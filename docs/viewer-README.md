@@ -1,0 +1,711 @@
+# Architecture Map — viewer folder
+
+This folder is a complete, self-contained architecture map. `viewer.html` is the whole
+application in one file; it draws the map described by two data files that you write:
+
+- **`architecture.yaml`** — the structure: domains → components → subcomponents, and the typed
+  connections (edges) between them.
+- **`workitems.json`** — optional: the work items (epics, features, user stories, bugs, tasks,
+  typically exported from Azure DevOps) that are shown on the parts of the structure they affect.
+
+Nothing here needs a server, a build step or the source repository. This document tells you how
+to use the viewer and — in full — how to author both data files, so that a person or an AI agent
+can produce a map for any project from its repository and its Azure DevOps project.
+
+**Contents:** [Files](#files-in-this-folder) · [Quick start](#quick-start-a-map-for-your-own-project) ·
+[architecture.yaml](#architectureyaml--the-structure) ·
+[From a repository](#deriving-the-structure-from-a-repository) ·
+[workitems.json](#workitemsjson--the-work-items) ·
+[From Azure DevOps](#getting-the-work-items-from-azure-devops) ·
+[Opening the files](#opening-the-data-files) ·
+[Checking](#checking-the-result) · [Using the viewer](#using-the-viewer) ·
+[Troubleshooting](#troubleshooting)
+
+## Files in this folder
+
+| File                      | What it is                                                                 | You edit it? |
+| ------------------------- | -------------------------------------------------------------------------- | ------------ |
+| `viewer.html`             | The viewer (all code and styles inlined). Works offline and from `file://` | No           |
+| `architecture.yaml`       | The structure. **As delivered: an example** (an online shop)               | **Yes**      |
+| `workitems.json`          | The work items. **As delivered: dummy data** for the example               | **Yes**      |
+| `THIRD-PARTY-NOTICES.txt` | The licences of the open-source software inside `viewer.html`              | No           |
+| `README.md`               | This document                                                              | No           |
+
+The viewer reads the two data files as they are: YAML and JSON, which it shows and never runs.
+Nothing is generated from them and nothing has to be rebuilt after an edit. How the files get
+into the viewer depends on how it is opened — see
+[Opening the data files](#opening-the-data-files).
+
+## Quick start: a map for your own project
+
+1. **Write `architecture.yaml`** for the project (format: [below](#architectureyaml--the-structure);
+   method: [Deriving the structure from a repository](#deriving-the-structure-from-a-repository)).
+   Replace the example file in this folder.
+2. **Write `workitems.json`** ([format](#workitemsjson--the-work-items),
+   [Azure DevOps export](#getting-the-work-items-from-azure-devops)), replacing the dummy file.
+   For a map without work items, leave the file out.
+3. **Open `viewer.html`** (double-click) and give it the files: click **Open YAML…** and choose
+   `architecture.yaml` and `workitems.json` together, or drop both on the page.
+4. Look at the **Diagnostics** panel at the bottom: it lists every problem of both files with
+   line numbers. Fix the file, click **↻ Reload**, until it is clean. See
+   [Checking the result](#checking-the-result).
+5. **Next time** the map is one click away: the start page lists it under **Open again** (Edge
+   and Chrome).
+6. **Share** the folder. Served by a web server, the map opens by itself, in every browser.
+
+Two things to know:
+
+- **A page opened from disk cannot read files by itself.** That is a rule of every browser, and
+  the reason the files are opened by hand the first time and offered for one click afterwards.
+  Served by a web server, the viewer fetches them without being asked. Both ways are described
+  in [Opening the data files](#opening-the-data-files).
+- **The delivered data is an example.** Until you replace the two files, they describe an
+  online shop with about 60 invented work items.
+
+## `architecture.yaml` — the structure
+
+A complete, valid file:
+
+```yaml
+version: 1
+
+rows: # optional: horizontal bands, listed top → bottom
+  - id: ui
+    name: User interface
+    description: What people click on
+  - id: services
+    name: Services
+  - id: storage
+    name: Storage
+
+domains:
+  - id: shop
+    name: Web Shop
+    description: Everything a customer sees
+    row: ui # the whole domain, and everything in it, sits in this band
+    owner: Storefront team # owner / status / tech are inherited by everything inside
+    status: live
+    tech: React
+    components:
+      - id: shop.catalog
+        name: Catalog
+        description: Product pages and search (src/web/catalog)
+        links:
+          - label: Source
+            url: https://git.example.com/shop/tree/main/src/web/catalog
+        metrics: # any numbers; "Colour by" can show each
+          loc: 12400
+          churn: 31
+        subcomponents:
+          - id: shop.catalog.search
+            name: Search
+          - id: shop.catalog.product-page
+            name: Product Page
+      - id: shop.checkout
+        name: Checkout
+
+  - id: orders
+    name: Order Processing # no row: it spans the rows its components use
+    components:
+      - id: orders.api
+        name: Orders API
+        row: services
+      - id: orders.db
+        name: Orders Database
+        row: storage
+
+edges:
+  - id: checkout-places-order
+    from: shop.checkout
+    to: orders.api
+    kind: dataflow # dataflow | dependency | control | config
+    label: place order # optional, short
+    protocol: REST # optional, free text
+    description: Sends the basket as an order # optional
+  - id: api-uses-db
+    from: orders.api
+    to: orders.db
+    kind: dependency
+
+flows: # optional: stories told through the edges (Focus in the toolbar)
+  - id: place-order
+    name: Place an order
+    kind: workflow # workflow | dataflow
+    description: From the basket to a stored order
+    edges: [checkout-places-order, api-uses-db] # the steps, in order
+    nodes: [shop.catalog] # further nodes it involves (optional)
+```
+
+### Top level
+
+| Key       | Required | Value                                                             |
+| --------- | -------- | ----------------------------------------------------------------- |
+| `version` | yes      | The number `1`                                                    |
+| `domains` | yes      | List of domains (may be empty, but then there is nothing to draw) |
+| `rows`    | no       | List of rows (bands), top → bottom                                |
+| `edges`   | no       | List of edges                                                     |
+| `flows`   | no       | List of flows (see below)                                         |
+
+### Nodes: domains, components, subcomponents
+
+There are exactly **three levels**. A domain lists its children under `components`, a component
+lists its children under `subcomponents`, a subcomponent has no children. Nothing nests deeper,
+and a list under the wrong key (for example `subcomponents` directly in a domain) is an error.
+
+| Key             | Required | Value                                             |
+| --------------- | -------- | ------------------------------------------------- |
+| `id`            | yes      | Text; see the ID rules below                      |
+| `name`          | yes      | Text, not empty: what the box shows               |
+| `description`   | no       | Text: shown in the detail panel and as a tooltip  |
+| `row`           | no       | ID of a row from `rows`                           |
+| `owner`         | no       | Text: the team or person responsible              |
+| `status`        | no       | Text: `planned`, `live`, `deprecated`, … (free)   |
+| `tech`          | no       | Text: the main technology                         |
+| `links`         | no       | List of `{ label, url }`; `url` must be `http(s)` |
+| `metrics`       | no       | Mapping of name → number (`loc: 12400`)           |
+| `components`    | no       | Domains only: list of components                  |
+| `subcomponents` | no       | Components only: list of subcomponents            |
+
+`owner`, `status` and `tech` are **inherited**: a node without one has its nearest ancestor's
+(the panel says where it comes from). Set them on a domain and override where a component
+differs. **Settings → Colour by** tints the boxes by any of them (one colour per value, with a
+legend) or by any metric (light to dark). Metrics are not inherited. A link that is not an
+`http(s)` address is left out with a warning; a metric that is not a number is an error.
+
+**ID rules** (all are checked; a violation is an error):
+
+- An ID is made of **segments** joined by dots. A segment is lowercase letters `a–z` and digits,
+  optionally joined by single `-` or `_`: `orders`, `order-api`, `v2_store`. No uppercase, no
+  spaces, no leading/trailing or doubled `-`/`_`.
+- A **domain** ID is one segment: `orders`.
+- A **child** ID is its parent's ID, a dot, and exactly one more segment: component
+  `orders.api`, subcomponent `orders.api.validation`.
+- Node IDs are **unique in the whole file**.
+- IDs are the stable keys of the map: work items point at them (`comp:orders.api`) and the
+  viewer remembers collapsed groups by them. Choose names that will survive a refactoring, and
+  do not rename them casually.
+
+### Rows
+
+Rows are optional horizontal bands (tiers), for example _UI / Services / Storage_ or
+_Engineering / Middle / Hardware_. Without a `rows` section the map is laid out as a plain
+graph by its connections.
+
+| Key           | Required | Value                                                  |
+| ------------- | -------- | ------------------------------------------------------ |
+| `id`          | yes      | One segment (same rule as a domain ID), unique in rows |
+| `name`        | yes      | Text, not empty: shown in the left gutter              |
+| `description` | no       | Text                                                   |
+
+- `row:` may be set on any node; everything inside inherits it. A node inside may repeat the
+  same row, but naming a **different** row than an ancestor is an error.
+- A group without a row **spans** the rows its children use and places each child in its band.
+- A child without a row inside a spanning group is placed in the band most of its connections
+  point to (drawn with a dashed border).
+- A top-level domain with no row anywhere in it goes to an **Unassigned** area at the right.
+- `row:` naming an unknown row, or used in a file without `rows`, is an error.
+
+### Edges
+
+| Key           | Required | Value                                                              |
+| ------------- | -------- | ------------------------------------------------------------------ |
+| `id`          | yes      | Text, same character rules as a node ID; unique among edges        |
+| `from`        | yes      | ID of an existing node (any level)                                 |
+| `to`          | yes      | ID of another existing node (any level); the arrowhead points here |
+| `kind`        | yes      | `dataflow`, `dependency`, `control` or `config`                    |
+| `label`       | no       | Short text on the line (2–4 words)                                 |
+| `protocol`    | no       | Free text, shown as `label [protocol]`                             |
+| `description` | no       | Text: shown on hover and in the detail panel                       |
+
+| Kind         | Drawn as       | Use it for                                                          |
+| ------------ | -------------- | ------------------------------------------------------------------- |
+| `dataflow`   | solid blue     | Data moving from `from` to `to`: requests, events, messages, files  |
+| `dependency` | dashed grey    | `from` needs `to` to build or run: libraries, shared services, auth |
+| `control`    | dotted red     | `from` commands or orchestrates `to`: start/stop, deploy, schedule  |
+| `config`     | dash-dot green | `from` supplies settings, parameters or definitions to `to`         |
+
+- Edge IDs, node IDs and row IDs are three separate namespaces.
+- `from` and `to` must be different nodes (no self-edges).
+- Two edges with the same `from`, `to` and `kind` give a warning; they are drawn as one line.
+- Attach an edge at the **most specific level you know**. When a group is collapsed or the view
+  is zoomed out, the viewer re-attaches the edge to the group by itself and merges parallel
+  ones into a single line with a count (`×3`).
+- Do not connect a node to its own ancestor or descendant (`orders` → `orders.api`): such an
+  edge has no line to draw once the group is closed and says nothing the nesting does not say.
+
+### Flows
+
+A flow is a story told through the edges: a **workflow** (an order is placed, a release goes
+out) or a **data flow** (a page view becomes a chart). It is defined apart from the nodes
+and edges, as a set: the viewer's **Focus** lights what a flow involves and pales everything
+else, and the panel of a node or an edge lists the flows it is part of.
+
+| Key           | Required | Value                                                            |
+| ------------- | -------- | ---------------------------------------------------------------- |
+| `id`          | yes      | Text, same character rules as a node ID; unique among flows      |
+| `name`        | yes      | Text, not empty                                                  |
+| `kind`        | no       | `workflow` (default) or `dataflow`                               |
+| `description` | no       | Text: what the flow is, shown in its panel                       |
+| `edges`       | no       | List of edge IDs, **in step order**; an edge may occur twice     |
+| `nodes`       | no       | List of node IDs the flow involves besides the ends of its edges |
+
+- A flow involves the nodes it names plus both ends of every edge it names.
+- An ID that names no edge or node is an error; a flow with neither is a warning.
+- Four to ten steps read well. Give the edges in a flow short labels that read as a sentence
+  when followed in order (`place order` → `reserve stock` → `confirm`).
+
+### Errors, warnings and YAML pitfalls
+
+**With any error the viewer draws no map at all**, only the Diagnostics list. Warnings do not
+stop it. Unknown keys are warnings and are ignored — check them, they are usually typos
+(`subcomponent:` for `subcomponents:`).
+
+Every value listed as "Text" must be a YAML string. Plain YAML turns some unquoted values into
+other types, which is then an error ("must be text"). Quote when in doubt:
+
+| Written like this           | YAML reads            | Write instead                |
+| --------------------------- | --------------------- | ---------------------------- |
+| `id: 404`                   | a number              | `id: '404'`                  |
+| `name: true` / `name: null` | a boolean / nothing   | `name: 'true'`               |
+| `label: 8080`               | a number              | `label: '8080'`              |
+| `description: Reads: fast`  | a syntax error (`: `) | `description: 'Reads: fast'` |
+| `label: [async]`            | a list                | `label: '[async]'`           |
+| `name: # todo`              | nothing (a comment)   | `name: '# todo'`             |
+
+Use spaces for indentation (never tabs), one document per file (no `---` separators), UTF-8.
+An empty optional key (`edges:` with nothing after it) is treated as absent.
+
+## Deriving the structure from a repository
+
+The map is a **communication tool**, not an inventory: someone should understand the system
+from it in a minute. Aim for the size of a whiteboard drawing.
+
+**Target size.** 3–8 domains, 10–40 components, subcomponents only where they explain
+something; up to about 150 nodes and 100 edges in total. The layout is computed in the browser:
+a map of more than roughly 300 nodes makes the page hang for a noticeable time on every load.
+
+**Procedure.**
+
+1. **Survey the repository.** Read the README and any architecture documents first. Then the
+   build and workspace definitions, which name the real units: `*.sln`/`*.csproj`,
+   `package.json` workspaces, `pnpm-workspace.yaml`, `go.work`/`go.mod`, `Cargo.toml`,
+   `pom.xml`/`settings.gradle`, `CMakeLists.txt`, `pyproject.toml`. Then what is deployed:
+   Dockerfiles, compose files, Kubernetes/Helm, Bicep/Terraform, pipeline definitions.
+2. **Choose the domains**: the few large areas a newcomer would be told about first — business
+   capabilities, bounded contexts or separately deployed systems. Top-level folders are a
+   starting point, not the answer; group by purpose, not by technology.
+3. **Choose the components** of each domain: one per service, application, library or package
+   that has a name the team uses. Use that name. Put the source path in the description
+   (`Order intake and validation (src/Services/Orders)`), so the reader can find the code.
+4. **Add subcomponents** only for the parts worth pointing at: the main modules of a large
+   service, the notable stages of a pipeline. Around 2–8 per component; none is fine.
+5. **Find the edges from evidence**, not from guesses:
+   - project/package references and imports across components → `dependency`;
+   - HTTP/gRPC clients, message topics and queues, database reads and writes, file exchange →
+     `dataflow`, pointing the way the data moves, with the `protocol`;
+   - schedulers, orchestrators, deployment and command channels → `control`;
+   - configuration, parameter and schema providers → `config`.
+     Leave out what every part does (logging, the standard library). Prefer one edge with a
+     clear label to five that say the same.
+6. **Decide on rows** if the system has tiers everyone recognises (UI / services / data,
+   cloud / edge / device). Give whole domains a row where they fit in one; give the components
+   of a cross-tier domain their own rows. Skip rows when nothing natural offers itself.
+7. **Add what makes the map speak.** `owner` per domain (from CODEOWNERS, team folders or the
+   README), `status` where something is planned or being retired, `tech` from the build files,
+   `links` to the source folder and the docs. For `metrics`, numbers you can compute from the
+   repository are the most telling: `loc` (lines of code in the component's folder), `churn`
+   (commits touching it in the last 90 days: `git log --since=90.days --oneline -- <path> | wc -l`),
+   `contributors`, `coverage` from the test report. Keep the names short and the same on every
+   node. Then write 2–4 `flows` for the stories everyone asks about — how a request is served,
+   how a release goes out, where the data comes from.
+8. **Write the file, generate, open, read the Diagnostics**, and look at the picture: does
+   **Fit view** show something a person would recognise? Merge or drop what is noise. The
+   Diagnostics panel ends with **hints** (nodes without a description or without any
+   connection, domains without work, no flows) — they are suggestions, not errors.
+
+Record facts you are unsure about in the `description` rather than inventing structure, and tell
+the person you work for which parts of the map are inferred.
+
+## `workitems.json` — the work items
+
+```json
+{
+  "version": 1,
+  "items": [
+    {
+      "id": 1010,
+      "type": "User Story",
+      "title": "Customers can pay by invoice",
+      "state": "Active",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:shop.checkout; comp:orders.api; payments",
+      "parentId": 1001,
+      "description": "As a business customer I want to …",
+      "url": "https://dev.azure.com/contoso/Shop/_workitems/edit/1010",
+      "fields": { "Story Points": 8, "Priority": 1, "Area": "Shop\\Checkout" }
+    },
+    {
+      "id": 1011,
+      "type": "Task",
+      "title": "Add the invoice option to the payment step",
+      "state": "New",
+      "parentId": 1010
+    }
+  ]
+}
+```
+
+| Key           | Required | Value                                                                         |
+| ------------- | -------- | ----------------------------------------------------------------------------- |
+| `id`          | yes      | A positive whole **number** (not a string); unique in the file                |
+| `type`        | yes      | Exactly `Epic`, `Feature`, `User Story`, `Bug` or `Task`                      |
+| `title`       | yes      | Text, not empty                                                               |
+| `state`       | yes      | Text, not empty, as the tracker names it (`New`, `Active`, `Closed`, …)       |
+| `assignedTo`  | no       | Text: the person's display name                                               |
+| `iteration`   | no       | Text: the iteration path; the viewer can filter by it                         |
+| `tags`        | no       | **One string**, entries separated by `;` — as Azure DevOps stores them        |
+| `parentId`    | no       | The `id` of another item **in this file**                                     |
+| `description` | no       | **Plain text** (line breaks are kept; HTML is shown as written, not rendered) |
+| `url`         | no       | Link to the item; must start with `http://` or `https://`                     |
+| `fields`      | no       | Object of further parameters: each value a **string or a number**             |
+
+Strictness — what happens to an item that breaks a rule:
+
+- A wrong type of value (`"id": "1010"`, `"assignedTo": {…}`, a `fields` value that is `true`,
+  `null`, a list or an object), a missing required key or a duplicate `id`: **error, the item is
+  skipped**; the others still load.
+- A `type` outside the five: **warning, the item is skipped**. Convert other type names first
+  (see the Azure DevOps section).
+- A key that is not in the table: warning, the key is ignored. Put extra data into `fields`.
+- `parentId` naming an item that is not in the file: warning, the parent is ignored. A circle of
+  parents: error, those links are ignored.
+- A `url` that is not `http(s)`: warning, the item is kept without the link.
+- `null` for an optional top-level key is the same as leaving it out. Inside `fields`, leave
+  the entry out instead.
+- A file that is not valid JSON, has another `version`, or no `items` list gives no items.
+
+### Linking work items to the structure: `comp:` tags
+
+A tag **`comp:<node-id>`** puts the item on that node — a domain, a component or a
+subcomponent. The prefix may be in any letter case and the ID is lower-cased by the viewer
+(`Comp:Orders.API` works). An item may carry several `comp:` tags and is then listed on each of
+those nodes. All other tags are shown as plain tags in the panel.
+
+- Tag at the most specific node that is true. An item tagged to `orders.api` is also counted on
+  `orders` when that group is collapsed.
+- **Tasks follow their parent**: a task is listed under its parent wherever the parent is
+  shown, and its own `comp:` tags are then not used. Tag stories, bugs and features; leave tasks
+  to inherit. (A task without a parent in the file is placed by its own tags.)
+- A `comp:` tag naming a node that does not exist is reported in the Diagnostics, as is every
+  item without any `comp:` tag, with a **tag coverage** percentage. Untagged items are not on
+  the map; they are still found by the search.
+
+### How the viewer treats the values
+
+- States **Closed, Done, Resolved, Removed** (any letter case) count as completed: such items
+  are struck through and can be hidden with one setting. Every other state counts as open.
+- The **Stories** selector shows nothing, the stories/bugs/features/epics, or those with their
+  tasks. A box lists at most 8 lines and then "+_k_ more"; the detail panel always lists all.
+- `iteration` and `state` feed the filter under **Settings → Work items shown**. The iteration
+  list offers every path above a sprint too (`Shop\PI 3` covers `Shop\PI 3\Sprint 13` and
+  `…\Sprint 14`), so a programme increment or a release can be chosen as one scope.
+- Open items are what **Heat by work** measures; completed over all items is what the
+  **Progress bars** show, within the chosen iteration (or in total).
+- `fields` are listed in the work-item panel in the order of the file, by the names you give
+  them — use readable names (`"Story Points"`, not `"Microsoft.VSTS.Scheduling.StoryPoints"`).
+
+## Getting the work items from Azure DevOps
+
+Any way of reading Azure DevOps that you have will do — the REST API, the `az boards` command
+line, or a connector/MCP tool. What matters is the conversion into the format above.
+
+**Credentials.** Read access to work items is enough (a personal access token with the scope
+_Work Items → Read_). Take the token from the environment or the tool's own sign-in. **Never
+write a token into any file of this folder**, and remember that `workitems.json` is plain text
+that gets shared together with the viewer: export only what the readers of the map may see.
+
+### 1. Query the IDs
+
+WIQL for everything the map can show (narrow it by area path, iteration or change date as
+needed — a few hundred to a few thousand items is a sensible size):
+
+```sql
+SELECT [System.Id] FROM WorkItems
+WHERE [System.TeamProject] = @project
+  AND [System.WorkItemType] IN ('Epic', 'Feature', 'User Story', 'Bug', 'Task')
+  AND [System.State] <> 'Removed'
+ORDER BY [System.Id]
+```
+
+REST: `POST https://dev.azure.com/{organization}/{project}/_apis/wit/wiql?api-version=7.1` with
+the body `{ "query": "<the WIQL>" }`; the answer lists `workItems[].id`. (Azure DevOps Server:
+`https://{server}/{collection}/{project}/_apis/…`.) Authenticate with the token as the password
+of HTTP Basic authentication and an empty user name.
+
+In projects that use another process, the story-level type has another name: put
+`Product Backlog Item` (Scrum), `Requirement` (CMMI) or `Issue` (Basic) into the `IN (…)` list
+in place of `User Story`.
+
+### 2. Fetch the fields
+
+`POST https://dev.azure.com/{organization}/{project}/_apis/wit/workitemsbatch?api-version=7.1`
+with at most **200 IDs per request**:
+
+```json
+{
+  "ids": [1010, 1011],
+  "fields": [
+    "System.Id",
+    "System.WorkItemType",
+    "System.Title",
+    "System.State",
+    "System.AssignedTo",
+    "System.IterationPath",
+    "System.AreaPath",
+    "System.Tags",
+    "System.Parent",
+    "System.Description",
+    "Microsoft.VSTS.TCM.ReproSteps",
+    "Microsoft.VSTS.Scheduling.StoryPoints",
+    "Microsoft.VSTS.Common.Priority",
+    "Microsoft.VSTS.Scheduling.RemainingWork"
+  ]
+}
+```
+
+### 3. Convert each work item
+
+| `workitems.json` | Azure DevOps field          | Conversion                                                                                                                                                                                                                                                         |
+| ---------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`             | `System.Id`                 | As a number                                                                                                                                                                                                                                                        |
+| `type`           | `System.WorkItemType`       | `Product Backlog Item`, `Requirement`, `Issue` → `User Story`; drop every type outside the five                                                                                                                                                                    |
+| `title`          | `System.Title`              | As it is                                                                                                                                                                                                                                                           |
+| `state`          | `System.State`              | As it is                                                                                                                                                                                                                                                           |
+| `assignedTo`     | `System.AssignedTo`         | The API gives an object: take its `displayName`. Leave the key out when unassigned                                                                                                                                                                                 |
+| `iteration`      | `System.IterationPath`      | As it is (`Shop\Sprint 13`)                                                                                                                                                                                                                                        |
+| `tags`           | `System.Tags`               | As it is — already one string separated by `;`                                                                                                                                                                                                                     |
+| `parentId`       | `System.Parent`             | As a number; leave it out when there is none or the parent is not in the export                                                                                                                                                                                    |
+| `description`    | `System.Description`        | **HTML → plain text**: `<br>`, `</p>`, `</div>`, `</li>` become line breaks, other tags are removed, entities (`&amp;`, `&nbsp;`) decoded. For a Bug use `Microsoft.VSTS.TCM.ReproSteps` when the description is empty. Leave the key out when the result is empty |
+| `url`            | —                           | `https://dev.azure.com/{organization}/{project}/_workitems/edit/{id}` (URL-encode the project name)                                                                                                                                                                |
+| `fields`         | anything else worth showing | Readable name → string or number, e.g. `"Story Points": 5`, `"Priority": 2`, `"Area": "Shop\\Checkout"`. Leave out empty values. When you renamed the type, keep the original as `"Work item type": "Product Backlog Item"`                                        |
+
+Write the file with a JSON encoder (never by string concatenation), as UTF-8.
+
+### 4. Make sure the items carry `comp:` tags
+
+The link between a work item and the map is the `comp:<node-id>` tag
+([above](#linking-work-items-to-the-structure-comp-tags)). After the export, compare the tags
+with the IDs of your `architecture.yaml`:
+
+- Where the team already tags its items, there is nothing to do.
+- Where it does not, decide the node for each story, bug and feature from what you can see —
+  area path, title, description, linked commits or pull requests — and **add the `comp:` entry
+  to the `tags` string in `workitems.json`**. This changes only the export.
+- Writing the tags back to Azure DevOps makes them permanent and visible to the whole team. Do
+  that only when the person you work for asks for it.
+- Leave an item untagged rather than guess wildly; the Diagnostics panel lists the untagged
+  items and the coverage, which is the honest summary to report.
+
+## Opening the data files
+
+The viewer reads `architecture.yaml` and `workitems.json` directly. There are two ways to use
+it.
+
+### From disk (double-click on `viewer.html`)
+
+A page opened from disk is not allowed to read other files by itself — a rule of every browser.
+So the files are given to it:
+
+- **Open YAML…** opens the browser's file dialog: choose `architecture.yaml`, or
+  `architecture.yaml` and `workitems.json` together. **Open work items…** opens a work-items
+  file on its own.
+- Or **drop** the file or both files on the page. A `.json` file is taken as the work items,
+  anything else as the structure.
+
+In **Edge and Chrome** the viewer remembers what was opened — the last 8 maps:
+
+- The start page lists them under **Open again**, and the toolbar under **Recent**. One click
+  opens a map again: its structure and the work items it was last opened with, read **fresh
+  from the disk**.
+- The browser may first ask whether the page may read the files again. That question is the
+  browser's own. Where it offers to allow this on every visit and you choose that, the viewer
+  opens the last map by itself as soon as the page is opened.
+- **↻ Reload** in the toolbar reads the files of the map again without leaving the page: edit
+  the YAML, click Reload, see the change.
+- A map is listed by its file names, with its first domains and the date as a hint — the folder
+  of a file is not something a browser tells a page. **×** forgets an entry; the files are not
+  touched.
+- What is remembered is the browser's reference to each file: not its content. It stays in this
+  browser profile. When a file has been moved, renamed or deleted, the entry says so when
+  clicked: open the file again from where it is now.
+- Opening a remembered map shows it as it was remembered — with its own work items, or with
+  none. A file opened by hand replaces just the structure or just the work items.
+
+Firefox and Safari have no such references: there the files are opened or dropped each time. A
+browser policy can switch the file dialog off in Edge and Chrome; the viewer then uses the plain
+file dialog and remembers nothing. In both cases a web server is the comfortable way.
+
+### From a web server
+
+Serve the folder with any static web server and the map opens by itself: the viewer fetches
+`architecture.yaml` and `workitems.json` next to it — no click, in every browser, always the
+current files. Other files can be named in the address:
+`viewer.html?data=<path>&workitems=<path>`, each a path on the same server — relative to the
+page (`maps/store.yaml`) or from the root of the server (`/shared/store.yaml`). An address on
+another server is refused (see [Offline use and security](#offline-use-and-security)): save such
+a file and open it with **Open YAML…** / **Open work items…**, or put it next to the viewer.
+
+## Checking the result
+
+Open `viewer.html` and read the **Diagnostics** panel at the bottom. It shows severity, file,
+line:column, the path inside the file and a message that says what to change.
+
+- **Errors in the structure**: there is no map, and the panel is open. Fix all of them.
+- **Only warnings**: the map is drawn and the panel is collapsed to a badge — click it.
+- **Work items** have their own heading in the panel: problems of the file, `comp:` tags that
+  name no node, untagged items, and the coverage ("87% tagged").
+
+The toolbar shows where the data came from (a file name, or a path on the server), the number of
+work items and the coverage — check that it is your data and not the example.
+
+Checklist before handing the folder over:
+
+- [ ] The Diagnostics panel shows no errors, and every warning is understood.
+- [ ] The viewer shows the files as they are now (**↻ Reload** after the last edit).
+- [ ] **Fit view** shows a map a newcomer could read; no domain is a wall of boxes.
+- [ ] Every edge has a `kind` that matches its meaning, and a short `label`.
+- [ ] No `comp:` tag is reported as unknown; the tag coverage is what you expect.
+- [ ] Clicking a work item's link opens the right item in Azure DevOps.
+- [ ] No token, password or private data is in any file of the folder.
+
+To try another file, use **Open YAML…** / **Open work items…** in the toolbar, or drop a
+`.yaml`/`.yml` file (structure) and/or a `.json` file (work items) on the page. The panel lists the first 500 problems of each file and counts the rest.
+
+## Using the viewer
+
+The version of the viewer stands beside its name in the toolbar (for example `0.1.0`): quote it
+when you report something.
+
+| To                                    | Do                                                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------------- |
+| Pan / zoom                            | Drag the canvas / mouse wheel or pinch; or press, drag, wheel in the minimap        |
+| See the whole map                     | **Fit view**                                                                        |
+| Choose how much is drawn              | **Detail**: Auto (follows the zoom), Domains, Components, Subcomponents, Everything |
+| Collapse / expand a group             | Its chevron, or double-click it; **Collapse all** / **Expand all**                  |
+| Select a node, an edge or a work item | Click it: its neighbourhood stays lit, the rest dims, the detail panel opens        |
+| Clear the selection                   | Click the empty canvas, **Esc**, or **×** in the panel                              |
+| Find a node or a work item            | Type in the search box (**/** or **Ctrl+K**): names, IDs, `#1010`, title words      |
+| Show / hide an edge kind              | The four kind buttons in the toolbar (they are also the legend)                     |
+| Choose what is shown of the work      | **Stories**: Off / Stories only / Stories + Tasks                                   |
+| Hide work items by state or iteration | **Settings → Work items shown**; **Show completed work items**                      |
+| Follow one story through the map      | **Focus**: a flow, an epic or a feature; or **Focus** in any panel                  |
+| See where the work is                 | **Settings → Heat by work**, **Progress bars**                                      |
+| Colour the boxes                      | **Settings → Colour by**: owner, status, tech or a metric (legend top left)         |
+| Calm the overview                     | **Settings → Edges on demand**                                                      |
+| Keep or share an arrangement          | **Views**: save under a name, come back, **Copy link**                              |
+| Lay out without the row bands         | **Settings → Arrange in rows**                                                      |
+| Move boxes by hand                    | **Unlock positions**, drag, **Lock positions**; **Reset positions** undoes it       |
+| Load other data                       | **Open YAML…**, **Open work items…**, or drop a file on the page                    |
+| Open a map again                      | **Recent** in the toolbar, **Open again** on the start page (Edge, Chrome)          |
+| See an edit of the data files         | **↻ Reload** (maps opened from disk in Edge, Chrome); else open the file again      |
+
+- **Levels of detail.** Zoomed out, only domains are drawn and edges are merged per domain;
+  zooming in shows components, then subcomponents with edge labels, then (**Everything**, above
+  160%) the work items listed inside the boxes. At the coarser levels a badge on a box counts
+  its work items and its open bugs. Changing level never moves anything.
+- **Collapsed groups** keep their place; edges into them are re-attached to the group and
+  merged (`×3`). Select a merged edge to see its member edges.
+- **Detail panel** (right): for a node its description, parent path, children, incoming and
+  outgoing edges and all its work items; for an edge its ends, kind, protocol and description;
+  for a work item everything in the file, its parent, its tasks and the nodes it is tagged to.
+  Everything underlined is a link that selects that thing and brings it on screen.
+- **Focus** is one filter for "what does this involve": choose a flow, an epic or a feature in
+  the toolbar, or press **Focus** in the panel of any work item or flow (a story, a bug). The
+  nodes and edges involved stay lit — for a work item, the nodes of everything under it and the
+  edges among them — and the rest of the map is paled; a bar under the toolbar names the focus.
+  Selecting things still works inside a focus. **Clear focus** ends it.
+- **Heat by work** draws a strip up both sides of every box, as tall as the open work left in it
+  compared with the hottest box of its level (domains against domains, components against
+  components), coloured from the bottom up like a bar of iron being heated: a little work
+  smoulders dark red, more glows red, then yellow, and the hottest box is white at the top.
+- **Progress bars** turn the bottom edge of a box into a bar of the completed items over all
+  items in it — for the iteration chosen under **Work items shown**, else in total. The state
+  filter does not affect them (hiding Closed items must not make a box look untouched).
+- **Colour by** tints every box by an attribute or a metric and shows a legend. Attribute
+  colours are given in the order the values first appear; from the ninth value on everything is
+  "Other". A metric is drawn light (its smallest value) to dark (its largest).
+- **Edges on demand** hides the edges at the Domains and Components levels, except at the box
+  under the pointer, at the selected box and those of the focus. Finer levels show every edge.
+- **Views** keep an arrangement under a name: collapsed groups, hidden edge kinds, level of
+  detail, focus, colouring, story mode and where the view is (the point in the middle, so it
+  fits any window). Saved views stay in this browser, per structure. **Copy link** puts a link
+  on the clipboard that carries the view itself (`viewer.html#view=…`), so it can be sent to
+  anyone who has the same folder; where the clipboard is not available the link is put in the
+  address bar instead.
+- **Remembered in the browser** (`localStorage`): collapsed groups, the view, hidden edge
+  kinds, hand-moved positions and saved views per structure; the settings once for the viewer.
+  The recent maps are kept as references to their files (IndexedDB; Edge and Chrome), not as
+  copies. Nothing is sent anywhere — the viewer makes no network request except fetching the
+  data files when it is served over HTTP.
+
+## Offline use and security
+
+The viewer works on a computer or a network without internet access. What that rests on:
+
+- **Nothing comes from the internet.** `viewer.html` contains all of its code and styles. There
+  is no CDN, no web font, no analytics, no telemetry and no update check. Opened from disk
+  (`file://`) the page makes no network request at all; served by a web server it asks that
+  same server for `architecture.yaml` and `workitems.json`, and nothing else.
+- **The browser enforces it.** The page carries a Content Security Policy that forbids
+  everything and then allows only: the viewer's own code (recognised by its SHA-256 hash),
+  inline styles, and requests to the page's own server. No script file is loaded, not even one
+  lying next to the page. Code from anywhere else, `eval`, a script slipped into the page and
+  a request to any other address are stopped by the browser itself, whatever a data file or a
+  link contains. For the same reason **`viewer.html` must not be edited by hand**: with other
+  code in it the hash no longer matches and the page stays empty. Change the data files, not
+  the viewer.
+- **Your data stays where it is.** The data files are read in the browser and nothing is
+  uploaded; the same holds for a file opened with the buttons or dropped on the page. What the
+  viewer remembers is kept in this browser: settings and views in `localStorage`, the recent
+  maps as references to their files — never the content of a file — in IndexedDB. **Copy link** writes to the
+  clipboard, only when clicked.
+- **A link cannot bring in a foreign map.** `?data=` and `?workitems=` only name files on the
+  server the page came from; on `file://` they name nothing. Whoever sends a link to the viewer
+  cannot make it load, or show, content from somewhere else.
+- **The only ways out are links you click.** The `links` of a node and the `url` of a work item
+  open in a new tab — `http(s)` addresses only, and without telling the other site where the
+  click came from. The small "React Flow" credit in the corner of the canvas links to the
+  website of the library that draws the map. Nothing is contacted until such a link is clicked.
+- **The data files are data, never code.** The viewer reads YAML and JSON only. Their content
+  is shown as text; a title or a description cannot run anything. Earlier versions loaded
+  generated `*.data.js` scripts next to the page: those are gone, and one left over in the
+  folder is ignored — the policy would not let it run.
+- **Azure DevOps is never contacted by the viewer.** The export described above is a separate
+  step that you run with your own access token; the token never comes near the viewer.
+- **Open-source licences.** `viewer.html` contains open-source libraries (React, React Flow,
+  d3, ELK, yaml, zod and what they need). `THIRD-PARTY-NOTICES.txt` lists them with their
+  licence texts, and the same text is at the end of `viewer.html`, so the file can be passed on
+  alone. All are under permissive licences (MIT, ISC, BSD) except the layout engine `elkjs`,
+  which is used unmodified under the Eclipse Public License 2.0.
+
+## Troubleshooting
+
+| What you see                                               | Cause and fix                                                                                                                                           |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The example map instead of yours                           | The example files were opened. Open your own `architecture.yaml` (and `workitems.json`)                                                                 |
+| Your edits do not show                                     | The viewer shows the file as it was when opened. Click **↻ Reload**, or open it again; over HTTP reload the page                                        |
+| Empty page with **Open YAML…**                             | Normal when opened from disk: click the map under **Open again**, or open / drop the files. Over HTTP: `architecture.yaml` is not next to `viewer.html` |
+| No map, a list of errors                                   | The structure file has errors: fix every error in the Diagnostics panel                                                                                 |
+| **Open again** / **Recent** is missing                     | Firefox or Safari, a private window, or storage switched off: open the files each time, or serve the folder over HTTP                                   |
+| The browser asks before a recent map opens                 | Its rule for files a page has remembered. Allow it — on every visit where that is offered — or serve the folder over HTTP                               |
+| "… is no longer where it was"                              | The file was moved, renamed or deleted. Open it from where it is now; **×** forgets the old entry                                                       |
+| A recent map opens without its work items                  | They could not be read again (moved, or not allowed). Open them with **Open work items…**                                                               |
+| Work items load but none are on the map                    | No `comp:` tag matches a node ID — see the unknown tags and the coverage in the Diagnostics panel                                                       |
+| Items missing                                              | Skipped for a format problem (Diagnostics), or hidden by **Settings → Work items shown**                                                                |
+| No stories in the boxes                                    | They are listed at the **Everything** level only (zoom in, or click **Everything**); **Stories** not Off                                                |
+| The page hangs after loading                               | The map is too large (hundreds of nodes). Reduce subcomponents; see the target size above                                                               |
+| Odd view or collapsed state after changing files           | Remembered state from before: **Fit view**, **Expand all**, **Reset positions**                                                                         |
+| Work items missing when served over HTTP                   | `workitems.json` took longer than 4 seconds: reload, or open it with **Open work items…**                                                               |
+| "…reads data files only from the place it was opened from" | `?data=` / `?workitems=` names a file on another server. Save it and open it, or put it next to the viewer                                              |
+| An empty page after `viewer.html` was edited               | The browser only runs the code the viewer was built with. Take the original file again                                                                  |

@@ -1,0 +1,515 @@
+# Example structure file: an online shop.
+#
+# How its nodes relate to the rows:
+#   - backoffice, storefront: domains with an explicit row (everything inside inherits it);
+#     backoffice.themes repeats its domain's row, which is allowed.
+#   - operations, data: domains without a row whose components sit in different rows (span).
+#   - data.analytics: a component without a row whose subcomponents are in different rows.
+#   - operations.alerts, data.analytics.feature-store: row-less children of spanning groups
+#     (the layout places them by the rows their connections point to).
+#   - platform: cross-cutting domain with no row anywhere in its subtree (Unassigned area).
+# It also has owner / status / tech on nodes (inherited down the tree), links, metrics
+# (Colour by in the settings), and flows (Focus in the toolbar).
+version: 1
+
+rows:
+  - id: backoffice
+    name: Back-office level
+    description: Staff tools, dashboards and configuration UIs
+  - id: middle
+    name: Middle level
+    description: Services, integration and data processing
+  - id: channels
+    name: Customer level
+    description: Web shop, apps and the gateway they talk to
+
+domains:
+  - id: backoffice
+    name: Back Office
+    description: Tools the shop staff use to manage the catalogue and its configuration
+    row: backoffice
+    owner: Tooling team
+    status: live
+    tech: C# / WPF
+    components:
+      - id: backoffice.studio
+        name: Merchandise Studio
+        description: Product data and page editing environment
+        links:
+          - label: Source
+            url: https://example.com/git/merchandise-studio
+          - label: User guide
+            url: https://example.com/docs/studio
+        metrics:
+          loc: 184000
+          churn: 37
+        subcomponents:
+          - id: backoffice.studio.product-editor
+            name: Product Editor
+            description: Editor for products, their variants and attributes
+          - id: backoffice.studio.page-builder
+            name: Page Builder
+            description: Builds the product pages from the catalogue model
+          - id: backoffice.studio.preview
+            name: Preview
+            description: Shows pages as customers will see them, before publishing
+      - id: backoffice.config-manager
+        name: Configuration Manager
+        description: Shop settings, price rules, event mappings and alert definitions
+        tech: TypeScript / Electron
+        metrics:
+          loc: 62000
+          churn: 58
+        subcomponents:
+          - id: backoffice.config-manager.rule-editor
+            name: Rule Editor
+          - id: backoffice.config-manager.version-store
+            name: Version Store
+            description: Versioned, released configuration sets
+      - id: backoffice.themes
+        name: Theme Manager
+        description: Theme packages and staged rollouts to the storefront
+        row: backoffice
+        status: deprecated
+        metrics:
+          loc: 21000
+          churn: 4
+
+  - id: operations
+    name: Operations
+    description: Running the shop day to day
+    owner: Shop IT
+    status: live
+    components:
+      - id: operations.console
+        name: Duty Console
+        description: Dashboards for the staff on duty
+        row: backoffice
+        subcomponents:
+          - id: operations.console.overview
+            name: Shop Overview
+          - id: operations.console.alert-view
+            name: Alert View
+      - id: operations.oms
+        name: OMS
+        description: Order management - orders, tracking and KPIs
+        row: middle
+        tech: Java / Spring
+        links:
+          - label: Runbook
+            url: https://example.com/wiki/oms-runbook
+        metrics:
+          loc: 310000
+          churn: 22
+        subcomponents:
+          - id: operations.oms.order-manager
+            name: Order Manager
+          - id: operations.oms.kpi
+            name: KPI Calculator
+            description: Throughput, lead time and returns per day
+      - id: operations.alerts
+        name: Alert Service
+        description: Collects, deduplicates and escalates alerts from all sources
+      - id: operations.campaign-runner
+        name: Campaign Runner
+        description: Switches sales campaigns on and off in the customer channels
+        row: channels
+        tech: C++
+        metrics:
+          loc: 48000
+          churn: 15
+
+  - id: storefront
+    name: Storefront
+    description: Where customers browse and buy
+    row: channels
+    owner: Web team
+    status: live
+    tech: TypeScript / React
+    components:
+      - id: storefront.web
+        name: Web Shop
+        metrics:
+          loc: 15000
+          churn: 41
+        subcomponents:
+          - id: storefront.web.checkout
+            name: Checkout
+            description: Basket, payment step and order confirmation
+          - id: storefront.web.fraud-check
+            name: Fraud Check
+            description: Stops orders that look fraudulent before they are placed
+          - id: storefront.web.tracker
+            name: Event Tracker
+      - id: storefront.apps
+        name: Shopper Apps
+        subcomponents:
+          - id: storefront.apps.ios
+            name: iPhone & iPad App
+          - id: storefront.apps.android
+            name: Android Devices App
+          - id: storefront.apps.kiosk
+            name: Store Kiosk
+            description: Self-service terminal in the shops
+      - id: storefront.payment
+        name: Payment Page
+      - id: storefront.gateway
+        name: Edge Gateway
+        description: Connects the customer channels to the services
+        tech: Rust
+        status: planned
+        metrics:
+          loc: 9000
+          churn: 73
+        subcomponents:
+          - id: storefront.gateway.api
+            name: Public API
+          - id: storefront.gateway.event-bridge
+            name: Event Bridge
+          - id: storefront.gateway.buffer
+            name: Store and Forward Buffer
+            description: Keeps telemetry while the uplink is down
+
+  - id: data
+    name: Data Platform
+    description: Telemetry ingestion, storage and analytics
+    owner: Data team
+    status: live
+    tech: Python
+    components:
+      - id: data.ingest
+        name: Telemetry Ingest
+        row: middle
+        subcomponents:
+          - id: data.ingest.broker
+            name: Message Broker
+          - id: data.ingest.normalizer
+            name: Normalizer
+            description: Currency conversion, field renaming and timestamp alignment
+      - id: data.event-store
+        name: Event Store
+        description: Time-series store for shop events
+        row: middle
+      - id: data.analytics
+        name: Analytics
+        status: planned
+        metrics:
+          loc: 27000
+          churn: 66
+        subcomponents:
+          - id: data.analytics.dashboards
+            name: Analytics Dashboards
+            row: backoffice
+          - id: data.analytics.anomaly
+            name: Anomaly Detection
+            description: Models for unusual orders and traffic
+            row: middle
+          - id: data.analytics.feature-store
+            name: Feature Store
+            description: Windowed features shared by models and dashboards
+
+  - id: platform
+    name: Platform Services
+    description: Cross-cutting services used at every level
+    owner: Shop IT
+    status: live
+    components:
+      - id: platform.identity
+        name: Identity and Access
+        subcomponents:
+          - id: platform.identity.cert-authority
+            name: Certificate Authority
+            description: Issues device and service certificates
+      - id: platform.logging
+        name: Central Logging
+
+edges:
+  # --- Data flow ---------------------------------------------------------------------------
+  - id: ios-to-tracker
+    from: storefront.apps.ios
+    to: storefront.web.tracker
+    kind: dataflow
+    label: app events
+    protocol: HTTPS
+  - id: android-to-tracker
+    from: storefront.apps.android
+    to: storefront.web.tracker
+    kind: dataflow
+    label: screen views
+    protocol: HTTPS
+  - id: kiosk-to-api
+    from: storefront.apps.kiosk
+    to: storefront.gateway.api
+    kind: dataflow
+    label: kiosk orders
+    protocol: REST
+  - id: tracker-to-api
+    from: storefront.web.tracker
+    to: storefront.gateway.api
+    kind: dataflow
+    label: page events
+    protocol: HTTPS
+  - id: api-to-bridge
+    from: storefront.gateway.api
+    to: storefront.gateway.event-bridge
+    kind: dataflow
+    label: tag changes
+  - id: bridge-to-buffer
+    from: storefront.gateway.event-bridge
+    to: storefront.gateway.buffer
+    kind: dataflow
+    label: outbound messages
+  - id: buffer-to-broker
+    from: storefront.gateway.buffer
+    to: data.ingest.broker
+    kind: dataflow
+    label: telemetry
+    protocol: AMQP over TLS
+    description: Batched JSON payloads, delivered at least once
+  - id: broker-to-normalizer
+    from: data.ingest.broker
+    to: data.ingest.normalizer
+    kind: dataflow
+  - id: normalizer-to-store
+    from: data.ingest.normalizer
+    to: data.event-store
+    kind: dataflow
+    label: normalized time series
+  - id: store-to-features
+    from: data.event-store
+    to: data.analytics.feature-store
+    kind: dataflow
+    label: feature windows
+  - id: features-to-anomaly
+    from: data.analytics.feature-store
+    to: data.analytics.anomaly
+    kind: dataflow
+  - id: store-to-dashboards
+    from: data.event-store
+    to: data.analytics.dashboards
+    kind: dataflow
+    label: trends
+  - id: anomaly-to-alerts
+    from: data.analytics.anomaly
+    to: operations.alerts
+    kind: dataflow
+    label: anomaly events
+    protocol: AMQP
+  - id: fraud-to-alerts
+    from: storefront.web.fraud-check
+    to: operations.alerts
+    kind: dataflow
+    label: fraud alerts
+    protocol: Webhook
+  - id: alerts-to-alert-view
+    from: operations.alerts
+    to: operations.console.alert-view
+    kind: dataflow
+    label: active alerts
+    protocol: WebSocket
+  - id: ingest-to-kpi
+    from: data.ingest
+    to: operations.oms.kpi
+    kind: dataflow
+    label: order events
+  - id: kpi-to-overview
+    from: operations.oms.kpi
+    to: operations.console.overview
+    kind: dataflow
+    label: daily KPIs
+    protocol: REST
+  - id: runner-to-oms
+    from: operations.campaign-runner
+    to: operations.oms
+    kind: dataflow
+    label: redemption counts
+  - id: storefront-to-data
+    from: storefront
+    to: data
+    kind: dataflow
+    label: raw telemetry
+    description: Summary edge for the domain overview
+  - id: backoffice-audit-log
+    from: backoffice
+    to: platform.logging
+    kind: dataflow
+    label: audit trail
+    protocol: syslog
+  - id: gateway-logs
+    from: storefront.gateway
+    to: platform.logging
+    kind: dataflow
+    label: gateway logs
+    protocol: syslog over TLS
+  - id: alert-journal
+    from: operations.alerts
+    to: platform.logging
+    kind: dataflow
+    label: alert journal
+
+  # --- Dependencies ------------------------------------------------------------------------
+  - id: editor-uses-builder
+    from: backoffice.studio.product-editor
+    to: backoffice.studio.page-builder
+    kind: dependency
+    label: builds with
+  - id: preview-uses-builder
+    from: backoffice.studio.preview
+    to: backoffice.studio.page-builder
+    kind: dependency
+    label: renders built pages
+  - id: rules-stored
+    from: backoffice.config-manager.rule-editor
+    to: backoffice.config-manager.version-store
+    kind: dependency
+    label: saves drafts and releases
+  - id: dashboards-query-store
+    from: data.analytics.dashboards
+    to: data.event-store
+    kind: dependency
+    label: queries
+    protocol: SQL
+  - id: oms-reads-history
+    from: operations.oms
+    to: data.event-store
+    kind: dependency
+    label: order history
+    protocol: SQL
+  - id: console-login
+    from: operations.console
+    to: platform.identity
+    kind: dependency
+    label: staff login
+    protocol: OIDC
+  - id: backoffice-sso
+    from: backoffice
+    to: platform.identity
+    kind: dependency
+    label: staff SSO
+    protocol: OIDC
+  - id: gateway-certificates
+    from: storefront.gateway
+    to: platform.identity.cert-authority
+    kind: dependency
+    label: device certificates
+    protocol: ACME
+  - id: broker-trust
+    from: data.ingest.broker
+    to: platform.identity.cert-authority
+    kind: dependency
+    label: mTLS trust chain
+
+  # --- Control -----------------------------------------------------------------------------
+  - id: studio-publishes-pages
+    from: backoffice.studio
+    to: storefront.web
+    kind: control
+    label: publish pages
+    protocol: HTTPS
+  - id: runner-commands-checkout
+    from: operations.campaign-runner
+    to: storefront.web.checkout
+    kind: control
+    label: start/stop, price list
+    protocol: gRPC
+  - id: checkout-payments
+    from: storefront.web.checkout
+    to: storefront.payment
+    kind: control
+    label: payment requests
+    protocol: REST
+  - id: payment-hold
+    from: storefront.web.fraud-check
+    to: storefront.payment
+    kind: control
+    label: payment hold
+    protocol: gRPC
+    description: Holds a payment before the card is charged
+  - id: overview-commands-runner
+    from: operations.console.overview
+    to: operations.campaign-runner
+    kind: control
+    label: campaign start/stop
+    protocol: REST
+  - id: orders-to-runner
+    from: operations.oms.order-manager
+    to: operations.campaign-runner
+    kind: control
+    label: stock limits
+    protocol: JSON
+  - id: theme-rollout
+    from: backoffice.themes
+    to: storefront.payment
+    kind: control
+    label: theme rollout
+    protocol: SFTP
+
+  # --- Configuration -----------------------------------------------------------------------
+  - id: gateway-routing
+    from: backoffice.config-manager
+    to: storefront.gateway
+    kind: config
+    label: event mapping and routing
+  - id: shop-settings
+    from: backoffice.config-manager
+    to: storefront.web
+    kind: config
+    label: shop settings
+  - id: released-rules
+    from: backoffice.config-manager.version-store
+    to: operations.oms.order-manager
+    kind: config
+    label: released rules
+  - id: alert-definitions
+    from: backoffice.config-manager
+    to: operations.alerts
+    kind: config
+    label: alert definitions
+  - id: anomaly-thresholds
+    from: data.analytics.dashboards
+    to: data.analytics.anomaly
+    kind: config
+    label: thresholds
+  - id: access-policies
+    from: platform.identity
+    to: data
+    kind: config
+    label: access policies
+
+flows:
+  - id: telemetry-to-dashboards
+    name: Telemetry to dashboards
+    kind: dataflow
+    description: >-
+      How a page view becomes a chart: collected by the tracker, sent through the public API
+      and the event bridge, buffered at the gateway, normalized, stored in the event store and
+      queried by the dashboards.
+    edges:
+      - tracker-to-api
+      - api-to-bridge
+      - bridge-to-buffer
+      - buffer-to-broker
+      - broker-to-normalizer
+      - normalizer-to-store
+      - store-to-dashboards
+  - id: campaign-run
+    name: Campaign run
+    kind: workflow
+    description: >-
+      A sales campaign on its way from the OMS to the checkout, and the resulting figures back
+      to the duty console.
+    edges:
+      - orders-to-runner
+      - runner-commands-checkout
+      - checkout-payments
+      - runner-to-oms
+      - kpi-to-overview
+  - id: rule-release
+    name: Rule release
+    kind: workflow
+    description: A staff member releases a rule version and the OMS picks it up for its orders.
+    nodes:
+      - backoffice.config-manager.rule-editor
+    edges:
+      - rules-stored
+      - released-rules

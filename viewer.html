@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- No link or request from this page tells another site where the page lives. -->
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>Architecture Map</title>
+    <!--
+      The page loads no other script. The map comes from data files only — architecture.yaml and
+      workitems.json — which are fetched when the page is served by a web server, and opened by
+      the user (and remembered) when it is opened from disk. See README.md.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

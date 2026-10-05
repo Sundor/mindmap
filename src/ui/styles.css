@@ -1,0 +1,2248 @@
+/* Architecture Map styles. Plain CSS with custom properties; light and dark follow the system. */
+
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #5f6368;
+  --border: #d9d9de;
+  --accent: #2563eb;
+  --error: #c5221f;
+  --warning: #b06000;
+
+  /* Row bands */
+  --band-even: rgba(37, 99, 235, 0.05);
+  --band-odd: rgba(37, 99, 235, 0.11);
+  --band-line: rgba(37, 99, 235, 0.25);
+  --band-gutter: rgba(37, 99, 235, 0.1);
+  --band-label: #3b4a6b;
+  --unassigned-bg: rgba(120, 120, 130, 0.08);
+  --unassigned-line: rgba(120, 120, 130, 0.45);
+
+  /* Nodes */
+  --domain-bg: rgba(255, 255, 255, 0.72);
+  --domain-border: #44517a;
+  --domain-header-bg: #44517a;
+  --domain-header-fg: #ffffff;
+  --component-bg: rgba(238, 242, 250, 0.85);
+  --component-border: #8b98b8;
+  --component-header-bg: #dbe2f1;
+  --component-header-fg: #1f2a44;
+  --leaf-bg: #ffffff;
+  --leaf-border: #9aa3b5;
+  --leaf-fg: #1d1d1f;
+  --node-selected: #2563eb;
+  --collapsed-bg: #eef1f8;
+  --collapsed-hatch: rgba(68, 81, 122, 0.1);
+
+  /* Edge kinds */
+  --edge-dataflow: #1a73e8;
+  --edge-dependency: #5f6368;
+  --edge-control: #d93025;
+  --edge-config: #188038;
+  --edge-label-bg: rgba(255, 255, 255, 0.92);
+
+  /* Layout constants mirrored from src/core/layout/constants.ts */
+  --header-height: 40px;
+  --unassigned-header: 36px;
+
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a;
+    --panel: #1f2023;
+    --fg: #e8e8ea;
+    --muted: #9aa0a6;
+    --border: #34363b;
+    --accent: #8ab4f8;
+    --error: #f28b82;
+    --warning: #fdd663;
+
+    --band-even: rgba(138, 180, 248, 0.04);
+    --band-odd: rgba(138, 180, 248, 0.09);
+    --band-line: rgba(138, 180, 248, 0.25);
+    --band-gutter: rgba(138, 180, 248, 0.1);
+    --band-label: #b9c6e4;
+    --unassigned-bg: rgba(160, 160, 170, 0.07);
+    --unassigned-line: rgba(160, 160, 170, 0.4);
+
+    --domain-bg: rgba(32, 34, 40, 0.72);
+    --domain-border: #7f8fc4;
+    --domain-header-bg: #3a4672;
+    --domain-header-fg: #f1f3f9;
+    --component-bg: rgba(44, 48, 58, 0.85);
+    --component-border: #5e6a8c;
+    --component-header-bg: #353c4f;
+    --component-header-fg: #e3e8f5;
+    --leaf-bg: #26282d;
+    --leaf-border: #6b7280;
+    --leaf-fg: #e8e8ea;
+    --node-selected: #8ab4f8;
+    --collapsed-bg: #2b2f3a;
+    --collapsed-hatch: rgba(160, 175, 220, 0.1);
+
+    --edge-dataflow: #8ab4f8;
+    --edge-dependency: #bdc1c6;
+    --edge-control: #f28b82;
+    --edge-config: #81c995;
+    --edge-label-bg: rgba(31, 32, 35, 0.92);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button {
+  font: inherit;
+}
+
+/* --- Page frame ---------------------------------------------------------------------------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex: none;
+}
+
+.toolbar h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+
+/* The version, small beside the name: there to be read out when something is reported. */
+.app-version {
+  margin-left: -0.35rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar button,
+.empty-state button {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar button:hover:not(:disabled),
+.empty-state button:hover {
+  border-color: var(--accent);
+}
+
+.toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.empty-state button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  padding: 0.5rem 1.25rem;
+}
+
+.source-name {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8rem;
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-summary {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lod-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.lod-indicator-caption {
+  margin-right: 0.15rem;
+}
+
+.lod-step {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lod-step:hover {
+  border-color: var(--accent);
+}
+
+/* The level being drawn (in Auto mode: the one the zoom selected). */
+.lod-step-current {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The mode the user picked. */
+.lod-step[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.lod-collapsed-note {
+  margin-left: 0.25rem;
+  font-style: italic;
+}
+
+.app-main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.status {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  color: var(--muted);
+}
+
+.notice {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.notice-error {
+  color: var(--error);
+}
+
+.empty-state {
+  margin: auto;
+  padding: 2rem;
+  max-width: 34rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty-state h2 {
+  margin: 0 0 0.5rem;
+  color: var(--fg);
+  font-size: 1.25rem;
+}
+
+.empty-state .hint {
+  font-size: 0.875rem;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  color: var(--fg);
+  font-size: 1.25rem;
+  pointer-events: none;
+}
+
+/* --- Diagnostics --------------------------------------------------------------------------- */
+
+.diagnostics {
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.diagnostics-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diagnostics-chevron {
+  width: 1em;
+}
+
+.badge {
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-error {
+  color: var(--error);
+}
+
+.badge-warning {
+  color: var(--warning);
+}
+
+.badge-info {
+  color: var(--muted);
+}
+
+.diagnostics-list {
+  max-height: 40vh;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+
+.diagnostics[data-errors]:not([data-errors='0']) .diagnostics-list {
+  max-height: 60vh;
+}
+
+.diagnostics table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.diagnostics th,
+.diagnostics td {
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.diagnostics th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.diagnostics td:not(.diagnostic-message) {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.diagnostic-error .diagnostic-severity {
+  color: var(--error);
+}
+
+.diagnostic-warning .diagnostic-severity {
+  color: var(--warning);
+}
+
+/* --- React Flow: nodes --------------------------------------------------------------------- */
+
+.react-flow {
+  --xy-background-color: var(--bg);
+}
+
+/* Our node types draw their own box; undo React Flow's built-in "group" look. */
+.react-flow__node-group,
+.react-flow__node-leaf,
+.react-flow__node-band {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.react-flow__node-group.selectable:hover,
+.react-flow__node-group.selectable:focus,
+.react-flow__node-group.selectable:focus-visible,
+.react-flow__node-group.selectable.selected {
+  box-shadow: none;
+}
+
+.react-flow__node-band,
+.react-flow__node.arch-band-node {
+  pointer-events: none !important;
+  user-select: none;
+}
+
+.arch-band {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-top: 1px solid var(--band-line);
+  border-bottom: 1px solid var(--band-line);
+}
+
+.arch-band-even {
+  background: var(--band-even);
+}
+
+.arch-band-odd {
+  background: var(--band-odd);
+}
+
+.arch-band-gutter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-right: 1px solid var(--band-line);
+  background: var(--band-gutter);
+  color: var(--band-label);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.arch-band-unassigned {
+  border: 1px dashed var(--unassigned-line);
+  border-radius: 8px;
+  background: var(--unassigned-bg);
+}
+
+.arch-band-title {
+  height: var(--unassigned-header);
+  line-height: var(--unassigned-header);
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.arch-node {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--leaf-border);
+  border-radius: 8px;
+}
+
+.arch-node-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arch-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--header-height);
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 6px 6px 0 0;
+  font-weight: 600;
+}
+
+.arch-level-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.arch-group.arch-level-domain {
+  border: 2px solid var(--domain-border);
+  background: var(--domain-bg);
+}
+
+.arch-group.arch-level-domain > .arch-group-header {
+  background: var(--domain-header-bg);
+  color: var(--domain-header-fg);
+  font-size: 19px;
+}
+
+.arch-group.arch-level-component {
+  border-color: var(--component-border);
+  background: var(--component-bg);
+}
+
+.arch-group.arch-level-component > .arch-group-header {
+  background: var(--component-header-bg);
+  color: var(--component-header-fg);
+  font-size: 17px;
+}
+
+.arch-leaf {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  background: var(--leaf-bg);
+  color: var(--leaf-fg);
+  font-size: 15px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.arch-leaf.arch-level-domain {
+  border: 2px solid var(--domain-border);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.arch-leaf.arch-level-component {
+  border-color: var(--component-border);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+/* Collapse toggle in a group header. */
+.arch-chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.arch-chevron:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.3);
+}
+
+.arch-chevron:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.arch-chevron:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.arch-chevron svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.12s ease;
+}
+
+.arch-collapsed .arch-chevron svg {
+  transform: rotate(-90deg);
+}
+
+/* A collapsed group keeps its box (same position and size) but reads as one closed block:
+   opaque, hatched, with a double border and a summary of what is inside. */
+.arch-group.arch-collapsed {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(135deg, var(--collapsed-hatch) 0 2px, transparent 2px 12px),
+    var(--collapsed-bg);
+  border-style: double;
+  border-width: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.arch-group.arch-collapsed.arch-node-placed {
+  border-style: dashed;
+  border-width: 2px;
+}
+
+.arch-collapsed > .arch-group-header {
+  flex: none;
+  border-radius: 3px 3px 0 0;
+}
+
+.arch-collapsed-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Row derived from connections: dashed border + tooltip. */
+.arch-node.arch-node-placed {
+  border-style: dashed;
+}
+
+.react-flow__node.selected > .arch-node {
+  outline: 2px solid var(--node-selected);
+  outline-offset: 1px;
+}
+
+/* Hidden handles: they only give edges their attachment points. */
+.react-flow__handle.arch-handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- React Flow: edges --------------------------------------------------------------------- */
+
+.arch-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.react-flow__edge .react-flow__edge-path {
+  stroke-width: 1.75;
+}
+
+.react-flow__edge.arch-edge-dataflow .react-flow__edge-path {
+  stroke: var(--edge-dataflow);
+}
+
+.react-flow__edge.arch-edge-dependency .react-flow__edge-path {
+  stroke: var(--edge-dependency);
+  stroke-dasharray: 7 4;
+}
+
+.react-flow__edge.arch-edge-control .react-flow__edge-path {
+  stroke: var(--edge-control);
+  stroke-dasharray: 1.5 4;
+  stroke-linecap: round;
+}
+
+.react-flow__edge.arch-edge-config .react-flow__edge-path {
+  stroke: var(--edge-config);
+  stroke-width: 1.1;
+  stroke-dasharray: 8 3 1.5 3;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+.react-flow__edge.arch-edge-config.selected .react-flow__edge-path {
+  stroke-width: 2.2;
+}
+
+/* Aggregate of several rolled-up edges: heavier line, count label. */
+.react-flow__edge.arch-edge-aggregate .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+.react-flow__edge.arch-edge-aggregate.selected .react-flow__edge-path {
+  stroke-width: 4.5;
+}
+
+.arch-edge-label.arch-edge-label-count {
+  padding: 1px 7px;
+  border-style: solid;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.arch-arrow-dataflow path {
+  fill: var(--edge-dataflow);
+}
+
+.arch-arrow-dependency path {
+  fill: var(--edge-dependency);
+}
+
+.arch-arrow-control path {
+  fill: var(--edge-control);
+}
+
+.arch-arrow-config path {
+  fill: var(--edge-config);
+}
+
+.arch-edge-label {
+  position: absolute;
+  /* Above edges and nodes (see Z_INDEX in src/core/flow.ts). */
+  z-index: 11;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--edge-label-bg);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.3;
+  /* One line per label; the labels of merged parallel edges sit on top of each other. */
+  white-space: pre;
+  text-align: center;
+  pointer-events: none;
+}
+
+.arch-edge-label-dataflow {
+  border: 1px solid var(--edge-dataflow);
+}
+
+.arch-edge-label-dependency {
+  border: 1px dashed var(--edge-dependency);
+}
+
+.arch-edge-label-control {
+  border: 1px dotted var(--edge-control);
+}
+
+.arch-edge-label-config {
+  border: 1px solid var(--edge-config);
+}
+
+/* --- React Flow: minimap ------------------------------------------------------------------- */
+
+.react-flow__minimap-node.arch-minimap-band {
+  fill: var(--band-odd);
+  stroke: var(--band-line);
+}
+
+.react-flow__minimap-node.arch-minimap-group {
+  fill: var(--component-header-bg);
+  stroke: var(--domain-border);
+  fill-opacity: 0.6;
+}
+
+.react-flow__minimap-node.arch-minimap-leaf {
+  fill: var(--leaf-border);
+}
+
+/* Our own minimap (src/ui/MiniMapFixed.tsx): drawn in minimap pixels, at a fixed scale. */
+.arch-minimap .react-flow__minimap-svg {
+  display: block;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.arch-minimap .react-flow__minimap-node {
+  stroke-width: 0.5;
+}
+
+.arch-minimap .react-flow__minimap-mask {
+  pointer-events: none;
+}
+
+.arch-minimap-viewport {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* --- Level of detail -------------------------------------------------------- */
+
+/*
+ * At the `domains` level the map is shown at less than 40% zoom, where 16px titles are too small
+ * to read. Every domain is then a closed box with nothing inside, so its title, its summary and
+ * the row names can simply be larger. Only text sizes change: boxes keep their layout rectangles.
+ * A title too long for one line wraps (two lines at most) instead of being cut.
+ */
+.app[data-lod='domains'][data-zoom-lod='domains']
+  .arch-level-domain:not(.arch-compact)
+  > .arch-group-header {
+  height: auto;
+  min-height: var(--header-height);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.app[data-lod='domains'][data-zoom-lod='domains']
+  .arch-level-domain:not(.arch-compact)
+  .arch-node-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  font-size: 28px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.app[data-lod='domains'][data-zoom-lod='domains']
+  .arch-level-domain:not(.arch-compact)
+  .arch-level-tag {
+  display: none;
+}
+
+.app[data-lod='domains'][data-zoom-lod='domains']
+  .arch-level-domain:not(.arch-compact)
+  .arch-collapsed-body {
+  font-size: 22px;
+}
+
+/* 20px: the widest word that still fits the fixed gutter is about 11 characters. */
+.app[data-lod='domains'][data-zoom-lod='domains'] .arch-band-gutter {
+  font-size: 20px;
+  overflow-wrap: break-word;
+}
+
+.app[data-lod='domains'][data-zoom-lod='domains'] .arch-band-title {
+  font-size: 22px;
+}
+
+/* --- Focus ---------------------------------------------------------------------------------- */
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- Toolbar: search and edge-kind filters ------------------------------------------------- */
+
+.toolbar {
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
+  /* Above the canvas, so the search results can hang over it. */
+  position: relative;
+  z-index: 20;
+}
+
+.search {
+  position: relative;
+}
+
+.search input {
+  width: 13rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  /* The horizontal position is set by SearchBox (dropdownOffset), keeping it in the window. */
+  left: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  width: min(24rem, 100vw - 1rem);
+  max-height: 60vh;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.search-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.search-option-active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.search-option-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-option-level {
+  font-size: 0.7rem;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-self: center;
+}
+
+.search-option-id {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-empty {
+  padding: 0.3rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.kind-filters {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.toolbar button.kind-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.toolbar button.kind-filter[aria-pressed='false'] {
+  opacity: 0.5;
+  text-decoration: line-through;
+  border-style: dashed;
+}
+
+/* Legend sample: the same stroke as the edges of that kind. */
+.kind-sample {
+  width: 28px;
+  height: 8px;
+  flex: none;
+}
+
+.kind-sample line {
+  stroke-width: 1.75;
+}
+
+.kind-filter-dataflow .kind-sample line {
+  stroke: var(--edge-dataflow);
+}
+
+.kind-filter-dependency .kind-sample line {
+  stroke: var(--edge-dependency);
+  stroke-dasharray: 7 4;
+}
+
+.kind-filter-control .kind-sample line {
+  stroke: var(--edge-control);
+  stroke-dasharray: 1.5 4;
+  stroke-linecap: round;
+}
+
+.kind-filter-config .kind-sample line {
+  stroke: var(--edge-config);
+  stroke-width: 1.1;
+  stroke-dasharray: 8 3 1.5 3;
+}
+
+.kind-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.kind-dot-dataflow {
+  background: var(--edge-dataflow);
+}
+
+.kind-dot-dependency {
+  background: var(--edge-dependency);
+}
+
+.kind-dot-control {
+  background: var(--edge-control);
+}
+
+.kind-dot-config {
+  background: var(--edge-config);
+}
+
+/* --- Canvas row and detail panel ----------------------------------------------------------- */
+
+.map-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.map-row > .map-canvas {
+  min-width: 0;
+}
+
+.detail-panel {
+  flex: none;
+  /* At most half the row: `reveal` in App.tsx relies on the canvas keeping the other half. */
+  max-width: 50%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 0.85rem;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.5rem 0.4rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.detail-kicker {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.detail-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.detail-close:hover {
+  border-color: var(--border);
+}
+
+.detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem 1rem;
+}
+
+.detail-body h2 {
+  margin: 0 0 0.3rem;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.detail-body h3 {
+  margin: 1rem 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.detail-breadcrumb,
+.detail-ends {
+  margin: 0 0 0.6rem;
+  line-height: 1.6;
+}
+
+.detail-breadcrumb-sep,
+.detail-arrow {
+  color: var(--muted);
+}
+
+.detail-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0 0 0.6rem;
+}
+
+.detail-fields dt {
+  color: var(--muted);
+}
+
+.detail-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-description {
+  margin: 0 0 0.6rem;
+  white-space: pre-wrap;
+}
+
+.detail-hint {
+  margin: 0 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.detail-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-children {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+.detail-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.detail-link:hover {
+  text-decoration: underline;
+}
+
+.detail-edge {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+}
+
+.detail-edge:hover {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.detail-edge-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-edge-label {
+  overflow-wrap: anywhere;
+}
+
+.detail-edge-context,
+.detail-edge-kind {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.detail-edge-kind {
+  flex: none;
+}
+
+/* --- Selection and neighbourhood dimming --------------------------------------------------- */
+
+.react-flow__node-group,
+.react-flow__node-leaf,
+.react-flow__edge {
+  cursor: pointer;
+}
+
+.react-flow__node,
+.react-flow__edge,
+.arch-edge-label {
+  transition: opacity 120ms ease-out;
+}
+
+/* Outside the neighbourhood of the selection: dimmed, never hidden. Row bands never are. */
+.react-flow__node.arch-dimmed,
+.arch-edge-label.arch-dimmed {
+  opacity: 0.3;
+}
+
+.react-flow__edge.arch-dimmed {
+  opacity: 0.18;
+}
+
+/* --- Lists of the node panel: foldable, movable (PanelSection) --------------------------- */
+
+.detail-section {
+  border-top: 2px solid transparent;
+}
+
+.detail-section-drop {
+  border-top-color: var(--accent);
+}
+
+.detail-body h3.detail-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: grab;
+}
+
+.detail-section-toggle {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.1rem 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.detail-section-toggle svg {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.detail-section[data-collapsed='true'] .detail-section-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.detail-section-moves {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0.35;
+}
+
+.detail-section-head:hover .detail-section-moves,
+.detail-section-moves:focus-within {
+  opacity: 1;
+}
+
+.detail-section-move {
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.detail-section-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.settings-completed {
+  margin-bottom: 0.2rem;
+}
+
+/* Positions unlocked: the boxes can be dragged. */
+.app[data-positions-unlocked='true'] .arch-node {
+  cursor: grab;
+}
+
+.app[data-positions-unlocked='true'] .react-flow__node.dragging .arch-node {
+  cursor: grabbing;
+}
+
+#unlock-positions[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* --- Settings drop-down ---------------------------------------------------------------- */
+
+.settings {
+  position: relative;
+  font-size: 0.8rem;
+}
+
+.settings > summary {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings[open] > summary {
+  border-color: var(--accent);
+}
+
+.settings-body {
+  position: absolute;
+  top: calc(100% + 4px);
+  /* Set by SettingsPanel so that the drop-down stays inside the window. */
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: min(22rem, 100vw - 1rem);
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.settings-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.settings-zoom {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.settings-label {
+  flex: none;
+  width: 8.5rem;
+}
+
+.settings-row input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-value {
+  flex: none;
+  width: 2.8rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-check {
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.settings-check small {
+  color: var(--muted);
+}
+
+/* --- Collapsed groups drawn shrunk (Settings → Shrink collapsed groups) ------------------ */
+
+/*
+ * The box is sized in src/core/compactGroup.ts for exactly this layout: the type sizes, line
+ * heights and paddings come from COMPACT_GROUP as --compact-* properties (set on the node in
+ * nodes.tsx). Fixed line heights, so that the height of the text does not depend on the font.
+ * These rules must win over the larger type of the `domains` level above: the selectors there
+ * leave shrunk groups out.
+ */
+.arch-group.arch-compact > .arch-group-header {
+  align-items: flex-start;
+  height: auto;
+  min-height: 0;
+  padding: var(--compact-header-top) var(--compact-padding-x) var(--compact-header-bottom);
+}
+
+.arch-group.arch-compact .arch-chevron {
+  margin-top: calc((var(--compact-name-line) - 22px) / 2);
+}
+
+/* A name too long for the full width of the group wraps instead of being cut. */
+.arch-group.arch-compact .arch-node-name {
+  font-size: var(--compact-name-size);
+  font-weight: 700;
+  line-height: var(--compact-name-line);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.arch-group.arch-compact .arch-level-tag {
+  display: none;
+}
+
+.arch-group.arch-compact .arch-collapsed-body {
+  display: block;
+  flex: 1;
+  overflow: hidden;
+  padding: var(--compact-body-top) var(--compact-padding-x) var(--compact-body-bottom);
+  font-size: var(--compact-text-size);
+  line-height: var(--compact-text-line);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* --- Work items -------------------------------------------------------- */
+
+/* Type colours as in Azure Boards; the darker two are lightened on a dark background. */
+:root {
+  --wi-story: #009ccc;
+  --wi-task: #f2cb1d;
+  --wi-task-mark: #4a3a00;
+  --wi-bug: #cc293d;
+  --wi-feature: #773b93;
+  --wi-epic: #ff7b00;
+  --wi-hover: rgba(37, 99, 235, 0.1);
+  --wi-selected: rgba(37, 99, 235, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wi-bug: #f0626f;
+    --wi-feature: #b07fd0;
+    --wi-hover: rgba(138, 180, 248, 0.14);
+    --wi-selected: rgba(138, 180, 248, 0.3);
+  }
+}
+
+.wi-icon {
+  flex: none;
+  width: var(--wi-icon-size, 1.15em);
+  height: var(--wi-icon-size, 1.15em);
+  vertical-align: -0.2em;
+  fill: currentColor;
+}
+
+.wi-icon-story {
+  color: var(--wi-story);
+}
+
+.wi-icon-task {
+  color: var(--wi-task);
+}
+
+.wi-icon-bug {
+  color: var(--wi-bug);
+}
+
+.wi-icon-feature {
+  color: var(--wi-feature);
+}
+
+.wi-icon-epic {
+  color: var(--wi-epic);
+}
+
+.wi-icon-mark {
+  fill: none;
+  stroke: var(--wi-task-mark);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/*
+ * The block of a node's work items. It is placed (inline style) exactly where the layout reserved
+ * it, and its lines are sized by WORK_ITEM_GEOMETRY (src/core/workItemContent.ts), handed over
+ * as --wi-* properties in WorkItemBlock.tsx: fixed line heights and no horizontal padding on a
+ * line, so that what was reserved is what is drawn.
+ */
+.arch-workitems {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--wi-padding-top) var(--wi-padding-x) var(--wi-padding-bottom);
+  overflow: hidden;
+  list-style: none;
+  color: var(--leaf-fg);
+  font-size: var(--wi-font-size);
+  font-weight: 400;
+  line-height: var(--wi-line-height);
+  text-align: left;
+}
+
+.arch-workitems > li {
+  height: var(--wi-line-height);
+}
+
+/*
+ * The list of an open group: drawn in the viewport above the edges (GroupWorkItemLists), on a
+ * background of its own, so that an edge on its way to a child of the group passes behind the
+ * list instead of through its text. The outline is a shadow: it takes no room from the lines.
+ */
+.arch-workitems-above {
+  border-radius: 4px;
+  background: var(--leaf-bg);
+  box-shadow: 0 0 0 1px var(--component-border);
+  /* The viewport itself takes no pointer events (React Flow). */
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.arch-workitems-above.arch-dimmed {
+  opacity: 0.3;
+}
+
+.arch-workitem {
+  display: flex;
+  align-items: center;
+  gap: var(--wi-icon-gap);
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--wi-line-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: var(--wi-line-height);
+  text-align: left;
+  cursor: pointer;
+}
+
+.arch-workitem-task {
+  padding-left: var(--wi-task-indent);
+  font-size: var(--wi-task-font-size);
+}
+
+.arch-workitem-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The highlight reaches a little beyond the line on both sides, into the padding of the block. */
+.arch-workitem:hover,
+.arch-workitem-related {
+  background: var(--wi-hover);
+  box-shadow:
+    -4px 0 0 var(--wi-hover),
+    4px 0 0 var(--wi-hover);
+}
+
+.arch-workitem-selected,
+.arch-workitem-selected:hover {
+  background: var(--wi-selected);
+  box-shadow:
+    -4px 0 0 var(--wi-selected),
+    4px 0 0 var(--wi-selected),
+    inset 0 -2px 0 var(--node-selected);
+}
+
+.arch-workitem:focus-visible {
+  outline: 2px solid var(--node-selected);
+  outline-offset: -2px;
+}
+
+/* Closed, done, resolved, removed: still listed, but out of the way. */
+.arch-workitem-closed .arch-workitem-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.arch-workitem-closed .wi-icon {
+  opacity: 0.55;
+}
+
+.arch-workitem-more {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--wi-task-font-size);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* The counts, where the lines are not drawn: in the block of a leaf or an open group… */
+.arch-workitems-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The badge of a box without a reserved block: on its top edge, at the right end. */
+.arch-badge-corner {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.arch-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(8px * var(--badge-scale, 1));
+  box-sizing: border-box;
+  height: calc(var(--wi-badge-height) * var(--badge-scale, 1));
+  padding: 0 calc(8px * var(--badge-scale, 1));
+  border: 1px solid var(--leaf-border);
+  border-radius: 999px;
+  background: var(--leaf-bg);
+  color: var(--leaf-fg);
+  font-size: calc(var(--wi-badge-font-size) * var(--badge-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.arch-badge-part {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--badge-scale, 1));
+}
+
+.arch-badge .wi-icon {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+/* …and below the names in a shrunk group: one line of COMPACT_GROUP.badgeLine (26px). */
+.arch-group.arch-compact .arch-collapsed-body .arch-badge {
+  display: flex;
+  width: fit-content;
+  margin: 6px auto 0;
+}
+
+/* At the `domains` level everything is small on screen: the badge grows with the titles. */
+.app[data-lod='domains'][data-zoom-lod='domains'] .arch-level-domain:not(.arch-compact) .arch-badge,
+.app[data-lod='domains'][data-zoom-lod='domains'] .arch-level-domain + .arch-workitems-badge {
+  --badge-scale: 1.4;
+}
+
+/* Work items in the detail panel. */
+.detail-workitem-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.detail-workitem-heading .wi-icon {
+  margin-top: 0.12em;
+}
+
+.detail-note {
+  margin: 0 0 0.6rem;
+  padding: 0.35rem 0.55rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+
+.detail-workitem-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.detail-workitem {
+  align-items: flex-start;
+}
+
+.detail-workitem .wi-icon {
+  margin-top: 0.1em;
+}
+
+.detail-workitem-title {
+  overflow-wrap: anywhere;
+}
+
+.detail-workitem-closed .detail-workitem-title {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+.detail-workitem-tasks {
+  margin-left: 1.3rem;
+}
+
+.detail-workitem-group h4 {
+  margin: 0.55rem 0 0.1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.detail-external {
+  flex: none;
+  padding: 0.3rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.detail-unknown {
+  color: var(--muted);
+}
+
+.search-option-name .wi-icon {
+  margin-right: 0.15rem;
+}
+
+/* The work-item filter in the Settings drop-down. */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.settings-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+}
+
+.settings-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.settings-row select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.settings-note {
+  color: var(--muted);
+}
+
+/* Work items in the diagnostics panel. */
+.diagnostics-heading {
+  margin: 0.6rem 0.75rem 0.15rem;
+  font-size: 0.8rem;
+}
+
+.diagnostics-coverage {
+  margin: 0 0.75rem 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* A new layout is on its way (another story mode, filter or work-items file): the map stays. */
+.layout-pending {
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  z-index: 20;
+  padding: 0.3rem 0.8rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* --- Focus (src/core/focus.ts): what the focus does not involve is paled, more than dimmed. --- */
+
+.react-flow__node.arch-faded,
+.arch-edge-label.arch-faded {
+  opacity: 0.14;
+}
+
+.react-flow__edge.arch-faded {
+  opacity: 0.08;
+}
+
+/* Edges on demand: hidden until the pointer or the selection asks for them. */
+.react-flow__edge.arch-quiet {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.arch-edge-label.arch-quiet {
+  display: none;
+}
+
+.notice-focus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.notice-focus button {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.toolbar-select {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.toolbar-select select {
+  max-width: 14rem;
+}
+
+/* --- Lenses on the boxes (src/ui/nodes.tsx) --------------------------------------------- */
+
+/* Heat by work: a strip up each side, as tall as the open work in the box, coloured along one
+   gradient laid over the full height — smouldering at the bottom, white-hot at the top — so a
+   short strip is only embers and a full one glows white at its tip. */
+.arch-heat {
+  position: absolute;
+  bottom: 0;
+  width: 5px;
+  height: calc(var(--heat) * 100%);
+  background-size: 100% calc(100% / var(--heat));
+  background-position: bottom;
+  background-repeat: no-repeat;
+  border-radius: 2px;
+  box-shadow: 0 0 6px 1px rgba(255, 120, 30, 0.45);
+  pointer-events: auto;
+}
+
+.arch-heat-left {
+  left: -1px;
+}
+
+.arch-heat-right {
+  right: -1px;
+}
+
+/* Progress: the bottom edge as a bar of the completed items over all of them. */
+.arch-progress {
+  position: absolute;
+  right: 6px;
+  bottom: -1px;
+  left: 6px;
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.arch-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(var(--done) * 100%);
+  border-radius: 3px;
+  background: #0ca30c;
+}
+
+.arch-group.arch-collapsed .arch-progress,
+.arch-group.arch-collapsed .arch-heat {
+  z-index: 1;
+}
+
+/* Colour by: a stripe along the top and a light tint of the box. */
+.arch-tinted {
+  --tint: var(--tint-light);
+}
+
+@media (prefers-color-scheme: dark) {
+  .arch-tinted,
+  .color-legend-chip,
+  .color-legend-gradient {
+    --tint: var(--tint-dark);
+    --tint-end: var(--tint-dark-end);
+  }
+}
+
+.arch-tinted::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  height: 6px;
+  border-radius: 8px 8px 0 0;
+  background: var(--tint);
+  pointer-events: none;
+}
+
+.arch-leaf.arch-tinted {
+  background: color-mix(in srgb, var(--tint) 14%, var(--leaf-bg));
+}
+
+.arch-group.arch-tinted {
+  background: color-mix(in srgb, var(--tint) 10%, var(--component-bg));
+}
+
+.arch-group.arch-level-domain.arch-tinted {
+  background: color-mix(in srgb, var(--tint) 10%, var(--domain-bg));
+}
+
+.arch-group.arch-collapsed.arch-tinted {
+  background:
+    repeating-linear-gradient(135deg, var(--collapsed-hatch) 0 2px, transparent 2px 12px),
+    color-mix(in srgb, var(--tint) 14%, var(--collapsed-bg));
+}
+
+/* The legend of "Colour by", over the canvas. */
+.map-row {
+  position: relative;
+}
+
+.color-legend {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 5;
+  max-width: 16rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.color-legend-title {
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.color-legend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.color-legend-list li {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.color-legend-chip,
+.color-legend-gradient {
+  --tint: var(--tint-light);
+  --tint-end: var(--tint-light-end);
+}
+
+.color-legend-chip {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--tint);
+}
+
+.color-legend-ramp {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.color-legend-gradient {
+  flex: 1;
+  height: 10px;
+  min-width: 5rem;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--tint), var(--tint-end));
+}
+
+/* --- Panel additions: attributes, links, flows, the Focus button -------------------------- */
+
+.detail-inherited {
+  color: var(--muted);
+}
+
+.detail-links {
+  margin: 0 0 0.6rem;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+}
+
+.detail-links a {
+  color: var(--accent);
+}
+
+.detail-flows h3,
+#detail-flow-steps h3,
+#detail-flow-nodes h3 {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 13px;
+}
+
+.detail-flow-kind {
+  color: var(--muted);
+}
+
+.detail-focus {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.detail-focus-active,
+.detail-focus:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.detail-steps {
+  counter-reset: step;
+}
+
+.detail-step-number {
+  flex: none;
+  min-width: 1.4rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Saved views (src/ui/ViewsMenu.tsx) --------------------------------------------------- */
+
+.views-save {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.views-save input {
+  flex: 1;
+  min-width: 0;
+}
+
+.views-list {
+  margin: 0.3rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.views-list li {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.views-apply {
+  flex: 1;
+  overflow: hidden;
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.views-apply:hover {
+  text-decoration: underline;
+}
+
+.views-link,
+.views-delete {
+  flex: none;
+  padding: 0 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.views-link:hover,
+.views-delete:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+/* --- Hints in the diagnostics panel ------------------------------------------------------ */
+
+.badge-hint {
+  color: var(--accent);
+}
+
+.diagnostics-hint-list {
+  margin: 0.2rem 0 0.4rem;
+  padding-left: 1.2rem;
+}
+
+.diagnostic-hint {
+  margin: 0.15rem 0;
+}
+
+/* --- Recent maps: the toolbar drop-down and the start page ------------------- */
+
+.recent-list li {
+  align-items: stretch;
+}
+
+.toolbar .recent-list .recent-open,
+.empty-state .recent-list .recent-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.1rem;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  white-space: normal;
+}
+
+.recent-open:hover .recent-name {
+  text-decoration: underline;
+}
+
+.recent-list li[data-current='true'] .recent-name {
+  font-weight: 600;
+}
+
+.recent-name,
+.recent-hint {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.toolbar .recent-list .recent-forget,
+.empty-state .recent-list .recent-forget {
+  flex: none;
+  align-self: center;
+  padding: 0 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+}
+
+.toolbar .recent-list .recent-forget:hover,
+.empty-state .recent-list .recent-forget:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+.empty-state .recent-start {
+  margin: 1rem auto;
+  max-width: 26rem;
+  text-align: left;
+}
+
+.empty-state .recent-start h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 0.875rem;
+}
+
+/* Sits with the file names in the first row of the toolbar: as small as the menus next to it. */
+.toolbar .reload-files {
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}

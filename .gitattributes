@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Command files for Windows: cmd.exe is only reliable with its own line ends.
+*.cmd text eol=crlf

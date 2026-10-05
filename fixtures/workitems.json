@@ -1,0 +1,874 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": 1001,
+      "type": "Epic",
+      "title": "Shop relaunch readiness",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "tags": "comp:storefront; launch",
+      "description": "Everything needed to switch the new shop on: storefront software, data pipeline and staff tooling. Tracked against the acceptance test in week 48.",
+      "fields": {
+        "Priority": 1,
+        "Area": "Shop",
+        "Target Date": "2026-11-27"
+      }
+    },
+    {
+      "id": 1002,
+      "type": "Feature",
+      "title": "Early warning for failing payments",
+      "state": "Active",
+      "assignedTo": "Sam Rivera",
+      "tags": "comp:data.analytics; ml",
+      "parentId": 1001,
+      "description": "Warn the staff on duty at least 48 hours before a payment method starts to fail, based on error and latency trends.",
+      "fields": {
+        "Priority": 2,
+        "Area": "Data Platform",
+        "Business Value": 80
+      }
+    },
+    {
+      "id": 1003,
+      "type": "Feature",
+      "title": "Rule versioning and rollback",
+      "state": "New",
+      "assignedTo": "Jamie Chen",
+      "tags": "comp:backoffice.config-manager; audit",
+      "parentId": 1001,
+      "description": "Every rule change is versioned, reviewable and can be rolled back to a released version from the back office.",
+      "fields": {
+        "Priority": 2,
+        "Area": "Back Office",
+        "Business Value": 60
+      }
+    },
+    {
+      "id": 1010,
+      "type": "User Story",
+      "title": "Add trusted-device exemption to the fraud check",
+      "state": "Active",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "Comp:Storefront.Web.Fraud-Check; risk",
+      "description": "Returning customers on a known device must pass the fraud check at checkout without an extra challenge. The exemption is allowed only while both device signals match in the right order.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 1,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1011,
+      "type": "Task",
+      "title": "Send the device signals with every tracked event and update the event list",
+      "state": "Closed",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:storefront.web.tracker",
+      "parentId": 1010,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Deployment"
+      }
+    },
+    {
+      "id": 1012,
+      "type": "Task",
+      "title": "Implement the exemption rule",
+      "state": "Active",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1010,
+      "fields": {
+        "Remaining Work": 6,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1013,
+      "type": "Task",
+      "title": "Validate the exemption window with the risk officer",
+      "state": "New",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1010,
+      "description": "The risk officer needs the decision table and the test protocol one week ahead.",
+      "fields": {
+        "Remaining Work": 4,
+        "Activity": "Testing"
+      }
+    },
+    {
+      "id": 1014,
+      "type": "User Story",
+      "title": "One-page checkout for returning customers",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:storefront.web.checkout",
+      "description": "The three-step checkout loses customers on the second page. Replace it with a single page so an order is placed within 40 seconds.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 2,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1015,
+      "type": "Task",
+      "title": "Tune the form layout on the test shop",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1014,
+      "fields": {
+        "Remaining Work": 5,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1016,
+      "type": "Task",
+      "title": "Record completion time before and after",
+      "state": "New",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1014,
+      "fields": {
+        "Remaining Work": 2,
+        "Activity": "Testing"
+      }
+    },
+    {
+      "id": 1017,
+      "type": "User Story",
+      "title": "Migrate the web shop to framework 4.2",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:storefront.web; upgrade",
+      "description": "Framework 4.2 is required for the new payment page. The shop must build without warnings and pass the regression checklist.",
+      "fields": {
+        "Story Points": 13,
+        "Priority": 2,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1018,
+      "type": "Task",
+      "title": "Convert the build configuration and re-map all routes that changed between framework 3.9 and 4.2",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1017,
+      "fields": {
+        "Remaining Work": 8,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1019,
+      "type": "Task",
+      "title": "Run regression checklist on the preview",
+      "state": "New",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1017,
+      "fields": {
+        "Remaining Work": 6,
+        "Activity": "Testing"
+      }
+    },
+    {
+      "id": 1020,
+      "type": "Task",
+      "title": "Update release notes",
+      "state": "New",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1017,
+      "fields": {
+        "Remaining Work": 2,
+        "Activity": "Documentation"
+      }
+    },
+    {
+      "id": 1021,
+      "type": "User Story",
+      "title": "Raise the event sampling rate in the iOS app",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:storefront.apps.ios",
+      "description": "Short sessions end before the current 30-second batch is sent, so their events are lost.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 2,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1022,
+      "type": "Task",
+      "title": "Replace the batching module",
+      "state": "Closed",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1021,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Deployment"
+      }
+    },
+    {
+      "id": 1023,
+      "type": "Task",
+      "title": "Check the battery impact",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1021,
+      "fields": {
+        "Remaining Work": 3,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1024,
+      "type": "User Story",
+      "title": "Keep the store-and-forward buffer across a restart",
+      "state": "Resolved",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:storefront.gateway.buffer; resilience",
+      "description": "Events buffered during a network outage must survive a gateway restart. Nothing older than the configured retention may be replayed.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 1,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1025,
+      "type": "Task",
+      "title": "Write buffer segments to disk",
+      "state": "Closed",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1024,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1026,
+      "type": "User Story",
+      "title": "Rotate device certificates without downtime",
+      "state": "Active",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:storefront.gateway.api; comp:data.ingest.broker; security",
+      "description": "Certificates expire every 12 months. Both the public API and the message broker must accept the old and the new certificate during the rollover window.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 1,
+        "Area": "Platform"
+      }
+    },
+    {
+      "id": 1027,
+      "type": "Task",
+      "title": "Add a second trust anchor to the broker",
+      "state": "Active",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1026,
+      "fields": {
+        "Remaining Work": 4,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1028,
+      "type": "Task",
+      "title": "Reload the server certificate without restarting sessions",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1026,
+      "fields": {
+        "Remaining Work": 6,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1029,
+      "type": "User Story",
+      "title": "Launch checklist for the new shop",
+      "state": "New",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:storefront",
+      "parentId": 1001,
+      "description": "One checklist for design, content and software sign-off, used at the acceptance test.",
+      "fields": {
+        "Story Points": 3,
+        "Priority": 3,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1030,
+      "type": "User Story",
+      "title": "Detect failing payments from the error pattern",
+      "state": "Active",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:data.analytics.anomaly; ml",
+      "parentId": 1002,
+      "description": "Train a model on the error codes of the payment providers. An anomaly score above the threshold for ten minutes raises an alert.",
+      "fields": {
+        "Story Points": 13,
+        "Priority": 1,
+        "Area": "Data Platform"
+      }
+    },
+    {
+      "id": 1031,
+      "type": "Task",
+      "title": "Label historical payment outages",
+      "state": "Closed",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1030,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Design"
+      }
+    },
+    {
+      "id": 1032,
+      "type": "Task",
+      "title": "Train and evaluate the baseline model",
+      "state": "Active",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1030,
+      "fields": {
+        "Remaining Work": 10,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1033,
+      "type": "User Story",
+      "title": "Backfill features for the last 90 days",
+      "state": "New",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:data.analytics.feature-store",
+      "parentId": 1002,
+      "description": "The anomaly model needs a full quarter of features before it can go live.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 3,
+        "Area": "Data Platform"
+      }
+    },
+    {
+      "id": 1034,
+      "type": "Task",
+      "title": "Schedule the backfill job outside peak hours",
+      "state": "New",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1033,
+      "fields": {
+        "Remaining Work": 4,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1035,
+      "type": "User Story",
+      "title": "Compress event archives older than one year",
+      "state": "Closed",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:data.event-store; storage",
+      "description": "Archive volumes grow by 40 GB per month. Older archives are compressed and stay queryable.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 3,
+        "Area": "Data Platform"
+      }
+    },
+    {
+      "id": 1036,
+      "type": "Task",
+      "title": "Benchmark compression codecs",
+      "state": "Closed",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1035,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Design"
+      }
+    },
+    {
+      "id": 1037,
+      "type": "User Story",
+      "title": "Normalise currencies for price fields",
+      "state": "Active",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:data.ingest.normalizer",
+      "description": "Some channels report cents, others whole units. The normalizer converts everything to cents.",
+      "fields": {
+        "Story Points": 3,
+        "Priority": 2,
+        "Area": "Data Platform"
+      }
+    },
+    {
+      "id": 1038,
+      "type": "Task",
+      "title": "Add currency metadata to the field catalogue",
+      "state": "Active",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1037,
+      "fields": {
+        "Remaining Work": 3,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1039,
+      "type": "User Story",
+      "title": "Data retention policy per event class",
+      "state": "New",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:data; compliance",
+      "description": "Order-relevant events are kept for ten years, diagnostics for 90 days. The policy applies to the event store and the feature store alike.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 3,
+        "Area": "Data Platform"
+      }
+    },
+    {
+      "id": 1040,
+      "type": "User Story",
+      "title": "Group alert floods by root cause",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:operations.console.alert-view; usability",
+      "description": "A failed payment provider raises dozens of follow-up alerts. The staff see the first alert with the consequences folded underneath.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 2,
+        "Area": "Operations"
+      }
+    },
+    {
+      "id": 1041,
+      "type": "Task",
+      "title": "Define the root-cause rules with the duty leads",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1040,
+      "fields": {
+        "Remaining Work": 4,
+        "Activity": "Design"
+      }
+    },
+    {
+      "id": 1042,
+      "type": "User Story",
+      "title": "Show KPIs per day",
+      "state": "Resolved",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:operations.oms.kpi",
+      "description": "Throughput, lead time and returns per day, with the previous day for comparison.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 2,
+        "Area": "Operations"
+      }
+    },
+    {
+      "id": 1043,
+      "type": "Task",
+      "title": "Add holiday calendar lookup",
+      "state": "Closed",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1042,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1044,
+      "type": "User Story",
+      "title": "Import purchase orders from ERP",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:operations.oms",
+      "description": "Orders released in ERP appear in the OMS order queue within one minute, including the rule reference.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 2,
+        "Area": "Operations"
+      }
+    },
+    {
+      "id": 1045,
+      "type": "Task",
+      "title": "Map ERP order fields to the OMS order model",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1044,
+      "fields": {
+        "Remaining Work": 6,
+        "Activity": "Design"
+      }
+    },
+    {
+      "id": 1046,
+      "type": "User Story",
+      "title": "Escalate unacknowledged fraud alerts",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:operations.alerts; risk",
+      "description": "A fraud alert that nobody acknowledges within two minutes is sent to the duty lead by text message.",
+      "fields": {
+        "Story Points": 3,
+        "Priority": 1,
+        "Area": "Operations"
+      }
+    },
+    {
+      "id": 1047,
+      "type": "User Story",
+      "title": "Incremental build for large catalogues",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:backoffice.studio.page-builder; performance",
+      "description": "A full build of the shop catalogue takes four minutes. Only the changed pages and their dependants should be rebuilt.",
+      "fields": {
+        "Story Points": 13,
+        "Priority": 2,
+        "Area": "Back Office"
+      }
+    },
+    {
+      "id": 1048,
+      "type": "Task",
+      "title": "Build the dependency graph of page templates",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1047,
+      "fields": {
+        "Remaining Work": 8,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1049,
+      "type": "Task",
+      "title": "Cache built pages on disk and invalidate them when a referenced template or a library version changes",
+      "state": "New",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1047,
+      "fields": {
+        "Remaining Work": 10,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1050,
+      "type": "User Story",
+      "title": "Preview sold-out scenarios",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:backoffice.studio.preview",
+      "description": "Editors can mark any product as sold out in the preview and watch the pages react.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 3,
+        "Area": "Back Office"
+      }
+    },
+    {
+      "id": 1051,
+      "type": "User Story",
+      "title": "Compare two rule versions side by side",
+      "state": "Active",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:backoffice.config-manager.rule-editor",
+      "parentId": 1003,
+      "description": "Changed parameters are highlighted. Values outside the validated range are marked in red.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 2,
+        "Area": "Back Office"
+      }
+    },
+    {
+      "id": 1052,
+      "type": "Task",
+      "title": "Diff view for parameter tables",
+      "state": "Active",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1051,
+      "fields": {
+        "Remaining Work": 5,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1053,
+      "type": "Task",
+      "title": "Highlight out-of-range values",
+      "state": "New",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "parentId": 1051,
+      "fields": {
+        "Remaining Work": 3,
+        "Activity": "Development"
+      }
+    },
+    {
+      "id": 1054,
+      "type": "User Story",
+      "title": "Roll back a rule to a released version",
+      "state": "New",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:backoffice.config-manager.version-store; audit",
+      "parentId": 1003,
+      "description": "A rollback creates a new version that copies the released one, so the history stays complete.",
+      "fields": {
+        "Story Points": 5,
+        "Priority": 2,
+        "Area": "Back Office"
+      }
+    },
+    {
+      "id": 1055,
+      "type": "User Story",
+      "title": "Single sign-on for the back-office tools",
+      "state": "Closed",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:platform.identity; security",
+      "description": "Staff sign in once with their staff account. Roles come from the directory groups.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 2,
+        "Area": "Platform"
+      }
+    },
+    {
+      "id": 1056,
+      "type": "Task",
+      "title": "Register the studio as an identity client",
+      "state": "Closed",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 12",
+      "parentId": 1055,
+      "fields": {
+        "Remaining Work": 0,
+        "Activity": "Deployment"
+      }
+    },
+    {
+      "id": 1057,
+      "type": "User Story",
+      "title": "Evaluate a new kiosk hardware vendor",
+      "state": "New",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 14",
+      "description": "Compare two vendors on price, delivery time and screen readability.",
+      "fields": {
+        "Story Points": 3,
+        "Priority": 4,
+        "Area": "Operations"
+      }
+    },
+    {
+      "id": 1058,
+      "type": "User Story",
+      "title": "Onboarding guide for new shop editors",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "docs; onboarding",
+      "description": "A short guide covering tools, access rights and the first-day checklist.",
+      "fields": {
+        "Story Points": 2,
+        "Priority": 4,
+        "Area": "Shop"
+      }
+    },
+    {
+      "id": 1059,
+      "type": "User Story",
+      "title": "Order by voice assistant",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:storefront.voice; voice",
+      "description": "The voice channel is not part of the architecture yet. The assistant needs six sample phrases per product category.",
+      "fields": {
+        "Story Points": 8,
+        "Priority": 2,
+        "Area": "Storefront"
+      }
+    },
+    {
+      "id": 1060,
+      "type": "Bug",
+      "title": "Payment page errors after a redeploy",
+      "state": "Active",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:storefront.payment",
+      "description": "After a redeploy of the web shop the payment page reports error P7011. A full restart clears it.",
+      "fields": {
+        "Severity": "2 - High",
+        "Priority": 1
+      }
+    },
+    {
+      "id": 1061,
+      "type": "Bug",
+      "title": "Broker drops retained messages after failover",
+      "state": "New",
+      "assignedTo": "Sam Rivera",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:data.ingest.broker; resilience",
+      "description": "Retained configuration topics are missing on the standby broker after a failover test.",
+      "fields": {
+        "Severity": "2 - High",
+        "Priority": 2
+      }
+    },
+    {
+      "id": 1062,
+      "type": "Bug",
+      "title": "Shop overview shows stale KPIs after midnight",
+      "state": "Closed",
+      "assignedTo": "Taylor Novak",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:operations.console.overview",
+      "description": "The KPI tile kept the value of the previous day until the page was reloaded.",
+      "fields": {
+        "Severity": "3 - Medium",
+        "Priority": 3
+      }
+    },
+    {
+      "id": 1063,
+      "type": "Bug",
+      "title": "Theme upload stalls at 98 %",
+      "state": "Resolved",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 12",
+      "tags": "comp:backoffice.themes; upgrade",
+      "description": "Uploads over the VPN stall near the end. The retry logic resent the last block forever.",
+      "fields": {
+        "Severity": "3 - Medium",
+        "Priority": 2
+      }
+    },
+    {
+      "id": 1064,
+      "type": "Bug",
+      "title": "Export job fails for time ranges over 30 days",
+      "state": "Active",
+      "assignedTo": "Jamie Chen",
+      "iteration": "Shop\\Sprint 13",
+      "tags": "comp:data.lake",
+      "description": "The export to the data lake times out. The data lake is not a node of the architecture file, so this tag is unknown.",
+      "fields": {
+        "Severity": "3 - Medium",
+        "Priority": 3
+      }
+    },
+    {
+      "id": 1065,
+      "type": "Bug",
+      "title": "Intermittent login timeout on Monday mornings",
+      "state": "New",
+      "assignedTo": "Sam Rivera",
+      "tags": "needs-triage",
+      "description": "Several users report a timeout at the first login of the week. Not yet reproduced.",
+      "fields": {
+        "Severity": "4 - Low",
+        "Priority": 4
+      }
+    },
+    {
+      "id": 1066,
+      "type": "Task",
+      "title": "Renew the TLS certificate of the gateway",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "tags": "comp:storefront.gateway; maintenance",
+      "description": "The certificate reaches its end date. Schedule the swap in a planned maintenance window.",
+      "fields": {
+        "Remaining Work": 2,
+        "Activity": "Deployment"
+      }
+    },
+    {
+      "id": 1067,
+      "type": "Task",
+      "title": "Order spare card readers",
+      "state": "Active",
+      "assignedTo": "Alex Morgan",
+      "fields": {
+        "Remaining Work": 1,
+        "Activity": "Requirements"
+      }
+    },
+    {
+      "id": 1068,
+      "type": "Task",
+      "title": "Back up the running shop before the migration",
+      "state": "New",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Sprint 14",
+      "parentId": 1017,
+      "fields": {
+        "Remaining Work": 1,
+        "Activity": "Deployment"
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+node_modules
+dist
+# Build kits (npm run installer): made from a commit, tens of megabytes, not for the repository.
+release
+coverage
+.env*
+*.log
+*.tsbuildinfo
+# Local working folder.
+.claude/
+# Throw-away browser profiles of ad-hoc headless probes (they belong in the temp directory).
+/prof-*/
