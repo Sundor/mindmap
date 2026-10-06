@@ -49,7 +49,7 @@ does on any web server (see "Where the viewer gets its data"). The dummy work it
 | `npm run lint`      | ESLint                                                                    |
 | `npm run format`    | Prettier (write); `npm run format:check` to only check                    |
 | `npm run smoke`     | Browser smoke test of the built viewer (see below)                        |
-| `npm run installer` | Build the build kit for Windows into `release/` ([below](#the-build-kit)) |
+| `npm run installer` | The two downloads of a release, into `release/` ([below](#the-build-kit)) |
 
 On Windows, `npm test` works from any spelling of the checkout path. If you call Vitest directly
 (`npx vitest`), do it from the canonically cased path (`C:…`, not `c:…`), or every suite fails
@@ -169,7 +169,7 @@ The project follows Semantic Versioning 2.0.0 (semver.org). The version is writt
 place, the `version` of `package.json`, and everything else takes it from there: the viewer
 shows it beside its name in the toolbar, the built page names it
 (`<meta name="generator" content="architecture-map 0.1.0">`), a release is the git tag
-`v<version>` on `main`, and the build kit carries it in its file name.
+`v<version>` on `main`, and the downloads of a release carry it in their file names.
 
 What the numbers mean here — the "public interface" is what someone who only has the built
 folder relies on:
@@ -189,10 +189,13 @@ only a MAJOR release may break.
 
 ## The build kit
 
-`npm run installer` makes `release/architecture-map-<version>-win-x64.zip` (about 66 MB) and its
-`.sha256`: everything a Windows computer needs to **build** the viewer, with no internet access,
-no administrator rights and nothing installed system-wide. To _use_ the viewer nobody needs it —
-the built folder and a browser are enough.
+`npm run installer` makes the two downloads of a release, each with a `.sha256` file:
+
+- `release/architecture-map-<version>-viewer.zip` (under 1 MB): the built folder — the viewer,
+  the example data files, the guide and the notices. All that is needed to **use** the map.
+- `release/architecture-map-<version>-build-kit-win-x64.zip` (about 66 MB): everything a
+  Windows computer needs to **build** the viewer, with no internet access, no administrator
+  rights and nothing installed system-wide. The rest of this section is about it.
 
 | In the kit                             | What it is                                                                  |
 | -------------------------------------- | --------------------------------------------------------------------------- |
@@ -200,7 +203,6 @@ the built folder and a browser are enough.
 | `payload/node-v…-win-x64.zip`          | Node.js, the archive published by nodejs.org, unchanged                     |
 | `payload/app-source.zip`               | The source as committed (`git archive`)                                     |
 | `payload/node_modules.tar.gz`          | The npm packages, as `npm ci` installed them from the lock file             |
-| `viewer/`                              | The built viewer: usable straight from the kit                              |
 | `manifest.json`, `README.txt`          | Size and SHA-256 of every packed file; what a user of the kit needs to know |
 
 **How it is made** (`scripts/make-installer.mjs`). Always from a commit, never from the working
@@ -209,7 +211,7 @@ once into `release/cache/`, accepted only with the SHA-256 pinned in the script)
 committed source into a staging folder and, _with that same Node.js_, runs `npm ci` (every
 package checked against the lock file), the unit tests and the build. Then it packs.
 `--verify` unpacks the finished zip and installs it into a scratch folder the way a user would;
-the installer builds the viewer there and compares it with the one in the kit — it is the same
+the installer builds the viewer there and compares it with the released one — it is the same
 file, byte for byte. A kit made from a commit that is not tagged `v<version>` is named
 `<version>+<commit>` instead, so it cannot be mistaken for the release.
 

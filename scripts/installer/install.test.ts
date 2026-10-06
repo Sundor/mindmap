@@ -149,7 +149,7 @@ describe('installInfo', () => {
         commit: '551aac5f',
         platform: 'win-x64',
         node: { version: '24.15.0', file: 'node-v24.15.0-win-x64.zip' },
-        payload: { source: 's', packages: 'p', viewer: 'v' },
+        payload: { source: 's', packages: 'p' },
         files: [],
         longestPath: 140,
         viewerSha256: 'ab',

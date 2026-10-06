@@ -5,8 +5,7 @@
 //   node install.mjs <kit folder> <installation folder>
 //
 // It checks every packed file against manifest.json, unpacks the source and the npm packages,
-// copies the built viewer, writes the helper commands, and builds the viewer once to show that
-// this computer can. Nothing outside the installation folder is written.
+// writes the helper commands, and builds the viewer once to show that this computer can. Nothing outside the installation folder is written.
 //
 // Node built-ins only: this file runs before any package is unpacked.
 
@@ -32,10 +31,10 @@ import { fileURLToPath } from 'node:url';
  * @property {string} commit
  * @property {string} platform  e.g. `win-x64`
  * @property {{ version: string, file: string }} node
- * @property {{ source: string, packages: string, viewer: string }} payload  paths in the kit
+ * @property {{ source: string, packages: string }} payload  paths in the kit
  * @property {PackedFile[]} files
  * @property {number} longestPath  the longest path below the installation folder, in characters
- * @property {string} viewerSha256  of the built viewer.html in the kit
+ * @property {string} viewerSha256  of the viewer.html released with this kit
  */
 
 /**
@@ -221,8 +220,6 @@ async function install(kitDir, target) {
   run(tar, ['-xf', inKit(manifest.payload.source), '-C', app]);
   say('Unpacking the npm packages (the longest step) ...');
   run(tar, ['-xf', inKit(manifest.payload.packages), '-C', app]);
-  say('Copying the built viewer ...');
-  await cp(inKit(manifest.payload.viewer), path.join(target, 'viewer'), { recursive: true });
 
   for (const [name, content] of Object.entries(helperCommands())) {
     await writeFile(path.join(target, name), content);
@@ -259,12 +256,12 @@ async function install(kitDir, target) {
   say(`Installed in ${target}`);
   say(
     same
-      ? 'The viewer built here is identical, byte for byte, to the one that came with the kit.'
-      : 'The viewer built here differs from the one in the kit (a different folder or system can do that).',
+      ? 'The viewer built here is identical, byte for byte, to the released one.'
+      : 'The viewer built here differs from the released one (a different folder or system can do that).',
   );
   console.log('');
-  say('viewer\\viewer.html   the viewer as shipped: open it in Edge or Chrome');
-  say('build.cmd            builds the viewer from the source   ->  app\\dist');
+  say('app\\dist\\viewer.html  the viewer built here: open it in Edge or Chrome');
+  say('build.cmd            builds it again from the source');
   say('test.cmd, smoke.cmd  the unit tests, the browser test');
   say('dev.cmd, shell.cmd   the development server, a prompt with Node.js and npm');
   say('README.txt           the rest');

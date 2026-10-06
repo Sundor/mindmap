@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-// Builds the build kit: one zip file with which a Windows computer can build the viewer without
-// internet access and without anything installed system-wide (README.md, "The build kit").
+// Builds the two downloads of a release (README.md, "The build kit"):
+// - the viewer: the built folder, zipped — all a user needs;
+// - the build kit: one zip file with which a Windows computer can build the viewer without
+//   internet access and without anything installed system-wide.
 //
-//   npm run installer                  release/architecture-map-<version>-win-x64.zip (+ .sha256)
+//   npm run installer                  release/architecture-map-<version>-viewer.zip and
+//                                      release/architecture-map-<version>-build-kit-win-x64.zip
+//                                      (each with its .sha256)
 //   npm run installer -- --verify      also installs the kit into a scratch folder, as a user would
 //   npm run installer -- --skip-tests  does not run the unit tests on the staged source
 //   npm run installer -- --allow-dirty takes HEAD although the working tree has changes
@@ -12,8 +16,8 @@
 //   2. the source, unpacked into a staging folder, where — with that same Node.js — `npm ci`
 //      installs the packages (each checked against package-lock.json), the unit tests run and
 //      the viewer is built;
-//   3. the source, the packages, the built viewer, the installer and a manifest with the
-//      checksum of every file are packed.
+//   3. the built viewer is zipped on its own; the source, the packages, the installer and a
+//      manifest with the checksum of every file are packed as the kit.
 //
 // Runs on Windows x64 only: the packages hold programs for the system they were installed on.
 // Node built-ins only.
@@ -56,7 +60,12 @@ export function kitLabel(version, { tag, commit, dirty = false }) {
 
 /** @param {string} label @returns {string} the name of the kit: its folder, and its zip file */
 export function kitName(label) {
-  return `${FILE_STEM}-${label}-${KIT_PLATFORM}`;
+  return `${FILE_STEM}-${label}-build-kit-${KIT_PLATFORM}`;
+}
+
+/** @param {string} label @returns {string} the name of the viewer download: folder and zip file */
+export function viewerName(label) {
+  return `${FILE_STEM}-${label}-viewer`;
 }
 
 /** @param {string} version @returns {string} */
@@ -257,10 +266,18 @@ async function main() {
   }
   say('building the viewer from the staged source');
   npm('run', 'build');
-  await cp(path.join(app, 'dist'), path.join(kit, 'viewer'), { recursive: true });
-  const viewerSha256 = await sha256Of(path.join(kit, 'viewer', 'viewer.html'));
+  const viewerSha256 = await sha256Of(path.join(app, 'dist', 'viewer.html'));
 
-  // --- 3. The installer, its manifest, the zip -------------------------------------------------
+  // --- 3. The viewer, on its own ---------------------------------------------------------------
+  const viewerFolder = viewerName(label);
+  await cp(path.join(app, 'dist'), path.join(work, viewerFolder), { recursive: true });
+  const viewerZip = path.join(release, `${viewerFolder}.zip`);
+  await rm(viewerZip, { force: true });
+  run(tar, ['-a', '-cf', viewerZip, '-C', work, viewerFolder]);
+  const viewerZipSha256 = await sha256Of(viewerZip);
+  await writeFile(`${viewerZip}.sha256`, checksumLine(viewerZipSha256, path.basename(viewerZip)));
+
+  // --- 4. The installer, its manifest, the kit zip ---------------------------------------------
   const installerDir = path.join(scriptsDir, 'installer');
   await writeFile(
     path.join(kit, 'install.cmd'),
@@ -278,6 +295,7 @@ async function main() {
         nodeFile,
         nodeSha256: KIT_NODE.sha256,
         zipName: `${name}.zip`,
+        viewerZip: `${viewerFolder}.zip`,
       }),
     ),
   );
@@ -287,7 +305,6 @@ async function main() {
     ...(await filesBelow(app)).map((file) => `app/${file}`),
     ...packedPaths,
     ...(await filesBelow(nodeDir)).map((file) => `node/${file}`),
-    ...(await filesBelow(path.join(kit, 'viewer'))).map((file) => `viewer/${file}`),
   ];
   const longestPath = Math.max(...installedPaths.map((file) => file.length));
   const packed = (await filesBelow(kit)).filter((file) => file !== 'manifest.json').sort();
@@ -301,7 +318,6 @@ async function main() {
     payload: {
       source: 'payload/app-source.zip',
       packages: 'payload/node_modules.tar.gz',
-      viewer: 'viewer',
     },
     longestPath,
     viewerSha256,
@@ -322,7 +338,7 @@ async function main() {
   await writeFile(`${zip}.sha256`, checksumLine(zipSha256, path.basename(zip)));
   const megabytes = ((await stat(zip)).size / 2 ** 20).toFixed(1);
 
-  // --- 4. A trial installation, from the zip, as a user would ----------------------------------
+  // --- 5. A trial installation, from the zip, as a user would ----------------------------------
   if (flags.has('--verify')) {
     const trial = path.join(work, 'trial');
     const unpacked = path.join(trial, 'unpacked');
@@ -345,7 +361,6 @@ async function main() {
       'app/package.json',
       'app/node_modules/vite/package.json',
       'app/dist/viewer.html',
-      'viewer/viewer.html',
       'build.cmd',
       'install-info.json',
       'README.txt',
@@ -357,12 +372,16 @@ async function main() {
     const rebuilt = await sha256Of(path.join(target, 'app', 'dist', 'viewer.html'));
     say(
       rebuilt === viewerSha256
-        ? 'trial installation: built a viewer identical to the one in the kit'
-        : 'trial installation: built a viewer that DIFFERS from the one in the kit',
+        ? 'trial installation: built a viewer identical to the released one'
+        : 'trial installation: built a viewer that DIFFERS from the released one',
     );
   }
 
   await rm(work, { recursive: true, force: true });
+  say(
+    `${path.relative(repoRoot, viewerZip)}  ${((await stat(viewerZip)).size / 2 ** 20).toFixed(1)} MB`,
+  );
+  say(`SHA-256 ${viewerZipSha256}`);
   say(`${path.relative(repoRoot, zip)}  ${megabytes} MB`);
   say(`SHA-256 ${zipSha256}`);
   if (label !== version) {

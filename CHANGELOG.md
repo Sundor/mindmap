@@ -5,6 +5,15 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## 0.1.1 — 2026-10-06
+
+- **Two downloads per release.** The viewer is its own download,
+  `architecture-map-<version>-viewer.zip`: the built folder with the viewer, the example data
+  files, the guide and the licence notices. The build kit, now named
+  `architecture-map-<version>-build-kit-win-x64.zip`, no longer contains the viewer; its
+  installer still builds the viewer and reports whether the result is identical to the
+  released one.
+
 ## 0.1.0 — 2026-10-05
 
 The first release.

@@ -8,6 +8,7 @@ import {
   KIT_NODE,
   kitLabel,
   kitName,
+  viewerName,
   nodeArchiveName,
   withCrLf,
 } from './make-installer.mjs';
@@ -46,8 +47,9 @@ describe('kitLabel', () => {
 
 describe('names', () => {
   it('names the kit after the app, its version and the system it is for', () => {
-    expect(kitName('0.1.0')).toBe('architecture-map-0.1.0-win-x64');
-    expect(kitName('0.1.0+551aac5')).toBe('architecture-map-0.1.0+551aac5-win-x64');
+    expect(kitName('0.1.0')).toBe('architecture-map-0.1.0-build-kit-win-x64');
+    expect(kitName('0.1.0+551aac5')).toBe('architecture-map-0.1.0+551aac5-build-kit-win-x64');
+    expect(viewerName('0.1.0')).toBe('architecture-map-0.1.0-viewer');
   });
 
   it('names the Node.js archive as nodejs.org does', () => {
@@ -96,6 +98,7 @@ describe('the files of the installer', () => {
       nodeFile: nodeArchiveName(KIT_NODE.version),
       nodeSha256: KIT_NODE.sha256,
       zipName: `${kitName('0.1.0')}.zip`,
+      viewerZip: `${viewerName('0.1.0')}.zip`,
     });
     expect(text).not.toMatch(/\{\{|\}\}/);
     expect(text).toContain('Architecture Map 0.1.0 - build kit');

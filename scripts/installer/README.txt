@@ -10,13 +10,12 @@ WHAT THIS IS
     - Node.js {{node}}, the official portable build, unchanged
     - the source code of Architecture Map {{version}}
     - all npm packages the build and the tests need, ready to use
-    - the viewer already built (folder "viewer")
 
 
 IF YOU ONLY WANT TO USE THE MAP
 
-  Nothing has to be installed. Open viewer\viewer.html in Edge or Chrome and read
-  viewer\README.md.
+  You do not need this kit. The viewer is its own download, {{viewerZip}}: unpack it, open
+  viewer.html in a browser, and read the README.md next to it.
 
 
 INSTALLING (to build the viewer yourself)
@@ -43,7 +42,7 @@ AFTER INSTALLING - in the installation folder
   dev.cmd         starts the development server and opens the viewer
   shell.cmd       a command prompt with the Node.js and npm of the kit on the PATH
   app\            the source code; app\README.md describes the project
-  viewer\         the viewer as it came with the kit
+  app\dist\       the viewer, built here during the installation
   node\           Node.js {{node}}
   install-info.json   which version this is
 
@@ -95,4 +94,4 @@ LICENCES
 
   Node.js:        node\LICENSE (after installing; inside the Node.js archive before)
   npm packages:   each package brings its licence in app\node_modules
-  The viewer:     viewer\THIRD-PARTY-NOTICES.txt lists the software inside viewer.html
+  The viewer:     app\dist\THIRD-PARTY-NOTICES.txt lists the software inside viewer.html
