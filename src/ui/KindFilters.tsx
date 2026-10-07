@@ -1,11 +1,11 @@
-// Edge-kind toggles. Each button doubles as the legend entry of its kind: it
-// shows a sample of the kind's line.
+// Edge-kind toggles, in the control panel. Each button shows a sample of its kind's line, like
+// the legend over the canvas (EdgeLegend).
 
 import { EDGE_KINDS, type EdgeKind } from '../core';
 
 export interface KindFiltersProps {
   readonly hiddenKinds: ReadonlySet<EdgeKind>;
-  /** Number of model edges of each kind, shown in the tooltip. */
+  /** Number of edges of each kind on the map (hidden or not), shown in the tooltip. */
   readonly counts: Readonly<Record<EdgeKind, number>>;
   readonly onToggle: (kind: EdgeKind) => void;
 }

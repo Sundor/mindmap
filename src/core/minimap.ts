@@ -142,3 +142,60 @@ export function miniMapNodes(nodes: readonly MiniMapSourceNode[]): MiniMapNode[]
     return { id: node.id, type: node.type, rect: { x, y, width: node.width, height: node.height } };
   });
 }
+
+/** Free space React Flow keeps around a panel on the canvas, in pixels; the minimap is one. */
+const PANEL_MARGIN = 15;
+
+/** The corner at the bottom right of the canvas that the minimap takes, with that space. */
+export const MINIMAP_CORNER: Size = {
+  width: MINIMAP.width + PANEL_MARGIN,
+  height: MINIMAP.height + PANEL_MARGIN,
+};
+
+/**
+ * Whether the minimap lies over a box of the map as `viewport` shows it on a screen of `screen`
+ * pixels, the minimap taking the bottom right `corner`. Only the boxes that hold no other box
+ * count, the leaves and the closed groups: of an open group it is the frame that reaches under
+ * the minimap, and a row band is no box.
+ */
+export function miniMapCovers(
+  nodes: readonly MiniMapSourceNode[],
+  viewport: Viewport,
+  screen: Size,
+  corner: Size = MINIMAP_CORNER,
+): boolean {
+  const view = viewportRect(viewport, screen);
+  const right = view.x + view.width;
+  const bottom = view.y + view.height;
+  const left = right - corner.width / viewport.zoom;
+  const top = bottom - corner.height / viewport.zoom;
+  const parents = new Set(nodes.map((node) => node.parentId));
+  return miniMapNodes(nodes).some(
+    ({ id, type, rect }) =>
+      type !== 'band' &&
+      !parents.has(id) &&
+      rect.x < right &&
+      rect.x + rect.width > left &&
+      rect.y < bottom &&
+      rect.y + rect.height > top,
+  );
+}
+
+/** Where room is kept for the minimap when the map is fitted: nowhere, at its right or below it. */
+export type MiniMapRoom = 'none' | 'beside' | 'above';
+
+/**
+ * The room to keep for the minimap when the map drawn by `nodes` is fitted into a screen of
+ * `screen` pixels. `fitted` gives the viewport of the fit with that room: none (the map may reach
+ * into the corner), the map ending beside the minimap, or ending above it. None is kept while
+ * the plain fit leaves no box under the minimap; otherwise the one that leaves the map larger.
+ */
+export function miniMapRoom(
+  nodes: readonly MiniMapSourceNode[],
+  screen: Size,
+  fitted: (room: MiniMapRoom) => Viewport,
+  corner: Size = MINIMAP_CORNER,
+): MiniMapRoom {
+  if (!miniMapCovers(nodes, fitted('none'), screen, corner)) return 'none';
+  return fitted('beside').zoom >= fitted('above').zoom ? 'beside' : 'above';
+}

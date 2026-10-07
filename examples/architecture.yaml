@@ -9,7 +9,7 @@
 #     (the layout places them by the rows their connections point to).
 #   - platform: cross-cutting domain with no row anywhere in its subtree (Unassigned area).
 # It also has owner / status / tech on nodes (inherited down the tree), links, metrics
-# (Colour by in the settings), and flows (Focus in the toolbar).
+# (Colour by, on the Lenses tab), and flows (Focus, on the Visibility tab).
 version: 1
 
 rows:

@@ -21,8 +21,8 @@ import {
   type ArchNode,
   type ArchRow,
   type NodeLevel,
-  type RowRange,
 } from './model';
+import { rowRanges } from './rows';
 import {
   ComponentSchema,
   DomainSchema,
@@ -636,30 +636,9 @@ function buildModel(
   edges: readonly ArchEdge[],
   flows: readonly ArchFlow[],
 ): ArchitectureModel {
-  const rowIndex = new Map(rows.map((row, i) => [row.id, i]));
-  // Children come after their parents in document order, so walking it backwards
-  // computes every child's range before its parent needs it.
-  const ranges = new Map<string, RowRange>();
-  const ordered = [...records.values()];
-  for (let i = ordered.length - 1; i >= 0; i--) {
-    const record = ordered[i];
-    if (!record) continue;
-    const own = record.effectiveRow === undefined ? undefined : rowIndex.get(record.effectiveRow);
-    let range: RowRange | undefined = own === undefined ? undefined : { top: own, bottom: own };
-    if (range === undefined) {
-      for (const childId of record.childIds) {
-        const child = ranges.get(childId);
-        if (!child) continue;
-        range = range
-          ? { top: Math.min(range.top, child.top), bottom: Math.max(range.bottom, child.bottom) }
-          : child;
-      }
-    }
-    if (range) ranges.set(record.id, range);
-  }
-
+  const ranges = rowRanges(rows, records.values());
   const nodes = new Map<string, ArchNode>();
-  for (const record of ordered) {
+  for (const record of records.values()) {
     nodes.set(
       record.id,
       compact({

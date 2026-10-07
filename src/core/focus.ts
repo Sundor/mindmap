@@ -1,8 +1,10 @@
-// Focus: one filter that highlights what a flow, or a work item and everything
-// under it, involves — and pales the rest of the map. Pure: no React, no browser APIs.
+// Focus: one choice that highlights what a flow, or a work item and everything
+// under it, involves — and pales the rest of the map, or in Filter mode leaves it out
+// (src/core/focusFilter.ts). Pure: no React, no browser APIs.
 
 import type { FlowEdge, FlowGraph, FlowNode } from './flow';
 import type { ArchitectureModel } from './model';
+import type { RenderedSelection } from './selection';
 import { workItemNodeIds, type WorkItemOverlay } from './workItemOverlay';
 
 /** What the map is focused on: a flow of the structure file, or a work item (with its children). */
@@ -12,6 +14,14 @@ export type Focus =
 
 export function sameFocus(a: Focus | undefined, b: Focus | undefined): boolean {
   return a?.type === b?.type && a?.id === b?.id;
+}
+
+/** How a focus is shown: the rest of the map paled, or not drawn at all. */
+export const FOCUS_MODES = ['focus', 'filter'] as const;
+export type FocusMode = (typeof FOCUS_MODES)[number];
+
+export function isFocusMode(value: unknown): value is FocusMode {
+  return typeof value === 'string' && (FOCUS_MODES as readonly string[]).includes(value);
 }
 
 /** What a focus involves, in model terms. */
@@ -121,18 +131,59 @@ export function focusedNodeIds(
 }
 
 /**
+ * The drawn nodes the selection is on: the selected node, the two ends of the selected edge, or
+ * the nodes that show the selected work item — with the groups drawn around them and, but for an
+ * edge, what is drawn inside them (as `highlightFlow` takes a selected node).
+ */
+function selectedNodeIds(flow: FlowGraph, selection: RenderedSelection): Set<string> {
+  let on: readonly string[];
+  if (selection.type === 'node') on = [selection.id];
+  else if (selection.type === 'workitem') on = selection.nodeIds;
+  else {
+    const edge = flow.edges.find((candidate) => candidate.id === selection.id);
+    on = edge ? [edge.source, edge.target] : [];
+  }
+  const ids = new Set<string>();
+  // Document order lists parents first: one pass finds the parents and what is drawn inside.
+  const parents = new Map<string, string | undefined>();
+  const inside = new Set(selection.type === 'edge' ? [] : on);
+  for (const node of flow.nodes) {
+    if (node.type === 'band') continue;
+    parents.set(node.id, node.parentId);
+    if (node.parentId !== undefined && inside.has(node.parentId)) {
+      inside.add(node.id);
+      ids.add(node.id);
+    }
+  }
+  for (const start of on) {
+    for (let id: string | undefined = start; id !== undefined; id = parents.get(id)) ids.add(id);
+  }
+  return ids;
+}
+
+/**
  * `flow` with the focus shown: every node and edge the focus does not involve gets the class
  * {@link FADED_CLASS} (edges also `data.faded`, for their labels). A rendered edge is involved
- * when any of the model edges it stands for is. Row bands are never faded. Nothing is removed or
- * moved; elements that need no change keep their identity.
+ * when any of the model edges it stands for is. Row bands are never faded, and neither is what
+ * `selection` is on — the selected node with what is drawn inside it, the selected edge with its
+ * two ends, the nodes that show the selected work item, and the groups around those: what the
+ * reader is looking at stays readable although the focus does not involve it. Nothing is removed
+ * or moved; elements that need no change keep their identity.
  */
-export function focusFlow(model: ArchitectureModel, flow: FlowGraph, set: FocusSet): FlowGraph {
+export function focusFlow(
+  model: ArchitectureModel,
+  flow: FlowGraph,
+  set: FocusSet,
+  selection?: RenderedSelection,
+): FlowGraph {
   const lit = focusedNodeIds(model, flow, set);
+  if (selection) for (const id of selectedNodeIds(flow, selection)) lit.add(id);
   const nodes = flow.nodes.map((node): FlowNode => {
     if (node.type === 'band' || lit.has(node.id)) return node;
     return { ...node, className: withClass(node.className, FADED_CLASS) };
   });
   const edges = flow.edges.map((edge): FlowEdge => {
+    if (selection?.type === 'edge' && edge.id === selection.id) return edge;
     if (edge.data.memberEdgeIds.some((id) => set.edges.has(id))) return edge;
     return {
       ...edge,

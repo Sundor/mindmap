@@ -5,6 +5,58 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## Unreleased
+
+- **Changed behaviour — the controls are in a panel at the left.** The toolbar at the top and
+  its Settings drop-down are gone. A rail at the left edge is always there, with **Search**,
+  six tabs, **Reload**, **Fit view** and **Hide** / **Show**; beside it, the body of the panel
+  shows the name and version of the viewer, the names of the files in use, the search box and
+  the tab that is chosen. Where the controls went:
+  - **Detail**: the level of detail, Collapse all and Expand all, Shrink collapsed groups, the
+    zoom thresholds, and what was the **Stories** selector, now **Work items on the map**.
+  - **Visibility**: the focus chooser, the four edge-kind buttons, Edges on demand, Work items
+    shown.
+  - **Lenses**: Colour by, Heat by work, Progress bars.
+  - **Layout**: Arrange in rows, Unlock / Lock positions, Reset positions.
+  - **Views**: the saved views and Copy link.
+  - **Files**: Open YAML…, Open work items…, the recent maps, and the size of the structure,
+    the number of work items and the tag coverage.
+- **The body of the panel can be hidden** — **Hide**, or a click on the tab that is shown —
+  which leaves the rail and gives the map the room; the tabs still show the level being drawn,
+  a dot while something is hidden, paled or filtered, and the number of saved views. With the
+  body hidden, **/**, **Ctrl+K** and **Search** show the search box alone beside the rail. In a
+  window at least 1400 px wide the open body stands beside the map. In a narrower one it is
+  hidden until you show it; opened, it lies over the left of the map until it is hidden again,
+  **Fit view** fits the map into the part beside it, and the notices above the map, the legends,
+  the zoom controls and the Diagnostics panel begin where it ends.
+- **Edge legend.** A key to the four edge kinds sits at the top left of the canvas, above the
+  colour legend, whatever the control panel shows; a hidden kind is struck through. The kind
+  buttons themselves are on the **Visibility** tab.
+- **Focus / Filter.** A switch under the focus chooser, and again in the focus bar above the
+  canvas, says how a focus is shown. **Focus** pales the rest of the map, as before. **Filter**
+  does not draw it: the map is reduced to what the focus involves — the nodes, the groups
+  around them, what lies inside them and the edges of the focus — laid out again with every
+  node in its row, and fitted. Leaving Filter brings the whole map back in the view it had.
+  The search and the detail panel still cover the whole structure and mark what the filtered
+  map does not have; going to it switches back to Focus, and the focus bar says so. Level of
+  detail, collapsed groups and hidden edge kinds apply to the filtered map as to the whole
+  one, and a filtered map has hand-moved positions of its own. In both modes, what is selected
+  is no longer paled when the focus does not involve it.
+- **Fit view** ends at another zoom than before, because the control panel takes width from
+  the canvas where the toolbar took height: with the shipped example at 1920×1080, at 61% with
+  the body open and 72% with it hidden (about 75% before); at 1366×768, where the body starts
+  hidden, at 50% (about 53% before). A fit — **Fit view**, and a map fitted when it is drawn —
+  no longer puts a box under the minimap: where it would, the map ends beside the minimap or
+  above it.
+- **Saved views and links** keep that a view was saved on a map filtered to its focus, and
+  show that filtered map again. Views and links saved before open as they did. A link copied
+  on a filtered map needs this version: an older viewer shows its focus paled, with the view
+  at the wrong place.
+- **Remembered in the browser**, once for the viewer: the tab shown and whether the body of the
+  control panel is hidden, and the Focus / Filter switch. The focus is still not remembered,
+  and the remembered viewport is that of the whole map: it does not change while a filtered
+  map is shown.
+
 ## 0.1.1 — 2026-10-06
 
 - **Two downloads per release.** The viewer is its own download,

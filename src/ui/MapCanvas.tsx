@@ -16,7 +16,7 @@ import {
   type NodeTypes,
   type OnNodeDrag,
 } from '@xyflow/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   collapseAction,
   nearestEdgeAt,
@@ -32,7 +32,8 @@ import {
 import { ArchEdgeView, EdgeMarkers } from './ArchEdge';
 import { MiniMapFixed } from './MiniMapFixed';
 import { CollapseContext, type ToggleCollapse } from './collapseContext';
-import { FIT_VIEW_OPTIONS } from './constants';
+import { fitOptions, fitRoom, fitWithRoom } from './constants';
+import { coveredCanvasLeft } from './coveredCanvas';
 import type { AppEdge, AppNode } from './flowTypes';
 import { BandNode, GroupNode, LeafNode } from './nodes';
 import { GroupWorkItemLists } from './WorkItemBlock';
@@ -117,28 +118,44 @@ export function MapCanvas({
 }: MapCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<AppNode>(flow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<AppEdge>(flow.edges);
-  // Mount-only: later values must not move the view.
-  const [startViewport] = useState(initialViewport);
   const store = useStoreApi();
   const { fitView, screenToFlowPosition } = useReactFlow<AppNode, AppEdge>();
   const container = useRef<HTMLDivElement>(null);
+  // Mount-only: later values must not move the view.
+  const [startViewport] = useState(initialViewport);
+  // How the view is fitted on mount: clear of what the control panel covers of the canvas then,
+  // and of the minimap where the map would have one of the boxes it starts with under it. That
+  // is judged by the size of the canvas this one replaces (the store still holds it), and
+  // without one taken as not needed.
+  const [startNodes] = useState(flow.nodes);
+  const [plainFit] = useState(() => fitOptions(coveredCanvasLeft()));
+  const [startRoom] = useState(() => {
+    const { width, height } = store.getState();
+    return fitRoom(plainFit, startNodes, { width, height });
+  });
+  const fitViewOptions = useMemo(() => fitWithRoom(plainFit, startRoom), [plainFit, startRoom]);
 
-  // A restored viewport is only kept when it shows a useful part of the map on the canvas as it
-  // is now (a smaller window, or a map panned to the very edge, would leave it empty): only here
-  // is the size of the canvas known. Otherwise fit, as without a stored viewport.
+  // Only here is the size of the canvas itself known. A map fitted on mount is fitted again when
+  // the minimap needs other room on a canvas of this size. A restored viewport is only kept when
+  // it shows a useful part of the map on the canvas as it is now (a smaller window, or a map
+  // panned to the very edge, would leave it empty); otherwise fit, as without a stored viewport.
   const onInit = useCallback(() => {
-    if (!startViewport) return;
     const size = container.current?.getBoundingClientRect();
     if (!size || !(size.width > 0 && size.height > 0)) return;
+    const room = fitRoom(plainFit, startNodes, size);
+    if (!startViewport) {
+      if (room !== startRoom) void fitView(fitWithRoom(plainFit, room));
+      return;
+    }
     if (!viewportShowsMap(startViewport, contentBounds, size)) {
-      void fitView(FIT_VIEW_OPTIONS);
+      void fitView(fitWithRoom(plainFit, room));
       return;
     }
     // The view starts here without moving, so the subscription below never sees it: report it
     // now. It may differ from the stored one — a layout that replaced another starts from the
     // place the user was looking at — and a reload must come back to this view, not to that.
     onViewportSettled?.(startViewport);
-  }, [startViewport, contentBounds, fitView, onViewportSettled]);
+  }, [startViewport, startNodes, startRoom, plainFit, contentBounds, fitView, onViewportSettled]);
 
   // Report the viewport once it rests. Subscribing to the store (rather than to React Flow's
   // move events) also covers fit to view and programmatic moves.
@@ -262,7 +279,7 @@ export function MapCanvas({
               {...(onHoverNode ? { onNodeMouseEnter, onNodeMouseLeave } : {})}
               // Restore the stored viewport when there is one, otherwise fit.
               fitView={startViewport === undefined}
-              fitViewOptions={FIT_VIEW_OPTIONS}
+              fitViewOptions={fitViewOptions}
               {...(startViewport ? { defaultViewport: startViewport } : {})}
               minZoom={ZOOM_RANGE.min}
               maxZoom={ZOOM_RANGE.max}

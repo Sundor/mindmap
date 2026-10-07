@@ -1,6 +1,7 @@
 // The panel of a flow: what it tells, its steps in order, the nodes it names, and
 // the button that puts the map's focus on it.
 
+import { useContext } from 'react';
 import {
   edgeLabelText,
   focusSet,
@@ -10,6 +11,7 @@ import {
   type Focus,
 } from '../core';
 import { Field, NodeLink } from './detailParts';
+import { FilterContext, outsideTitle } from './filterContext';
 
 export interface FlowDetailProps {
   readonly model: ArchitectureModel;
@@ -39,8 +41,8 @@ export function FocusButton({
       aria-pressed={active}
       title={
         active
-          ? 'The map is focused on this: everything else is paled. Click to clear the focus.'
-          : 'Focus the map on this: what it involves stays lit, everything else is paled.'
+          ? 'The map is focused on this: everything else is paled, or left out in Filter mode. Click to clear the focus.'
+          : 'Focus the map on this: what it involves stays lit, everything else is paled, or left out in Filter mode.'
       }
       onClick={() => onFocus(active ? undefined : target)}
     >
@@ -50,6 +52,8 @@ export function FocusButton({
 }
 
 export function FlowDetail({ model, id, focus, onFocus, onGoToNode, onGoToEdge }: FlowDetailProps) {
+  // A map filtered to another focus leaves steps of this flow out: those are marked.
+  const filtered = useContext(FilterContext);
   const flow = model.flows.find((candidate) => candidate.id === id);
   if (!flow) return null;
   const set = focusSet(model, { type: 'flow', id });
@@ -77,13 +81,15 @@ export function FlowDetail({ model, id, focus, onFocus, onGoToNode, onGoToEdge }
             {flow.edgeIds.map((edgeId, index) => {
               const edge = edges.get(edgeId);
               if (!edge) return null;
+              const outside = filtered !== undefined && !filtered.showsEdge(edge.id);
               return (
                 <li key={`${index}:${edgeId}`}>
                   <button
                     type="button"
                     className="detail-edge"
                     data-edge-id={edge.id}
-                    title={edge.id}
+                    data-outside={outside ? 'true' : undefined}
+                    title={outside ? outsideTitle(edge.id) : edge.id}
                     onClick={() => onGoToEdge(edge.id)}
                   >
                     <span className="detail-step-number">{index + 1}</span>

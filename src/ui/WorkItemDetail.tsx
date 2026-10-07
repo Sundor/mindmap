@@ -2,7 +2,7 @@
 // only place that shows its description and parameters and the full text of its tasks — and the
 // "linked work items" section of a node. Everything shown is computed by src/core.
 
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 import {
   childWorkItems,
   isOpenState,
@@ -13,6 +13,7 @@ import {
   subtreeWorkItemCounts,
   WORK_ITEM_GEOMETRY,
   workItemLines,
+  workItemNodeIds,
   workItemPlace,
   workItemsOfNode,
   type ArchitectureModel,
@@ -22,6 +23,7 @@ import {
   type WorkItemSummary,
 } from '../core';
 import { Field, NodeLink } from './detailParts';
+import { FilterContext, outsideTitle } from './filterContext';
 import { WorkItemIcon } from './WorkItemIcon';
 import { PanelSection } from './PanelSection';
 
@@ -64,16 +66,28 @@ function ExternalLink({ item }: { item: WorkItemSummary }) {
   );
 }
 
-/** One work item in a list: type icon, the full title, then ID, state and assignee. */
+/**
+ * One work item in a list: type icon, the full title, then ID, state and assignee. An item is
+ * marked when the filtered map leaves out every node that lists it.
+ */
 function WorkItemEntry({
   item,
+  overlay,
   onGoToWorkItem,
   children,
 }: {
   item: WorkItemSummary;
+  overlay: WorkItemOverlay;
   onGoToWorkItem: (id: number) => void;
   children?: ReactNode;
 }) {
+  const filtered = useContext(FilterContext);
+  const nodeIds = workItemNodeIds(overlay, item.id);
+  const outside =
+    filtered !== undefined &&
+    nodeIds.length > 0 &&
+    !nodeIds.some((nodeId) => filtered.showsNode(nodeId));
+  const title = `${item.type} #${item.id}`;
   return (
     <li>
       <div className="detail-workitem-row">
@@ -82,7 +96,8 @@ function WorkItemEntry({
           className={`detail-edge detail-workitem${isOpenState(item.state) ? '' : ' detail-workitem-closed'}`}
           data-workitem-id={item.id}
           data-workitem-type={item.type}
-          title={`${item.type} #${item.id}`}
+          data-outside={outside ? 'true' : undefined}
+          title={outside ? outsideTitle(title) : title}
           onClick={() => onGoToWorkItem(item.id)}
         >
           <WorkItemIcon type={item.type} labelled />
@@ -127,7 +142,7 @@ function PlaceNote({
         </p>
       );
     case 'off':
-      text = 'Not drawn on the map: the Stories selector is Off.';
+      text = `Not drawn on the map: "Work items on the map" (Detail tab) is ${STORY_MODE_LABELS.off}.`;
       action = (
         <button
           type="button"
@@ -248,12 +263,12 @@ export function WorkItemDetail(props: WorkItemPanelProps & { readonly id: number
           <h3>Parent</h3>
           {parent && overlay.shownIds.has(parent.id) ? (
             <ul className="detail-list">
-              <WorkItemEntry item={parent} onGoToWorkItem={onGoToWorkItem} />
+              <WorkItemEntry item={parent} overlay={overlay} onGoToWorkItem={onGoToWorkItem} />
             </ul>
           ) : (
             <p className="detail-hint">
               {parent
-                ? `${parent.type} #${parent.id} "${parent.title}" (${parent.state}) is hidden by the filter.`
+                ? `${parent.type} #${parent.id} "${parent.title}" (${parent.state}) is hidden by the work-item filter.`
                 : `#${item.parentId} is not in the work-items file.`}
             </p>
           )}
@@ -267,11 +282,16 @@ export function WorkItemDetail(props: WorkItemPanelProps & { readonly id: number
           </h3>
           <ul className="detail-list">
             {children.map((child) => (
-              <WorkItemEntry key={child.id} item={child} onGoToWorkItem={onGoToWorkItem} />
+              <WorkItemEntry
+                key={child.id}
+                item={child}
+                overlay={overlay}
+                onGoToWorkItem={onGoToWorkItem}
+              />
             ))}
           </ul>
           {filteredChildren > 0 && (
-            <p className="detail-hint">{filteredChildren} more hidden by the filter.</p>
+            <p className="detail-hint">{filteredChildren} more hidden by the work-item filter.</p>
           )}
         </section>
       )}
@@ -318,11 +338,21 @@ export function NodeWorkItems({
           </h4>
           <ul className="detail-list">
             {group.rows.map((row) => (
-              <WorkItemEntry key={row.item.id} item={row.item} onGoToWorkItem={onGoToWorkItem}>
+              <WorkItemEntry
+                key={row.item.id}
+                item={row.item}
+                overlay={overlay}
+                onGoToWorkItem={onGoToWorkItem}
+              >
                 {row.tasks.length > 0 && (
                   <ul className="detail-list detail-workitem-tasks">
                     {row.tasks.map((task) => (
-                      <WorkItemEntry key={task.id} item={task} onGoToWorkItem={onGoToWorkItem} />
+                      <WorkItemEntry
+                        key={task.id}
+                        item={task}
+                        overlay={overlay}
+                        onGoToWorkItem={onGoToWorkItem}
+                      />
                     ))}
                   </ul>
                 )}

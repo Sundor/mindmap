@@ -33,7 +33,7 @@ export interface WorkItemSource {
   readonly origin: WorkItemOrigin;
   /** JSON text of the work-items file. */
   readonly text: string;
-  /** Name shown in the toolbar: the path, or the file name. */
+  /** Name shown in the control panel: the path, or the file name. */
   readonly name: string;
   /** Name used in diagnostics. */
   readonly diagnosticsName: string;

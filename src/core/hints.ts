@@ -83,7 +83,7 @@ export function authoringHints(
       kind: 'no-flows',
       nodeIds: [],
       message:
-        'No flows: a "flows:" section naming the edges of a workflow or a data flow lets a reader follow one story through the map (Focus in the toolbar).',
+        'No flows: a "flows:" section naming the edges of a workflow or a data flow lets a reader follow one story through the map (Focus, on the Visibility tab).',
     });
   }
   return hints;

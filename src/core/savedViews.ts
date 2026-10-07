@@ -1,6 +1,7 @@
 // Saved views: a named arrangement of the map — collapsed groups, hidden edge
-// kinds, level of detail, focus, colouring and where the view is — kept per structure in the
-// browser, and carried in a link (`#view=…`) so that it can be sent to someone. Pure.
+// kinds, level of detail, focus (paled or filtered), colouring and where the view is — kept per
+// structure in the browser, and carried in a link (`#view=…`) so that it can be sent to someone.
+// Pure.
 
 import { isEdgeKind, type ArchitectureModel, type EdgeKind } from './model';
 import { isLodMode, isValidZoom, type LodMode } from './lod';
@@ -24,6 +25,13 @@ export interface SavedView {
   readonly lodMode: LodMode;
   readonly center: ViewCenter;
   readonly focus?: Focus;
+  /**
+   * Set when the view shows the map reduced to its focus (`FocusMode`): `center` is then a point
+   * of that reduced arrangement, and of no other. It stays set when `focus` is gone (the model
+   * no longer has the flow): that arrangement cannot be shown then, and the place is not one of
+   * the whole map. Absent for a view of the whole map.
+   */
+  readonly focusMode?: 'filter';
   /** A `ColorBy` value; checked against the structure when applied. */
   readonly colorBy?: string;
   readonly storyMode?: StoryMode;
@@ -69,8 +77,10 @@ function finite(value: unknown): number | undefined {
 
 /**
  * One view from stored or linked data, checked against `model`: unknown or non-group collapsed
- * IDs and unknown kinds are dropped, a flow focus must name a flow of the model, numbers must be
- * finite and the zoom valid. Undefined when the shape is not a view at all.
+ * IDs and unknown kinds are dropped, a flow focus must name a flow of the model, the focus mode
+ * is kept when it is `'filter'` — also when the focus was dropped, because it says what `center`
+ * is a point of —, numbers must be finite and the zoom valid. Undefined when the shape is not a
+ * view at all.
  */
 export function parseSavedView(value: unknown, model: ArchitectureModel): SavedView | undefined {
   if (!isRecord(value)) return undefined;
@@ -128,6 +138,8 @@ export function parseSavedView(value: unknown, model: ArchitectureModel): SavedV
     lodMode,
     center: { x, y, zoom },
     ...(focus ? { focus } : {}),
+    // Without its focus too: the centre is still not a place on the whole map.
+    ...(value.focusMode === 'filter' ? { focusMode: 'filter' as const } : {}),
     ...(colorBy !== undefined ? { colorBy } : {}),
     ...(storyMode !== undefined ? { storyMode } : {}),
   };

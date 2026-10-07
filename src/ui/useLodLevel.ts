@@ -15,7 +15,7 @@ import { createLodTracker, LOD_CONFIG, type LodConfig, type LodLevel } from '../
  * and the hysteresis history dropped, so the next real zoom is judged by the plain thresholds
  * (on load, after loading another file or replacing the layout, and on **Fit view**).
  *
- * A new `config` object (the thresholds were changed in the settings) starts a new tracker: the
+ * A new `config` object (the thresholds were changed on the Detail tab) starts a new tracker: the
  * current zoom is then judged by the plain thresholds of that config. Keep the object stable
  * between changes. Must be used below a `ReactFlowProvider`.
  */

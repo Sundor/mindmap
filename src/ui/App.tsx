@@ -1,5 +1,6 @@
 import { ReactFlowProvider, useReactFlow, useStoreApi } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { flushSync } from 'react-dom';
 import {
   availableIterations,
   availableStates,
@@ -7,11 +8,19 @@ import {
   buildFlow,
   buildWorkItemOverlay,
   computeLayout,
+  CONTROL_PANEL_DOCK_WIDTH,
+  CONTROL_TABS,
+  controlPanelCollapsed,
   NO_POSITION_OVERRIDES,
+  readControlPanel,
   readPositions,
+  shownControlTab,
   withNodeMoved,
   withoutRows,
+  writeControlPanel,
   writePositions,
+  type ControlPanelState,
+  type ControlTab,
   type Position,
   type PositionOverrides,
   EDGE_KINDS,
@@ -21,11 +30,9 @@ import {
   groupIds,
   highlightFlow,
   LOD_LEVELS,
-  LOD_MODES,
   lodModeToDraw,
   lodRevealZoom,
   minLodForNode,
-  NODE_LEVEL_NAMES,
   parseArchitecture,
   recentMapHint,
   recentMapLabel,
@@ -42,8 +49,6 @@ import {
   resolveSelection,
   revealZoomForNodes,
   sameSelection,
-  STORY_MODE_LABELS,
-  STORY_MODES,
   toggleEdgeKind,
   unionRect,
   usableWorkItemFilter,
@@ -66,7 +71,7 @@ import {
   type EdgeKind,
   type FlowGraph,
   type LayoutResult,
-  type LodConfig,
+  type LodLevel,
   type LodMode,
   type NodeContent,
   type Rect,
@@ -78,21 +83,30 @@ import {
   authoringHints,
   centerToViewport,
   colorByOptions,
+  filterToFocus,
   focusFlow,
+  focusMoveTiming,
   focusSet,
+  goToTiming,
   heatByWork,
+  modelShows,
   nodeColoring,
   progressByNode,
   quietEdges,
   readSavedViews,
+  rowPlacement,
+  sameFocus,
   usableColorBy,
   viewFromLinkHash,
   viewLinkHash,
   viewportToCenter,
   withoutSavedView,
+  withPlacedRows,
   withSavedView,
   writeSavedViews,
   type Focus,
+  type FocusMode,
+  type RowPlacement,
   type SavedView,
   type ViewCenter,
 } from '../core';
@@ -124,20 +138,30 @@ import {
 } from '../providers/workItemSource';
 import { afterNextPaint } from './afterNextPaint';
 import { browserStorage } from './browserStorage';
+import { whenCanvasReady } from './canvasReady';
 import { ColorLegend } from './ColorLegend';
-import { DETAIL_PANEL_WIDTH, FIT_VIEW_OPTIONS } from './constants';
+import { DETAIL_PANEL_WIDTH, fitOptions, fitRoom, fitWithRoom } from './constants';
+import { ControlPanel, type ControlTabMarks } from './ControlPanel';
+import { coveredCanvasLeft } from './coveredCanvas';
 import { DetailPanel } from './DetailPanel';
+import { DetailTab } from './DetailTab';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { EdgeLegend } from './EdgeLegend';
 import { ErrorBoundary } from './ErrorBoundary';
-import { KindFilters } from './KindFilters';
+import { FilesTab } from './FilesTab';
+import { FilterContext, type FilteredMap } from './filterContext';
+import { FocusBar } from './FocusBar';
+import { LayoutTab } from './LayoutTab';
+import { LensesTab } from './LensesTab';
 import { MapCanvas } from './MapCanvas';
 import type { NodeLenses } from './nodeLensContext';
-import { RecentList, RecentMenu } from './RecentMenu';
-import { SearchBox } from './SearchBox';
-import { SettingsPanel, type WorkItemFilterChoices } from './SettingsPanel';
+import { PanelIcon } from './PanelIcons';
+import { RecentList } from './RecentList';
+import { SearchBox, type SearchOutside } from './SearchBox';
 import { useLodLevel } from './useLodLevel';
 import { APP_VERSION } from './version';
-import { ViewsMenu } from './ViewsMenu';
+import { ViewsTab } from './ViewsTab';
+import { VisibilityTab, type WorkItemFilterChoices } from './VisibilityTab';
 import type { WorkItemCanvas } from './workItemContext';
 import '@xyflow/react/dist/style.css';
 import './styles.css';
@@ -167,23 +191,39 @@ interface WorkItemView {
   readonly content: ReadonlyMap<string, NodeContent>;
 }
 
+/** What a layout is computed for and the canvas draws: the whole model or what a focus involves. */
+interface DrawnModel {
+  readonly model: ArchitectureModel;
+  /** The focus the model is reduced to; absent for the whole model. */
+  readonly filteredTo?: Focus;
+  /** `Submodel.placedRow` of the reduced model. */
+  readonly placedRow?: ReadonlyMap<string, string>;
+}
+
 type LayoutState =
   | {
+      /** The whole model: everything but the drawing is about it. `drawn` is what is laid out. */
       readonly model: ArchitectureModel;
       readonly workItems: WorkItemView;
+      readonly drawn: DrawnModel;
       readonly layout: LayoutResult;
       /**
        * Where the view starts on this layout when it replaces another one of the same model: the
-       * place the user was looking at (`viewportKeepingPlace`).
+       * place the user was looking at (`viewportKeepingPlace`), where the whole map was before it
+       * was filtered, or the place of a saved view.
        */
       readonly startViewport?: Viewport;
+      /** The view starts fitted instead: a map reduced to another focus than the one before. */
+      readonly startFitted?: true;
       readonly error?: undefined;
     }
   | {
       readonly model: ArchitectureModel;
       readonly workItems: WorkItemView;
+      readonly drawn: DrawnModel;
       readonly layout?: undefined;
       readonly startViewport?: undefined;
+      readonly startFitted?: undefined;
       readonly error: string;
     };
 
@@ -212,11 +252,22 @@ type FlowState =
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
 const NO_KINDS_HIDDEN: ReadonlySet<EdgeKind> = new Set();
 const NO_WORK_ITEMS: readonly WorkItemSummary[] = [];
+const NO_PLACED_ROWS: ReadonlyMap<string, string> = new Map();
+/** The rows of the nodes while the map is not arranged in rows: none. */
+const NO_ROW_PLACEMENT: RowPlacement = { placedRow: new Map(), rowOf: new Map() };
 
-const STORY_MODE_HINTS: Readonly<Record<StoryMode, string>> = {
-  off: 'Show nothing about work items on the map (the detail panel still lists them).',
-  stories: 'List the stories, bugs, features and epics of each node; counts when zoomed out.',
-  tasks: 'Also list the tasks under each story (first words; the full text is in the panel).',
+/** The tabs of the control panel that can be chosen while no structure is loaded. */
+const FILES_ONLY: readonly ControlTab[] = ['files'];
+
+/**
+ * The level being drawn, as the Detail tab says it on the rail of the control panel: in short
+ * on the tab, by its name in the tooltip.
+ */
+const LOD_MARKS: Readonly<Record<LodLevel, { readonly text: string; readonly name: string }>> = {
+  domains: { text: 'Dom', name: 'Domains' },
+  components: { text: 'Comp', name: 'Components' },
+  subcomponents: { text: 'Sub', name: 'Subcomponents' },
+  detail: { text: 'All', name: 'Everything' },
 };
 
 /** Duration of the animated move that brings a search result or an edge on screen. */
@@ -239,36 +290,33 @@ function isTextEntry(target: EventTarget | null): boolean {
   );
 }
 
-const LOD_LABELS: Readonly<Record<LodMode, string>> = {
-  auto: 'Auto',
-  domains: 'Domains',
-  components: 'Components',
-  subcomponents: 'Subcomponents',
-  detail: 'Everything',
-};
-
-function percent(zoom: number): string {
-  return `${Math.round(zoom * 100)}%`;
-}
-
-/** Tooltips of the level-of-detail buttons: what each mode shows. */
-function lodHint(mode: LodMode, config: LodConfig): string {
-  switch (mode) {
-    case 'auto':
-      return `Follow the zoom: domains below ${percent(config.componentsZoom)}, components up to ${percent(config.subcomponentsZoom)}, subcomponents up to ${percent(config.detailZoom)}, everything beyond (adjustable under Settings).`;
-    case 'domains':
-      return 'Always show domains only, with the edges merged between domains.';
-    case 'components':
-      return 'Always show components; subcomponents and edge labels stay hidden.';
-    case 'subcomponents':
-      return 'Always show subcomponents and edge labels; what is inside the boxes (work items) stays hidden.';
-    case 'detail':
-      return 'Always show everything, including what is inside the boxes (work items).';
-  }
-}
-
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** True when two viewports show the same: within a pixel and a thousandth of the zoom. */
+function sameView(a: Viewport, b: Viewport): boolean {
+  return Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.zoom - b.zoom) < 0.001;
+}
+
+/** What a node, an edge or a work item is called in a notice: as its panel is headed. */
+function targetName(
+  model: ArchitectureModel,
+  target: Selection,
+  overlay: WorkItemOverlay | undefined,
+): string {
+  switch (target.type) {
+    case 'node':
+      return model.nodes.get(target.id)?.name ?? target.id;
+    case 'edge':
+      return model.edges.find((edge) => edge.id === target.id)?.label ?? target.id;
+    case 'workitem': {
+      const item = overlay?.byId.get(target.id);
+      return item ? `#${item.id} ${item.title}` : `#${target.id}`;
+    }
+    default:
+      return target.id;
+  }
 }
 
 /** Which of the two content files a picked or dropped file is. */
@@ -347,10 +395,21 @@ function Viewer() {
   const [settings, setSettings] = useState<DisplaySettings>(() =>
     readDisplaySettings(browserStorage()),
   );
+  // The settings as changed last: what a callback made in an earlier render changes one of.
+  const settingsNow = useRef(settings);
   const changeSettings = useCallback((next: DisplaySettings) => {
+    settingsNow.current = next;
     setSettings(next);
     writeDisplaySettings(browserStorage(), next);
   }, []);
+  /** Focus / Filter: how a focus is shown. Every other setting stays as it is now. */
+  const setFocusMode = useCallback(
+    (mode: FocusMode) => {
+      const now = settingsNow.current;
+      if (now.focusMode !== mode) changeSettings({ ...now, focusMode: mode });
+    },
+    [changeSettings],
+  );
   const lodConfig = settings.lod;
   const zoomLod = useLodLevel(lodConfig);
   // 'auto' follows the zoom; any other mode pins that level whatever the zoom.
@@ -711,6 +770,67 @@ function Viewer() {
   );
   const model = parsed?.model ?? undefined;
 
+  // The control panel: the tab shown and whether the body is collapsed to the rail — one choice
+  // for the viewer, kept in the browser. Until the user has chosen, the body is open while the
+  // window is wide enough for it to stand beside the canvas, and collapsed while it would lie
+  // over the canvas: the width is read again whenever the window crosses that mark.
+  const [panel, setPanel] = useState(() => readControlPanel(browserStorage()));
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const dock = window.matchMedia(`(min-width: ${CONTROL_PANEL_DOCK_WIDTH}px)`);
+    const onChange = () => setWindowWidth(window.innerWidth);
+    dock.addEventListener('change', onChange);
+    return () => dock.removeEventListener('change', onChange);
+  }, []);
+  const panelCollapsed = controlPanelCollapsed(panel, windowWidth);
+  const panelTab = shownControlTab(panel.tab, model !== undefined);
+  // Collapsed, the search box is shown beside the rail while it is in use.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // What had the cursor when the box was shown there: it gets the cursor back when the search
+  // is left by a key, since the box goes then.
+  const beforeSearch = useRef<Element | null>(null);
+  const changePanel = (next: { readonly tab: ControlTab; readonly collapsed: boolean }) => {
+    // Without a structure the panel shows Files whatever was chosen, and the chosen tab is kept.
+    const state: ControlPanelState = {
+      tab: model ? next.tab : panel.tab,
+      collapsed: next.collapsed,
+    };
+    setPanel(state);
+    writeControlPanel(browserStorage(), state);
+    if (!next.collapsed) setSearchOpen(false);
+  };
+  /**
+   * Puts the cursor in the search box, showing the box first when the body of the panel is
+   * collapsed. Returns whether there is a search box.
+   */
+  const focusSearch = useCallback((): boolean => {
+    const input = searchInput.current;
+    if (!input) return false;
+    if (panelCollapsed) {
+      if (document.activeElement !== input) beforeSearch.current = document.activeElement;
+      // Rendered at once: the box has to be on screen to take the focus.
+      flushSync(() => setSearchOpen(true));
+    }
+    input.focus();
+    input.select();
+    return true;
+  }, [panelCollapsed, setSearchOpen]);
+  /**
+   * The search was left by a key. With the body of the panel collapsed the box is no longer on
+   * screen, so the cursor goes back to where it came from — to the Search button of the rail
+   * when that was nowhere — and the Tab key goes on from there.
+   */
+  const leaveSearch = useCallback(() => {
+    if (!panelCollapsed) return;
+    const before = beforeSearch.current;
+    beforeSearch.current = null;
+    const back =
+      before instanceof HTMLElement && before !== document.body && before.isConnected
+        ? before
+        : document.querySelector<HTMLElement>('#search-open');
+    back?.focus();
+  }, [panelCollapsed]);
+
   // The work items laid over the model: filtered, mapped onto the nodes, and sized
   // for the chosen story mode. Waits for the work items, so the map is laid out once.
   const workLoad = work.status === 'done' ? work.load : undefined;
@@ -743,15 +863,25 @@ function Viewer() {
     timer = setTimeout(settle, lodMode === 'auto' ? LINES_SETTLE_MS : 0);
     return () => clearTimeout(timer);
   }, [linesWanted, linesDrawn, lodMode]);
-  const workItemView = useMemo((): WorkItemView | undefined => {
-    if (!model || work.status !== 'done') return undefined;
-    const overlay = buildWorkItemOverlay(model, workItems, workFilter);
-    return {
-      overlay,
-      mode: storyMode,
-      content: workItemContent(overlay, linesDrawn ? storyMode : 'off'),
-    };
-  }, [model, work.status, workItems, storyMode, workFilter, linesDrawn]);
+  // One overlay, over the whole model, whatever of the map is drawn.
+  const wantedOverlay = useMemo(
+    () =>
+      model && work.status === 'done'
+        ? buildWorkItemOverlay(model, workItems, workFilter)
+        : undefined,
+    [model, work.status, workItems, workFilter],
+  );
+  const workItemView = useMemo(
+    (): WorkItemView | undefined =>
+      wantedOverlay
+        ? {
+            overlay: wantedOverlay,
+            mode: storyMode,
+            content: workItemContent(wantedOverlay, linesDrawn ? storyMode : 'off'),
+          }
+        : undefined,
+    [wantedOverlay, storyMode, linesDrawn],
+  );
   const filterChoices = useMemo(
     (): WorkItemFilterChoices | undefined =>
       workItemView
@@ -765,62 +895,192 @@ function Viewer() {
     [workItems, workItemView],
   );
 
-  // Layout: once per loaded model and per work-item content (new data, another story mode or
-  // filter: an explicit action), never on zoom or collapse. When it replaces
-  // another layout of the same model, the view keeps the place the user was looking at: the node
-  // in the middle of the canvas stays there, at the same zoom.
-  const shownLayout = useRef<{ model: ArchitectureModel; layout: LayoutResult }>(undefined);
+  // The focus: what a flow or a work item involves. In Filter mode the map is reduced to it: the
+  // rest is not drawn, and what remains is laid out as a model of its own. Only laying out and
+  // drawing see the reduced model; everything said about a box, and everything kept in the
+  // browser, is about the whole one.
+  const focus = focusEdit !== undefined && focusEdit.model === model ? focusEdit.focus : undefined;
+  // What it involves, for the map that is drawn next: from the overlay the next layout is for
+  // (the overlay on screen comes with its layout, which would then depend on itself), and only
+  // for a work item — a flow involves the same whatever the work items are.
+  const focusOverlay = focus?.type === 'workitem' ? wantedOverlay : undefined;
+  const wantedFocused = useMemo(
+    () => (model ? focusSet(model, focus, focusOverlay) : undefined),
+    [model, focus, focusOverlay],
+  );
+  const wholePlacement = useMemo(() => (model ? rowPlacement(model) : undefined), [model]);
+  // One object per model: choosing a focus that pales the rest lays nothing out.
+  const whole = useMemo((): DrawnModel | undefined => (model ? { model } : undefined), [model]);
+  const wantedDrawn = useMemo((): DrawnModel | undefined => {
+    if (!model || settings.focusMode !== 'filter' || !focus || !wantedFocused) return whole;
+    // Nothing to leave out, or nothing involved: the whole map stays, paled like in Focus mode.
+    const filtered = filterToFocus(model, wantedFocused, wholePlacement);
+    return filtered
+      ? { model: filtered.model, filteredTo: focus, placedRow: filtered.placedRow }
+      : whole;
+  }, [model, whole, settings.focusMode, focus, wantedFocused, wholePlacement]);
+
+  // Layout: once per drawn model and per work-item content (new data, another story mode or
+  // filter, a map reduced to a focus: an explicit action), never on zoom or collapse. When it
+  // replaces another layout of the same model, the view keeps the place the user was looking at:
+  // the node in the middle of the canvas stays there, at the same zoom. A map reduced to a focus
+  // is fitted instead, and leaving it brings back the view the whole map had before.
+  const shownLayout = useRef<{
+    model: ArchitectureModel;
+    layout: LayoutResult;
+    filteredTo: Focus | undefined;
+  }>(undefined);
+  /** Where the whole map was when a filtered one replaced it. */
+  const viewBeforeFilter = useRef<{
+    model: ArchitectureModel;
+    key: string;
+    viewport: Viewport;
+    absolute: LayoutResult['absolute'];
+  }>(undefined);
+  /** The filtered layout that was fitted when it arrived and, once known, where that fit rested. */
+  const refit = useRef<{ key: string; viewport?: Viewport }>(undefined);
+  /**
+   * The place of a saved view that is still to be shown (see `applyView`). It waits for the map
+   * of that view only: whatever the reader chooses next for the focus or its mode drops it.
+   */
+  const pendingCentre = useRef<{
+    model: ArchitectureModel;
+    center: ViewCenter;
+    /** The view was saved on a map reduced to its focus: its place means nothing elsewhere. */
+    filtered: boolean;
+  }>(undefined);
   const { showRows } = settings;
   useEffect(() => {
-    if (!model || !workItemView) return;
+    if (!model || !workItemView || !wantedDrawn) return;
     let cancelled = false;
     const compute = async (): Promise<LayoutState> => {
+      const wanted = { model, workItems: workItemView, drawn: wantedDrawn };
       // ELK runs on the main thread and takes seconds on a large model: show the status first.
       await afterNextPaint();
-      if (cancelled) return { model, workItems: workItemView, error: 'cancelled' };
+      if (cancelled) return { ...wanted, error: 'cancelled' };
       try {
         // Rows hidden: the same model without its rows, arranged by the connections alone.
-        const computed = await computeLayout(showRows ? model : withoutRows(model), {
-          content: workItemView.content,
-        });
-        return { model, workItems: workItemView, layout: computed };
+        const computed = await computeLayout(
+          showRows ? wantedDrawn.model : withoutRows(wantedDrawn.model),
+          { content: workItemView.content },
+        );
+        return { ...wanted, layout: computed };
       } catch (err: unknown) {
-        return { model, workItems: workItemView, error: errorMessage(err) };
+        return { ...wanted, error: errorMessage(err) };
       }
     };
     void compute().then((state) => {
       if (cancelled) return;
       const previous = shownLayout.current;
-      if (state.layout && previous?.model === model && previous.layout !== state.layout) {
-        const { width, height } = flowStore.getState();
-        // A move of the view that is still under way ends with the canvas it runs on. The new
-        // canvas starts where the move was going, not at the point it happened to have reached
-        // — a zoom towards the Everything level would stop short of it, and stay there.
-        const moving = performance.now() < movingUntil.current ? movingTo.current : undefined;
-        const startViewport = viewportKeepingPlace(
-          moving ?? getViewport(),
-          { width, height },
-          previous.layout.absolute,
-          state.layout.absolute,
-        );
-        setLayoutState({ ...state, startViewport });
-      } else {
+      // A layout that failed takes no saved place.
+      if (!state.layout) pendingCentre.current = undefined;
+      // The first layout of the model, an error, or the canvas that is on screen already (only
+      // another key mounts a new one).
+      if (!state.layout || previous?.model !== model || previous.layout.key === state.layout.key) {
         setLayoutState(state);
+        return;
       }
+      const { width, height, panZoom, fitViewQueued } = flowStore.getState();
+      const size = { width, height };
+      // A move of the view that is still under way ends with the canvas it runs on. The new
+      // canvas starts where the move was going, not at the point it happened to have reached
+      // — a zoom towards the Everything level would stop short of it, and stay there.
+      const moving = performance.now() < movingUntil.current ? movingTo.current : undefined;
+      const now = moving ?? getViewport();
+      const from = previous.filteredTo;
+      const to = state.drawn.filteredTo;
+      const centre = pendingCentre.current;
+      // Where the whole map was when a filtered one replaces it, given back when Filter is left
+      // — unless its canvas had not come to its own view yet.
+      if (to && !from) {
+        const settled = panZoom !== null && width > 0 && height > 0 && !fitViewQueued;
+        viewBeforeFilter.current = settled
+          ? { model, key: previous.layout.key, viewport: now, absolute: previous.layout.absolute }
+          : undefined;
+      }
+      const before = from && !to ? viewBeforeFilter.current : undefined;
+      if (!to) viewBeforeFilter.current = undefined;
+      const fitted = refit.current;
+      refit.current = undefined;
+      let start: { startViewport?: Viewport; startFitted?: true } = {};
+      if (
+        centre?.model === model &&
+        width > 0 &&
+        height > 0 &&
+        centre.filtered === (to !== undefined)
+      ) {
+        // A saved view: its place, on the kind of map it was saved on. A place on the whole map
+        // is none on a reduced one, nor the other way round.
+        pendingCentre.current = undefined;
+        start = { startViewport: centerToViewport(centre.center, size) };
+      } else if (to && !sameFocus(from, to)) {
+        // Filter entered, or another focus while filtering: the reduced map is another map.
+        refit.current = { key: state.layout.key };
+        start = { startFitted: true };
+      } else if (to) {
+        // Filtered to the same focus, with other content. The place is kept — but a view that
+        // still rests where the fit put it is fitted again, once: the first layout after the fit
+        // may be one nobody asked for (fitting moved the zoom out of the Everything level, so the
+        // lists went), and the fit was made for a map of another size.
+        start =
+          fitted?.key === previous.layout.key && fitted.viewport && sameView(fitted.viewport, now)
+            ? { startFitted: true }
+            : {
+                startViewport: viewportKeepingPlace(
+                  now,
+                  size,
+                  previous.layout.absolute,
+                  state.layout.absolute,
+                ),
+              };
+      } else if (from) {
+        // Filter left: back to where the whole map was — the very view when it is the same
+        // arrangement, else the place that was in the middle. Without such a view (the whole map
+        // was not on screen before, or had not come to rest) the stored viewport or a fit, like
+        // on load.
+        if (before?.model === model) {
+          start = {
+            startViewport:
+              before.key === state.layout.key
+                ? before.viewport
+                : viewportKeepingPlace(
+                    before.viewport,
+                    size,
+                    before.absolute,
+                    state.layout.absolute,
+                  ),
+          };
+        }
+      } else {
+        start = {
+          startViewport: viewportKeepingPlace(
+            now,
+            size,
+            previous.layout.absolute,
+            state.layout.absolute,
+          ),
+        };
+      }
+      setLayoutState({ ...state, ...start });
     });
     return () => {
       cancelled = true;
     };
-  }, [model, workItemView, showRows, flowStore, getViewport]);
+  }, [model, workItemView, wantedDrawn, showRows, flowStore, getViewport]);
 
-  // While a layout for other work-item content is on its way, the previous one of this model
-  // stays on screen, drawn with the content it was computed for.
+  // While another layout is on its way (other work-item content, the map reduced to a focus or
+  // whole again), the previous one of this model stays on screen, drawn with what it was computed
+  // for. Everything that draws uses this state, never what is wanted next.
   const current = layoutState?.model === model ? layoutState : undefined;
   const computedLayout = current?.layout;
+  const drawn = current?.drawn;
+  const drawnModel = drawn?.model;
+  const filteredTo = drawn?.filteredTo;
 
   // Positions set by hand: while unlocked, groups and nodes can be dragged. The
   // moved positions are overrides on top of the computed layout, kept in the browser per layout
-  // (rows shown or hidden and each story mode have their own); nothing else moves.
+  // (rows shown or hidden, each story mode and each map reduced to a focus have their own);
+  // nothing else moves.
   const [positionsUnlocked, setPositionsUnlocked] = useState(false);
   const [positionEdit, setPositionEdit] = useState<{
     readonly key: string;
@@ -838,12 +1098,18 @@ function Viewer() {
     positionEdit !== undefined && positionEdit.key === positionsKey
       ? positionEdit.positions
       : storedPositions;
+  // A reduced model carries the rows its nodes have on the whole map, so its own layout places
+  // none by their connections: the marks of those the whole map places so are put back.
   const layout = useMemo(
     () =>
-      model && computedLayout
-        ? applyPositionOverrides(model, computedLayout, positions)
+      drawn && computedLayout
+        ? applyPositionOverrides(
+            drawn.model,
+            withPlacedRows(computedLayout, drawn.placedRow ?? NO_PLACED_ROWS),
+            positions,
+          )
         : computedLayout,
-    [model, computedLayout, positions],
+    [drawn, computedLayout, positions],
   );
   const changePositions = useCallback(
     (next: PositionOverrides) => {
@@ -863,19 +1129,24 @@ function Viewer() {
   );
   const resetPositions = () => changePositions(NO_POSITION_OVERRIDES);
   useEffect(() => {
-    shownLayout.current = model && layout ? { model, layout } : undefined;
-  }, [model, layout]);
-  // Another story mode, filter or work-items file: its layout is being computed.
+    shownLayout.current =
+      model && layout && drawn ? { model, layout, filteredTo: drawn.filteredTo } : undefined;
+  }, [model, layout, drawn]);
+  // Another story mode, filter or work-items file, or the map reduced to another focus (or whole
+  // again): its layout is being computed.
   const layoutPending =
-    current !== undefined && workItemView !== undefined && current.workItems !== workItemView;
+    current !== undefined &&
+    workItemView !== undefined &&
+    wantedDrawn !== undefined &&
+    (current.workItems !== workItemView || current.drawn !== wantedDrawn);
   const shownWorkItems = current?.workItems;
   const overlay = shownWorkItems?.overlay;
 
-  // The lenses. Focus: what a flow or a work item involves, from the overlay the
-  // canvas shows. Heat: the open work in each box, from the same overlay (so the filter counts).
+  // The lenses, all of the whole model: a box says the same whether or not the rest is drawn.
+  // Focus: what a flow or a work item involves, from the overlay the canvas shows. Heat: the open
+  // work in each box, from the same overlay (so the work-item filter counts).
   // Progress: done over all, from an overlay with the iteration alone — a state filter must
   // not make a box look untouched. Colour: by an attribute or a metric of the structure.
-  const focus = focusEdit !== undefined && focusEdit.model === model ? focusEdit.focus : undefined;
   const focused = useMemo(
     () => (model ? focusSet(model, focus, overlay) : undefined),
     [model, focus, overlay],
@@ -964,7 +1235,8 @@ function Viewer() {
   };
 
   // Edge-kind filter: stored per structure like the collapsed set, and applied to
-  // the model's edges *before* the rollup, so aggregates and their counts cover what is shown.
+  // the drawn model's edges *before* the rollup, so aggregates and their counts cover what is
+  // shown. It never changes the layout.
   const storedHiddenKinds = useMemo(
     () => (model ? readHiddenKinds(browserStorage(), model) : NO_KINDS_HIDDEN),
     [model],
@@ -979,18 +1251,22 @@ function Viewer() {
     }
   }, [hiddenKindsEdit]);
   const shownModel = useMemo(
-    () => (model ? withoutEdgeKinds(model, hiddenKinds) : undefined),
-    [model, hiddenKinds],
+    () => (drawnModel ? withoutEdgeKinds(drawnModel, hiddenKinds) : undefined),
+    [drawnModel, hiddenKinds],
   );
+  // Of the edges on the map: what a click on a kind hides or shows.
   const kindCounts = useMemo(() => {
     const counts: Record<EdgeKind, number> = { dataflow: 0, dependency: 0, control: 0, config: 0 };
-    for (const edge of model?.edges ?? []) counts[edge.kind] += 1;
+    for (const edge of drawnModel?.edges ?? []) counts[edge.kind] += 1;
     return counts;
-  }, [model]);
+  }, [drawnModel]);
 
   // Nodes and edges for the current view. Only visibility and the edge rollup depend on the
   // collapsed set and the level of detail: positions and sizes always come from the one layout,
-  // which the effect above computes per model alone, so zooming never lays anything out.
+  // which the effect above computes per drawn model alone, so zooming never lays anything out.
+  // The model and the layout both come from the state on screen: a model with a node the layout
+  // lacks cannot be drawn. The collapsed set is that of the whole model; groups that are not
+  // drawn have no effect.
   const flowState = useMemo((): FlowState | undefined => {
     if (!shownModel || !layout || shownModel.nodes.size === 0) return undefined;
     try {
@@ -1020,11 +1296,13 @@ function Viewer() {
   const flow = flowState?.flow;
   const renderError = current?.error ?? flowState?.error;
 
-  // Selection. A node or an edge is held in model terms, so it survives
-  // collapsing and zooming. An aggregate only means something while it is drawn: once its groups
-  // are opened (or a filter leaves one member) it becomes that single edge or nothing, for good —
-  // the state is adjusted while rendering, so it does not come back by itself later. Likewise a
-  // work item that the filter now hides (or that another file does not have) is no longer selected.
+  // Selection. A node or an edge is held in terms of the whole model, so it survives
+  // collapsing and zooming, and a map reduced to a focus that leaves it out: its panel stays
+  // open. An aggregate only means something while it is drawn: once its groups are opened (or
+  // only one member is left drawn) it becomes that single edge or nothing, for good — the state
+  // is adjusted while rendering, so it does not come back by itself later. Likewise a work item
+  // that the work-item filter now hides (or that another file does not have) is no longer
+  // selected.
   const requested =
     selectionEdit !== undefined && selectionEdit.model === model
       ? selectionEdit.selection
@@ -1043,6 +1321,18 @@ function Viewer() {
   // `revealWorkItems`). It lasts only as long as that item is the selection: left behind, it
   // would move the view much later, when such a layout arrives for another reason.
   const pendingWorkItemReveal = useRef<{ nodeId: string; itemId: number }>(undefined);
+  // Something to go to once the map that has it is on screen (see `deferGoTo`, and `goToFlow`
+  // for a flow): selected already, still to be brought on screen. Like the reveal above it lasts
+  // only while it is the selection.
+  const [pendingGoTo, setPendingGoTo] = useState<{
+    readonly model: ArchitectureModel;
+    readonly target: Selection;
+  }>();
+  // What the viewer said when it left Filter by itself, shown in the focus bar.
+  const [filterNote, setFilterNote] = useState<{
+    readonly model: ArchitectureModel;
+    readonly text: string;
+  }>();
   const select = useCallback(
     (next: Selection | undefined) => {
       if (!model) return;
@@ -1050,6 +1340,9 @@ function Viewer() {
       if (pending && !(next?.type === 'workitem' && next.id === pending.itemId)) {
         pendingWorkItemReveal.current = undefined;
       }
+      setPendingGoTo((request) =>
+        request && !sameSelection(request.target, next) ? undefined : request,
+      );
       setSelectionEdit((previous) =>
         previous?.model === model && sameSelection(previous.selection, next)
           ? previous
@@ -1061,22 +1354,69 @@ function Viewer() {
   const clearSelection = useCallback(() => select(undefined), [select]);
   const setFocus = useCallback(
     (next: Focus | undefined) => {
-      if (model) setFocusEdit({ model, focus: next });
+      if (!model) return;
+      // Another focus is another map: what was asked of the one before no longer holds, and the
+      // place of a view that was applied is not taken there.
+      setPendingGoTo(undefined);
+      setFilterNote(undefined);
+      pendingCentre.current = undefined;
+      // The same focus chosen again keeps its object: nothing that follows from it starts anew.
+      setFocusEdit((previous) =>
+        previous?.model === model && sameFocus(previous.focus, next)
+          ? previous
+          : { model, focus: next },
+      );
     },
     [model],
+  );
+  /**
+   * Navigation wins over Filter. Whether `target` cannot be shown on the map as it is or as it is
+   * about to be: it is then selected (its panel opens at once) and gone to later, on the map
+   * that has it. When that is not the map wanted now — it is filtered to a focus that leaves the
+   * target out — the mode goes back to Focus, with the focus kept, and the focus bar says so.
+   */
+  const deferGoTo = useCallback(
+    (target: Selection): boolean => {
+      if (!model) return false;
+      // Judged by the map wanted first, so that this also holds while a filtered one is on its
+      // way; then by the one on screen: the target may be on the wanted map, which has not
+      // arrived yet, and there is only to wait. Something the structure does not have is handled
+      // as on the whole map.
+      const timing = goToTiming(model, wantedDrawn?.model, drawnModel, target, wantedOverlay);
+      if (timing === 'now') return false;
+      select(target);
+      setPendingGoTo({ model, target });
+      if (timing === 'leave') {
+        // The place of a view applied just before is one of the map that is left.
+        pendingCentre.current = undefined;
+        setFocusMode('focus');
+        setFilterNote({
+          model,
+          text: `Filter switched off to show ${targetName(model, target, wantedOverlay)}.`,
+        });
+      }
+      return true;
+    },
+    [model, wantedOverlay, wantedDrawn, drawnModel, select, setFocusMode],
   );
   // Edges on demand holds at the coarse levels, where the edges are the clutter.
   const edgesQuiet =
     settings.edgesOnDemand && (lodLevel === 'domains' || lodLevel === 'components');
+  // On a map reduced to its focus every edge is one of the focus: none is held back.
+  const edgesHeldBack = edgesQuiet && !filteredTo;
   // The flow as drawn: the selected element marked and everything outside its neighbourhood
-  // dimmed; then what the focus does not involve paled; then, with edges on demand, every edge
-  // hidden but those at the hovered or selected box and those of the focus.
+  // dimmed; then what the focus does not involve paled, but for what the selection is on (gone
+  // to from the search or a panel, it has to be readable); then, with edges on demand, every edge
+  // hidden but those at the hovered or selected box and those of the focus. The selection is
+  // marked where the drawn model has it (the whole model would mark the nearest group around a
+  // node that is left out, as if the node were inside it). A map reduced to its focus has
+  // nothing to pale; a whole map with a filtered one on its way is paled meanwhile.
   const shownFlow = useMemo(() => {
-    if (!model || !flow) return flow;
-    const rendered = renderedSelection(model, flow, selection, overlay);
+    if (!model || !drawnModel || !flow) return flow;
+    const rendered = renderedSelection(drawnModel, flow, selection, overlay);
     let shown = highlightFlow(flow, rendered);
-    if (focused) shown = focusFlow(model, shown, focused);
-    if (edgesQuiet) {
+    if (focused && !filteredTo) shown = focusFlow(model, shown, focused, rendered);
+    if (edgesHeldBack) {
       const loud = new Set<string>();
       if (hoveredNode !== undefined) loud.add(hoveredNode);
       if (rendered?.type === 'node') loud.add(rendered.id);
@@ -1084,7 +1424,28 @@ function Viewer() {
       shown = quietEdges(shown, loud, focused, rendered?.type === 'edge' ? rendered.id : undefined);
     }
     return shown;
-  }, [model, flow, selection, overlay, focused, edgesQuiet, hoveredNode]);
+  }, [
+    model,
+    drawnModel,
+    filteredTo,
+    flow,
+    selection,
+    overlay,
+    focused,
+    edgesHeldBack,
+    hoveredNode,
+  ]);
+  // Fits the map into the canvas, clear of what lies over it: the body of the control panel in a
+  // narrow window, and the minimap where the map would have a box under it.
+  const fitMap = useCallback(
+    (duration?: number) => {
+      const { width, height } = flowStore.getState();
+      const plain = fitOptions(coveredCanvasLeft());
+      const fit = fitWithRoom(plain, fitRoom(plain, flow?.nodes ?? [], { width, height }));
+      void fitView(duration === undefined ? fit : { ...fit, duration });
+    },
+    [flow, flowStore, fitView],
+  );
 
   const toggleKind = (kind: EdgeKind) => {
     if (!model) return;
@@ -1104,23 +1465,34 @@ function Viewer() {
       // The canvas as it will be once the detail panel is open beside it (the panel never takes
       // more than half the row, see `.detail-panel` in styles.css).
       const { width, height } = flowStore.getState();
+      // What the control panel covers at the left of the canvas is left out: the target is
+      // brought on screen in the part beside it, as if the canvas began there.
+      const inset = coveredCanvasLeft();
       const size = {
-        width: panelOpen ? width : Math.max(width - DETAIL_PANEL_WIDTH, width / 2),
+        width: (panelOpen ? width : Math.max(width - DETAIL_PANEL_WIDTH, width / 2)) - inset,
         height,
       };
       const from = getViewport();
-      const to = viewportToReveal(from, target, size, { minZoom, ...(primary ? { primary } : {}) });
-      if (to === from) return;
+      const shifted = { ...from, x: from.x - inset };
+      const to = viewportToReveal(shifted, target, size, {
+        minZoom,
+        ...(primary ? { primary } : {}),
+      });
+      if (to === shifted) return;
+      const moved = { ...to, x: to.x + inset };
       movingUntil.current = performance.now() + REVEAL_DURATION_MS + 100;
-      movingTo.current = to;
-      void setViewport(to, { duration: REVEAL_DURATION_MS });
+      movingTo.current = moved;
+      // The view goes somewhere on purpose: it no longer rests where a fit put it.
+      refit.current = undefined;
+      void setViewport(moved, { duration: REVEAL_DURATION_MS });
     },
     [flowStore, panelOpen, getViewport, setViewport],
   );
   // Brings the given nodes on screen: opens the groups around them and, only if needed, pans
-  // and zooms — at least far enough in for the level of detail to draw them.
+  // and zooms — at least far enough in for the level of detail to draw them. Without `move` the
+  // view is left alone: for a map that is about to be replaced by one that is fitted.
   const reveal = useCallback(
-    (ids: readonly string[]) => {
+    (ids: readonly string[], options?: { readonly move?: boolean }) => {
       if (!model || !layout) return;
       changeCollapsed((collapsedNow) => {
         const next = expandToReveal(model, collapsedNow, ids);
@@ -1133,6 +1505,7 @@ function Viewer() {
       );
       const mode = needed ? lodModeToDraw(lodMode, needed, lodConfig) : lodMode;
       setLodMode(mode);
+      if (options?.move === false) return;
       const target = unionRect(
         ids.map((id) => layout.absolute.get(id)).filter((rect) => rect !== undefined),
       );
@@ -1189,63 +1562,62 @@ function Viewer() {
   useEffect(() => {
     const pending = pendingWorkItemReveal.current;
     if (!pending || !layout?.content.has(pending.nodeId)) return;
-    let cancelled = false;
-    // Once the canvas for the new layout is up: it has its pan/zoom, its size, and the viewport
-    // it starts from. Moving the view before that would be computed for a canvas of no size.
-    let tries = 0;
-    const run = () => {
-      if (cancelled || pendingWorkItemReveal.current !== pending) return;
-      const { panZoom, width, height, fitViewQueued } = flowStore.getState();
-      if (panZoom === null || !(width > 0 && height > 0) || fitViewQueued) {
-        tries += 1;
-        if (tries < 120) requestAnimationFrame(run);
-        return;
-      }
+    // Once the canvas for the new layout is up, and only if the item is still waited for.
+    return whenCanvasReady(flowStore, () => {
+      if (pendingWorkItemReveal.current !== pending) return;
       revealWorkItems(pending.nodeId, pending.itemId);
-    };
-    void afterNextPaint().then(run);
-    return () => {
-      cancelled = true;
-    };
+    });
   }, [layout, revealWorkItems, flowStore]);
   const goToNode = useCallback(
     (id: string) => {
+      if (deferGoTo({ type: 'node', id })) return;
       pendingWorkItemReveal.current = undefined;
       reveal([id]);
       select({ type: 'node', id });
     },
-    [reveal, select],
+    [deferGoTo, reveal, select],
   );
   // A work item chosen in the panel or the search: selected, and the first node that draws its
   // line is opened and zoomed to. One that is not drawn (story mode Off, a task in Stories only,
   // a line under "+k more") shows the node it belongs to; the panel says why there is no line and
   // offers the mode that draws it — the story mode itself is only ever changed by the user,
-  // because it lays the whole map out again.
+  // because it lays the whole map out again. On a filtered map it is the first such node the map
+  // has; an item none of whose nodes it has is gone to on the whole map (`deferGoTo`).
   const goToWorkItem = useCallback(
     (id: number) => {
+      if (deferGoTo({ type: 'workitem', id })) return;
       select({ type: 'workitem', id });
-      if (!shownWorkItems) return;
+      if (!shownWorkItems || !drawnModel) return;
       const place = workItemPlace(shownWorkItems.overlay, shownWorkItems.mode, id);
-      const [drawnOn] = place.drawnOn;
-      const [listedOn] = place.nodeIds;
+      const onMap = (nodeId: string) => drawnModel.nodes.has(nodeId);
+      const drawnOn = place.drawnOn.find(onMap);
+      const listedOn = place.nodeIds.find(onMap);
       if (drawnOn !== undefined) revealWorkItems(drawnOn, id);
       else if (listedOn !== undefined) reveal([listedOn]);
     },
-    [shownWorkItems, select, reveal, revealWorkItems],
+    [shownWorkItems, drawnModel, deferGoTo, select, reveal, revealWorkItems],
   );
   const selectWorkItem = useCallback((id: number) => select({ type: 'workitem', id }), [select]);
   // A flow chosen in a panel or the Focus selector: the map is focused on it, its panel opens,
-  // and what it involves is brought on screen.
+  // and what it involves is brought on screen — on the map that shows it. In Filter mode that is
+  // the map reduced to the flow, which arrives fitted: the view of the map it replaces is not
+  // moved first. A flow that leaves nothing out is shown on the whole map in either mode; when a
+  // reduced map is on screen instead, the view moves once the whole one is back.
   const goToFlow = useCallback(
     (id: string) => {
       if (!model) return;
-      const set = focusSet(model, { type: 'flow', id });
+      const next: Focus = { type: 'flow', id };
+      const set = focusSet(model, next);
       if (!set) return;
-      setFocus({ type: 'flow', id });
-      select({ type: 'flow', id });
-      reveal([...set.nodes]);
+      setFocus(next);
+      select(next);
+      const reduced =
+        settings.focusMode === 'filter' && filterToFocus(model, set, wholePlacement) !== undefined;
+      const timing = focusMoveTiming(next, reduced, filteredTo);
+      if (timing === 'wait') setPendingGoTo({ model, target: next });
+      reveal([...set.nodes], { move: timing === 'now' });
     },
-    [model, setFocus, select, reveal],
+    [model, settings.focusMode, wholePlacement, filteredTo, setFocus, select, reveal],
   );
   const chooseFocus = useCallback(
     (next: Focus | undefined) => {
@@ -1269,6 +1641,7 @@ function Viewer() {
   );
   const goToEdge = useCallback(
     (id: string) => {
+      if (deferGoTo({ type: 'edge', id })) return;
       const edge = model?.edges.find((candidate) => candidate.id === id);
       if (!model || !edge) return;
       // A hidden kind is switched back on: the edge is to be seen.
@@ -1280,8 +1653,31 @@ function Viewer() {
       reveal([edge.from, edge.to]);
       select({ type: 'edge', id });
     },
-    [model, storedHiddenKinds, reveal, select],
+    [model, storedHiddenKinds, deferGoTo, reveal, select],
   );
+  // What was asked for on a map that did not have it is gone to once the map that has it is on
+  // screen, on a canvas that can be moved.
+  useEffect(() => {
+    if (!pendingGoTo || pendingGoTo.model !== model || layoutPending || !layout) return;
+    const { target } = pendingGoTo;
+    return whenCanvasReady(flowStore, () => {
+      setPendingGoTo(undefined);
+      if (target.type === 'node') goToNode(target.id);
+      else if (target.type === 'edge') goToEdge(target.id);
+      else if (target.type === 'workitem') goToWorkItem(target.id);
+      else if (target.type === 'flow') goToFlow(target.id);
+    });
+  }, [
+    pendingGoTo,
+    model,
+    layoutPending,
+    layout,
+    flowStore,
+    goToNode,
+    goToEdge,
+    goToWorkItem,
+    goToFlow,
+  ]);
 
   // Last viewport: restored on mount instead of fitting (the canvas checks that it
   // still shows some of the map, see MapCanvas); stored whenever the view comes to rest.
@@ -1290,19 +1686,31 @@ function Viewer() {
   // A layout that replaces another one of the same model (another story mode, filter or
   // work-items file) starts from the place the user was looking at instead; should that show
   // nothing of the new map, the canvas fits the view like for any useless viewport.
+  // The stored viewport is that of the whole map: a map reduced to a focus neither starts from it
+  // (it is fitted, unless the layout effect gave it a place) nor is stored.
   const layoutKey = layout?.key;
   const startViewport = current?.startViewport;
-  const initialViewport = useMemo(
-    () =>
-      startViewport ??
-      (model && layoutKey !== undefined ? readViewport(browserStorage(), model) : undefined),
-    [model, layoutKey, startViewport],
-  );
+  const startFitted = current?.startFitted;
+  const initialViewport = useMemo(() => {
+    if (startViewport) return startViewport;
+    if (startFitted || filteredTo) return undefined;
+    return model && layoutKey !== undefined ? readViewport(browserStorage(), model) : undefined;
+  }, [model, layoutKey, startViewport, startFitted, filteredTo]);
   const storeViewport = useCallback(
     (viewport: Viewport) => {
       if (model) writeViewport(browserStorage(), model, viewport);
     },
     [model],
+  );
+  /** Where a filtered canvas reports its view instead: only the rest of its first fit is noted. */
+  const noteFilteredView = useCallback(
+    (viewport: Viewport) => {
+      const fitted = refit.current;
+      if (fitted && fitted.key === layoutKey && !fitted.viewport) {
+        refit.current = { key: fitted.key, viewport };
+      }
+    },
+    [layoutKey],
   );
 
   // Shortcuts: "/" or Ctrl+K focuses the search box, Escape clears the selection.
@@ -1313,21 +1721,18 @@ function Viewer() {
         (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k';
       const slash = event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey;
       if (ctrlK || (slash && !isTextEntry(event.target))) {
-        if (!searchInput.current) return;
-        event.preventDefault();
-        searchInput.current.focus();
-        searchInput.current.select();
+        if (focusSearch()) event.preventDefault();
       } else if (event.key === 'Escape' && !isTextEntry(event.target)) {
         clearSelection();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clearSelection]);
+  }, [clearSelection, focusSearch]);
 
   // What the diagnostics panel adds about the work items: problems of the file, tags
-  // naming unknown nodes, and — of the items the filter shows — those without a comp: tag with
-  // the tag coverage.
+  // naming unknown nodes, and — of the items the work-item filter shows — those without a comp:
+  // tag with the tag coverage.
   const workDiagnosticsName = workLoad?.source?.diagnosticsName;
   const tagWarnings = useMemo(
     () => (model ? workItemDiagnostics(model, workItems, workDiagnosticsName, workFilter) : []),
@@ -1367,16 +1772,23 @@ function Viewer() {
     setSavedViewsEdit({ model, views });
     writeSavedViews(browserStorage(), model, views);
   };
-  /** The arrangement as it is now, under `name`. */
+  /**
+   * The arrangement as it is now, under `name`. Its place is one on the map on screen, so focus
+   * and mode are those of that map: Filter and the focus it is reduced to, whatever is wanted
+   * next (another focus, or none, whose map has not arrived); on the whole map the focus that is
+   * chosen, which pales the rest there.
+   */
   const currentView = (name: string): SavedView => {
     const { width, height } = flowStore.getState();
+    const shownFocus = filteredTo ?? focus;
     return {
       name,
       collapsed: [...collapsed].sort(),
       hiddenKinds: EDGE_KINDS.filter((kind) => hiddenKinds.has(kind)),
       lodMode,
       center: viewportToCenter(getViewport(), { width, height }),
-      ...(focus ? { focus } : {}),
+      ...(shownFocus ? { focus: shownFocus } : {}),
+      ...(filteredTo ? { focusMode: 'filter' as const } : {}),
       ...(colorBy !== 'none' ? { colorBy } : {}),
       storyMode: settings.storyMode,
     };
@@ -1384,39 +1796,73 @@ function Viewer() {
   // Moving the view waits for a canvas with a size: on load, the linked view arrives before it.
   const moveViewTo = useCallback(
     (center: ViewCenter) => {
-      let tries = 0;
-      const run = () => {
-        const { panZoom, width, height, fitViewQueued } = flowStore.getState();
-        if (panZoom === null || !(width > 0 && height > 0) || fitViewQueued) {
-          tries += 1;
-          if (tries < 120) requestAnimationFrame(run);
-          return;
-        }
+      whenCanvasReady(flowStore, () => {
+        const { width, height } = flowStore.getState();
         const to = centerToViewport(center, { width, height });
         movingUntil.current = performance.now() + REVEAL_DURATION_MS + 100;
         movingTo.current = to;
         void setViewport(to, { duration: REVEAL_DURATION_MS });
-      };
-      void afterNextPaint().then(run);
+      });
     },
     [flowStore, setViewport],
   );
+  // A view that was applied: its place is still to be shown (`pendingCentre`).
+  const [viewRequest, setViewRequest] = useState(0);
   const applyView = useCallback(
     (view: SavedView) => {
       if (!model) return;
       setCollapsedEdit({ model, ids: new Set(view.collapsed) });
       setHiddenKindsEdit({ model, kinds: new Set(view.hiddenKinds) });
       setLodMode(view.lodMode);
-      setFocusEdit({ model, focus: view.focus });
+      // The view says what is focused and how: what was asked of the map before no longer holds.
+      setPendingGoTo(undefined);
+      setFilterNote(undefined);
+      setFocusEdit((previous) =>
+        previous?.model === model && sameFocus(previous.focus, view.focus)
+          ? previous
+          : { model, focus: view.focus },
+      );
       const nextColor = view.colorBy === undefined ? 'none' : usableColorBy(model, view.colorBy);
       const nextStory = view.storyMode ?? settings.storyMode;
-      if (nextColor !== settings.colorBy || nextStory !== settings.storyMode) {
-        changeSettings({ ...settings, colorBy: nextColor, storyMode: nextStory });
+      // A view with a focus says how it is shown: one without the mode was saved on the whole
+      // map, and its place only means something there. Without a focus the mode is left alone.
+      const nextMode = view.focus ? (view.focusMode ?? 'focus') : settings.focusMode;
+      if (
+        nextColor !== settings.colorBy ||
+        nextStory !== settings.storyMode ||
+        nextMode !== settings.focusMode
+      ) {
+        changeSettings({
+          ...settings,
+          colorBy: nextColor,
+          storyMode: nextStory,
+          focusMode: nextMode,
+        });
       }
-      moveViewTo(view.center);
+      // The place: taken by the layout that arrives for the view as the place it starts from —
+      // or, when the view needs no other layout, moved to (the effect below). A view saved on a
+      // filtered map says so even when its focus is gone: its place is none on the whole map.
+      pendingCentre.current = {
+        model,
+        center: view.center,
+        filtered: view.focusMode === 'filter',
+      };
+      setViewRequest((count) => count + 1);
     },
-    [model, settings, changeSettings, moveViewTo],
+    [model, settings, changeSettings],
   );
+  useEffect(() => {
+    const centre = pendingCentre.current;
+    if (!centre || centre.model !== model || layoutPending || !layout) return;
+    pendingCentre.current = undefined;
+    // The view goes somewhere on purpose: it no longer rests where a fit put it.
+    refit.current = undefined;
+    // Saved on a map reduced to its focus, which cannot be shown (the focus is not among the
+    // loaded data, is gone from the structure, or leaves nothing out): the place is one of
+    // another arrangement.
+    if (centre.filtered && !filteredTo) fitMap();
+    else moveViewTo(centre.center);
+  }, [viewRequest, layoutPending, layout, filteredTo, model, moveViewTo, fitMap]);
   const copyViewLink = async (view: SavedView | undefined): Promise<boolean> => {
     const hash = viewLinkHash(view ?? currentView(''));
     const url = `${window.location.href.split('#')[0]}${hash}`;
@@ -1457,6 +1903,95 @@ function Viewer() {
     return item ? `#${item.id} ${item.title}` : `#${focus.id}`;
   };
 
+  // Focus / Filter: the switch is the remembered choice of how a focus is shown, with or without
+  // one. What it means for the map is said beside it, of the map that is on screen.
+  const filterOn = settings.focusMode === 'filter';
+  const switchFilter = (on: boolean) => {
+    // The reader's own choice: nothing waits for another map any more — no place of a view
+    // either —, and nothing is left to say.
+    setPendingGoTo(undefined);
+    setFilterNote(undefined);
+    pendingCentre.current = undefined;
+    setFocusMode(on ? 'filter' : 'focus');
+  };
+  // A focus that Filter cannot reduce the map to: it involves every node, so there is nothing to
+  // leave out, or none (or is not among the loaded data), so there would be nothing to draw.
+  const focusInvolvesNothing = wantedFocused === undefined || wantedFocused.nodes.size === 0;
+  const filterHint = (): string => {
+    if (!filterOn) return 'The rest of the map is paled.';
+    const rule = 'The rest is not drawn and what remains is laid out again.';
+    if (!focus) return `${rule} Applies once a focus is chosen.`;
+    if (model && flow && drawnModel && filteredTo) {
+      return `Not drawn: ${model.nodes.size - drawnModel.nodes.size} of ${model.nodes.size} nodes.`;
+    }
+    // On its way: one line, like the texts before and after it, so that nothing below it moves.
+    if (flow && layoutPending) return 'The map is being laid out again…';
+    if (!flow) return rule;
+    return focusInvolvesNothing
+      ? 'The focus involves nothing on the map: the whole map is shown, paled.'
+      : 'The focus leaves nothing out: the whole map is shown.';
+  };
+  const focusBarState = (): string | undefined => {
+    if (!filterOn || !flow) return undefined;
+    if (filteredTo) {
+      return sameFocus(focus, filteredTo) ? ' · the rest of the map is not drawn' : undefined;
+    }
+    if (layoutPending) return undefined;
+    return focusInvolvesNothing
+      ? ' · nothing of it is on the map: the whole map is shown, paled'
+      : ' · nothing to leave out: the whole map is shown';
+  };
+  // The search and the detail panel list the whole model. What the filtered map on screen leaves
+  // out is marked there before it is clicked: going to it switches Filter off.
+  const filteredMap = useMemo((): FilteredMap | undefined => {
+    if (!filteredTo || !drawnModel) return undefined;
+    const edgeIds = new Set(drawnModel.edges.map((edge) => edge.id));
+    return {
+      showsNode: (id) => drawnModel.nodes.has(id),
+      showsEdge: (id) => edgeIds.has(id),
+    };
+  }, [filteredTo, drawnModel]);
+  const searchOutside = useMemo(
+    (): SearchOutside | undefined =>
+      filteredTo && drawnModel
+        ? {
+            node: (id) => !drawnModel.nodes.has(id),
+            workItem: (id) => !modelShows(drawnModel, { type: 'workitem', id }, overlay),
+          }
+        : undefined,
+    [filteredTo, drawnModel, overlay],
+  );
+  // The selected thing itself may be one of those (selected before the map was filtered): its
+  // panel stays, says so and offers the way to it — unless the map that has it is on its way
+  // already (Filter was just left, or another focus chosen).
+  const selectionOutside =
+    selection !== undefined &&
+    filteredTo !== undefined &&
+    drawnModel !== undefined &&
+    !modelShows(drawnModel, selection, overlay) &&
+    wantedDrawn !== undefined &&
+    !modelShows(wantedDrawn.model, selection, wantedOverlay);
+  const showSelectionOnMap = () => {
+    if (selection?.type === 'node') goToNode(selection.id);
+    else if (selection?.type === 'edge') goToEdge(selection.id);
+    else if (selection?.type === 'workitem') goToWorkItem(selection.id);
+  };
+
+  const mapDrawn = flow !== undefined;
+  // What the tabs of the control panel say on the rail, where the controls themselves may be
+  // out of sight: the level drawn, that something is hidden or paled, how many views are kept.
+  const fileNames = [source?.name, workLoad?.source?.name].filter((name) => name !== undefined);
+  const marks: ControlTabMarks = {
+    level: mapDrawn ? { ...LOD_MARKS[lodLevel], pinned: lodMode !== 'auto' } : undefined,
+    hiding:
+      hiddenKinds.size > 0 ||
+      focus !== undefined ||
+      (mapDrawn && edgesQuiet) ||
+      (filterChoices !== undefined && filterChoices.shown < filterChoices.total),
+    views: savedViews.length,
+    files: fileNames.length > 0 ? fileNames.join(', ') : undefined,
+  };
+
   return (
     <div
       className="app"
@@ -1469,7 +2004,11 @@ function Viewer() {
       data-lod-mode={flow ? lodMode : undefined}
       data-zoom-lod={flow ? zoomLod : undefined}
       data-lines-laid-out={
-        flow ? linesDrawn === linesWanted && current?.workItems === workItemView : undefined
+        flow
+          ? linesDrawn === linesWanted &&
+            current?.workItems === workItemView &&
+            current?.drawn === wantedDrawn
+          : undefined
       }
       data-compact-collapsed={settings.compactCollapsed}
       data-show-rows={settings.showRows}
@@ -1478,453 +2017,365 @@ function Viewer() {
       data-selection={selection ? `${selection.type}:${selection.id}` : undefined}
       data-hidden-kinds={EDGE_KINDS.filter((kind) => hiddenKinds.has(kind)).join(' ')}
       data-focus={focus ? `${focus.type}:${focus.id}` : undefined}
+      data-focus-mode={model ? settings.focusMode : undefined}
+      data-filtered={flow && filteredTo ? `${filteredTo.type}:${filteredTo.id}` : undefined}
+      data-drawn-nodes={flow ? drawnModel?.nodes.size : undefined}
+      data-drawn-edges={flow ? drawnModel?.edges.length : undefined}
+      data-layout-pending={flow ? layoutPending : undefined}
       data-color-by={flow ? colorBy : undefined}
       data-heat={flow ? settings.heat : undefined}
       data-progress={flow ? settings.progress : undefined}
       data-edges-on-demand={flow ? settings.edgesOnDemand : undefined}
       data-edges-quiet={flow ? edgesQuiet : undefined}
+      data-panel-tab={panelTab}
+      data-panel-collapsed={panelCollapsed}
     >
-      <header className="toolbar">
-        <h1>Architecture Map</h1>
-        <span
-          id="app-version"
-          className="app-version"
-          title={`Architecture Map, version ${APP_VERSION}`}
-        >
-          {APP_VERSION}
-        </span>
-        {source && (
-          <span id="source-name" className="source-name" data-origin={source.origin}>
-            {source.name}
-          </span>
-        )}
-        {model && <ModelSummary model={model} />}
-        {workLoad?.source && (
-          <span
-            id="workitems-source"
-            className="source-name"
-            data-origin={workLoad.source.origin}
-            title={`Work items from ${workLoad.source.name}`}
-          >
-            {workLoad.source.name}
-          </span>
-        )}
-        {workLoad?.source && (
-          <span
-            id="workitems-summary"
-            className="model-summary"
-            data-origin={workLoad.source.origin}
-            data-items={workItems.length}
-            data-coverage={coverage?.percent}
-            data-covered={coverage?.total}
-            title={`Work items from ${workLoad.source.name}`}
-          >
-            {plural(workItems.length, 'work item')}
-            {coverage && coverage.hidden > 0 ? ` (${coverage.total} shown)` : ''}
-            {coverage && coverage.total > 0 ? ` · ${coverage.percent}% tagged` : ''}
-          </span>
-        )}
-        {/* With the names of the files: reading them again, and the maps opened before. */}
-        {currentEntry && (
-          <button
-            type="button"
-            id="reload-files"
-            className="reload-files"
-            title={`Read ${recentMapLabel(currentEntry)} again from the disk`}
-            onClick={() => void openRecent(currentEntry, true)}
-          >
-            ↻ Reload
-          </button>
-        )}
-        {recents.length > 0 && (
-          <RecentMenu
-            recents={recents}
-            current={currentRecent}
-            onOpen={openRecentById}
-            onForget={forgetRecent}
-          />
-        )}
-        <span className="toolbar-spacer" />
-        {model && flow && (
-          <SearchBox
-            key={loadId}
-            model={model}
-            workItems={overlay?.shown}
-            onChoose={goToNode}
-            onChooseWorkItem={goToWorkItem}
-            inputRef={searchInput}
-          />
-        )}
-        {flow && (
-          <KindFilters hiddenKinds={hiddenKinds} counts={kindCounts} onToggle={toggleKind} />
-        )}
-        {flow && (
-          <span
-            id="lod-indicator"
-            className="lod-indicator"
-            role="group"
-            aria-label="Level of detail"
-            data-lod={lodLevel}
-            data-lod-mode={lodMode}
-          >
-            <span className="lod-indicator-caption">Detail</span>
-            {LOD_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`lod-step${mode === lodLevel ? ' lod-step-current' : ''}`}
-                data-lod-option={mode}
-                aria-pressed={mode === lodMode}
-                aria-current={mode === lodLevel ? 'true' : undefined}
-                title={lodHint(mode, lodConfig)}
-                onClick={() => chooseLod(mode)}
-              >
-                {LOD_LABELS[mode]}
-              </button>
-            ))}
-            {collapsed.size > 0 && (
-              <span
-                id="collapsed-note"
-                className="lod-collapsed-note"
-                title="Groups collapsed by hand stay closed at every level of detail. Expand all opens them."
-              >
-                {collapsed.size} collapsed by hand
-              </span>
-            )}
-          </span>
-        )}
-        {flow && workItems.length > 0 && (
-          <span
-            id="story-mode"
-            className="lod-indicator"
-            role="group"
-            aria-label="Work items on the map"
-            data-story-mode={storyMode}
-          >
-            <span className="lod-indicator-caption">Stories</span>
-            {STORY_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`lod-step${mode === storyMode ? ' lod-step-current' : ''}`}
-                data-story-option={mode}
-                aria-pressed={mode === storyMode}
-                title={STORY_MODE_HINTS[mode]}
-                onClick={() => chooseStoryMode(mode)}
-              >
-                {STORY_MODE_LABELS[mode]}
-              </button>
-            ))}
-          </span>
-        )}
-        {flow && model && (model.flows.length > 0 || workItems.length > 0) && (
-          <label
-            className="toolbar-select"
-            id="focus-control"
-            title="Focus the map on a flow, an epic or a feature: what it involves stays lit, the rest is paled"
-          >
-            <span className="lod-indicator-caption">Focus</span>
-            <select
-              id="focus-select"
-              value={focus ? `${focus.type}:${focus.id}` : ''}
-              onChange={(event) => {
-                const [type, ...rest] = event.target.value.split(':');
-                const id = rest.join(':');
-                if (type === 'flow') chooseFocus({ type: 'flow', id });
-                else if (type === 'workitem') chooseFocus({ type: 'workitem', id: Number(id) });
-                else chooseFocus(undefined);
-              }}
+      {/* The heading of the page: the one in the head of the control panel goes with its body. */}
+      {panelCollapsed && <h1 className="visually-hidden">Architecture Map</h1>}
+      <ControlPanel
+        tab={panelTab}
+        collapsed={panelCollapsed}
+        available={model ? CONTROL_TABS : FILES_ONLY}
+        onChange={changePanel}
+        marks={marks}
+        head={
+          <>
+            <h1>Architecture Map</h1>
+            <span
+              id="app-version"
+              className="app-version"
+              title={`Architecture Map, version ${APP_VERSION}`}
             >
-              <option value="">None</option>
-              {(['workflow', 'dataflow'] as const).map((kind) => {
-                const flows = model.flows.filter((f) => f.kind === kind);
-                return flows.length > 0 ? (
-                  <optgroup key={kind} label={kind === 'dataflow' ? 'Data flows' : 'Workflows'}>
-                    {flows.map((f) => (
-                      <option key={f.id} value={`flow:${f.id}`}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null;
-              })}
-              {(['Epic', 'Feature'] as const).map((type) => {
-                const items = (overlay?.shown ?? []).filter((item) => item.type === type);
-                return items.length > 0 ? (
-                  <optgroup key={type} label={`${type}s`}>
-                    {items.map((item) => (
-                      <option key={item.id} value={`workitem:${item.id}`}>
-                        #{item.id} {item.title}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null;
-              })}
-              {focus?.type === 'workitem' &&
-                !(overlay?.shown ?? []).some(
-                  (item) =>
-                    item.id === focus.id && (item.type === 'Epic' || item.type === 'Feature'),
-                ) && <option value={`workitem:${focus.id}`}>{focusName()}</option>}
-            </select>
-          </label>
-        )}
-        {flow && (
-          <SettingsPanel
-            settings={settings}
-            onChange={changeSettings}
-            workItems={filterChoices}
-            colorChoices={colorChoices}
-          />
-        )}
-        {flow && (
-          <ViewsMenu
-            views={savedViews}
-            onSave={(name) => changeSavedViews(withSavedView(savedViews, currentView(name)))}
-            onApply={applyView}
-            onDelete={(name) => changeSavedViews(withoutSavedView(savedViews, name))}
-            onCopyLink={copyViewLink}
-          />
-        )}
-        <button
-          type="button"
-          id="open-yaml"
-          title="Open a structure file (architecture.yaml) — together with its work items (workitems.json) if you choose both; files can also be dropped on the page"
-          onClick={() => pick('map')}
-        >
-          Open YAML…
-        </button>
-        <button
-          type="button"
-          id="open-workitems"
-          title="Load a work-items file (workitems.json); a .json file can also be dropped on the page"
-          onClick={() => pick('workitems')}
-        >
-          Open work items…
-        </button>
-        <button
-          type="button"
-          id="unlock-positions"
-          disabled={!flow}
-          aria-pressed={positionsUnlocked}
-          title={
-            positionsUnlocked
-              ? 'Positions are unlocked: drag groups and nodes to move them. Click to lock.'
-              : 'Positions are locked. Click to unlock and move groups and nodes by hand.'
-          }
-          onClick={() => setPositionsUnlocked((unlocked) => !unlocked)}
-        >
-          {positionsUnlocked ? 'Lock positions' : 'Unlock positions'}
-        </button>
-        <button
-          type="button"
-          id="reset-positions"
-          disabled={!flow || positions.size === 0}
-          title="Put every node moved by hand back where the layout placed it"
-          onClick={resetPositions}
-        >
-          Reset positions
-        </button>
-        <button
-          type="button"
-          id="collapse-all"
-          disabled={!flow || groups.length === 0 || allCollapsed}
-          onClick={collapseAll}
-        >
-          Collapse all
-        </button>
-        <button
-          type="button"
-          id="expand-all"
-          disabled={!flow || collapsed.size === 0}
-          onClick={expandAll}
-        >
-          Expand all
-        </button>
-        <button
-          type="button"
-          id="fit-view"
-          disabled={!flow}
-          onClick={() => void fitView({ ...FIT_VIEW_OPTIONS, duration: 200 })}
-        >
-          Fit view
-        </button>
-        <input
-          ref={fileInput}
-          id="yaml-file"
-          type="file"
-          accept=".yaml,.yml"
-          hidden
-          onChange={onPick('structure')}
-        />
-        <input
-          ref={workItemInput}
-          id="workitems-file"
-          type="file"
-          accept=".json"
-          hidden
-          onChange={onPick('workitems')}
-        />
-      </header>
-
-      {fileError !== undefined && (
-        <p id="file-error" className="notice notice-error" role="alert">
-          {fileError}
-        </p>
-      )}
-      {focus && flow && (
-        <p id="focus-bar" className="notice notice-focus" role="status">
-          Focus: <strong>{focusName() ?? '—'}</strong>
-          {focused
-            ? ` · ${plural(focused.nodes.size, 'node')} · ${plural(focused.edges.size, 'edge')}`
-            : ' · not among the loaded data'}
-          {focus.type === 'flow' && !sameSelection(selection, { type: 'flow', id: focus.id }) && (
-            <button type="button" id="focus-show" onClick={() => select(focus)}>
-              Show
-            </button>
-          )}
-          {focus.type === 'workitem' &&
-            !sameSelection(selection, { type: 'workitem', id: focus.id }) && (
-              <button type="button" id="focus-show" onClick={() => goToWorkItem(focus.id)}>
-                Show
-              </button>
-            )}
-          <button type="button" id="focus-clear" onClick={() => setFocus(undefined)}>
-            Clear focus
-          </button>
-        </p>
-      )}
-
-      <main className="app-main">
-        {load.status === 'loading' && (
-          <p id="load-status" className="status">
-            Loading architecture…
-          </p>
-        )}
-        {load.status === 'empty' && (
-          <div id="empty-state" className="empty-state">
-            <h2>No architecture loaded</h2>
-            <p id="load-status">{load.reason}</p>
-            {recents.length > 0 && (
-              <div className="recent-start">
-                <h3>Open again</h3>
-                <RecentList
-                  id="recent-start"
-                  recents={recents}
-                  onOpen={openRecentById}
-                  onForget={forgetRecent}
-                />
+              {APP_VERSION}
+            </span>
+            {(source || workLoad?.source) && (
+              <div className="cp-files">
+                {source && (
+                  <span
+                    id="source-name"
+                    className="source-name"
+                    data-origin={source.origin}
+                    title={`Structure from ${source.name}`}
+                  >
+                    {source.name}
+                  </span>
+                )}
+                {workLoad?.source && (
+                  <span
+                    id="workitems-source"
+                    className="source-name"
+                    data-origin={workLoad.source.origin}
+                    title={`Work items from ${workLoad.source.name}`}
+                  >
+                    {workLoad.source.name}
+                  </span>
+                )}
               </div>
             )}
-            <p>
-              <button type="button" className="primary" onClick={() => pick('map')}>
-                Open YAML…
-              </button>
-            </p>
-            <p className="hint">
-              or drop an architecture.yaml file — with its workitems.json — anywhere on this page.
-            </p>
-          </div>
-        )}
-        {parsed && !model && (
-          <p id="load-status" className="status">
-            {source?.name} has errors — see the diagnostics below.
-          </p>
-        )}
-        {isEmptyModel && (
-          <p id="load-status" className="status">
-            {source?.name} contains no domains — nothing to draw.
-          </p>
-        )}
-        {model && !isEmptyModel && !current && (
-          <p id="layout-status" className="status">
-            Computing layout…
-          </p>
-        )}
-        {layoutPending && renderError === undefined && (
-          <p id="layout-status" className="status layout-pending" role="status">
-            Computing layout…
-          </p>
-        )}
-        {renderError !== undefined && (
-          <p id="layout-status" className="status notice-error" role="alert">
-            Layout failed: {renderError}
-          </p>
-        )}
-        {model && flow && shownFlow && layout && (
-          <div className="map-row">
-            <MapCanvas
-              key={`${loadId}:${layout.key}`}
-              flow={shownFlow}
-              onToggleCollapse={toggleCollapsed}
-              workItemCanvas={workItemCanvas}
-              onSelect={select}
-              initialViewport={initialViewport}
-              contentBounds={layout.bounds}
-              onViewportSettled={storeViewport}
-              positionsUnlocked={positionsUnlocked}
-              onNodeMoved={moveNode}
-              lenses={lenses}
-              onHoverNode={edgesQuiet ? setHoveredNode : undefined}
+          </>
+        }
+        search={
+          model && flow ? (
+            <SearchBox
+              key={loadId}
+              model={model}
+              workItems={overlay?.shown}
+              onChoose={goToNode}
+              onChooseWorkItem={goToWorkItem}
+              inputRef={searchInput}
+              outside={searchOutside}
+              onLeave={leaveSearch}
             />
-            <ColorLegend coloring={coloring} />
-            {selection && (
-              <DetailPanel
-                model={model}
-                layout={layout}
-                selection={selection}
-                edges={flow.edges}
-                hiddenKinds={hiddenKinds}
-                onGoToNode={goToNode}
-                onGoToEdge={goToEdge}
-                overlay={overlay}
-                storyMode={shownWorkItems?.mode ?? 'off'}
-                onGoToWorkItem={goToWorkItem}
-                onChooseStoryMode={chooseStoryMode}
-                onGoToFlow={goToFlow}
-                focus={focus}
-                onFocus={setFocus}
-                heat={heat}
-                progress={progress}
-                onClose={clearSelection}
-              />
+          ) : undefined
+        }
+        searchOpen={searchOpen}
+        onSearchOpenChange={setSearchOpen}
+        onSearch={focusSearch}
+        actions={
+          <>
+            {/* Always at hand, whatever the panel shows: the files read again, the whole map. */}
+            {currentEntry && (
+              <button
+                type="button"
+                id="reload-files"
+                className="cp-rail-button"
+                title={`Read ${recentMapLabel(currentEntry)} again from the disk`}
+                onClick={() => void openRecent(currentEntry, true)}
+              >
+                <PanelIcon name="reload" />
+                <span className="cp-tab-label">Reload</span>
+              </button>
             )}
-          </div>
+            <button
+              type="button"
+              id="fit-view"
+              className="cp-rail-button"
+              disabled={!flow}
+              title="Fit the whole map into the view"
+              onClick={() => fitMap(200)}
+            >
+              <PanelIcon name="fit" />
+              <span className="cp-tab-label">Fit view</span>
+            </button>
+          </>
+        }
+        panels={{
+          detail: (
+            <DetailTab
+              drawn={mapDrawn}
+              lodMode={lodMode}
+              lodLevel={lodLevel}
+              lodConfig={lodConfig}
+              onChooseLod={chooseLod}
+              collapsedCount={collapsed.size}
+              canCollapseAll={groups.length > 0 && !allCollapsed}
+              onCollapseAll={collapseAll}
+              onExpandAll={expandAll}
+              settings={settings}
+              onChange={changeSettings}
+              hasWorkItems={workItems.length > 0}
+              onChooseStoryMode={chooseStoryMode}
+            />
+          ),
+          visibility: (
+            <VisibilityTab
+              drawn={mapDrawn}
+              focusChooser={
+                // Offered as soon as there is a structure, not only once it is drawn.
+                model && (model.flows.length > 0 || workItems.length > 0)
+                  ? {
+                      flows: model.flows,
+                      items: overlay?.shown ?? NO_WORK_ITEMS,
+                      focus,
+                      focusName: focusName(),
+                      onChoose: chooseFocus,
+                    }
+                  : undefined
+              }
+              filterOn={filterOn}
+              onFilterChange={switchFilter}
+              filterHint={filterHint()}
+              hiddenKinds={hiddenKinds}
+              kindCounts={kindCounts}
+              onToggleKind={toggleKind}
+              settings={settings}
+              onChange={changeSettings}
+              workItems={filterChoices}
+            />
+          ),
+          lenses: (
+            <LensesTab
+              drawn={mapDrawn}
+              settings={settings}
+              onChange={changeSettings}
+              colorChoices={colorChoices}
+              hasWorkItems={workItems.length > 0}
+            />
+          ),
+          layout: (
+            <LayoutTab
+              drawn={mapDrawn}
+              settings={settings}
+              onChange={changeSettings}
+              positionsUnlocked={positionsUnlocked}
+              onToggleUnlocked={() => setPositionsUnlocked((unlocked) => !unlocked)}
+              movedCount={positions.size}
+              onResetPositions={resetPositions}
+            />
+          ),
+          views: (
+            <ViewsTab
+              drawn={mapDrawn}
+              active={panelTab === 'views' && !panelCollapsed}
+              views={savedViews}
+              onSave={(name) => changeSavedViews(withSavedView(savedViews, currentView(name)))}
+              onApply={applyView}
+              onDelete={(name) => changeSavedViews(withoutSavedView(savedViews, name))}
+              onCopyLink={copyViewLink}
+            />
+          ),
+          files: (
+            <FilesTab
+              model={model}
+              workItems={
+                workLoad?.source
+                  ? {
+                      origin: workLoad.source.origin,
+                      name: workLoad.source.name,
+                      count: workItems.length,
+                      coverage,
+                    }
+                  : undefined
+              }
+              onOpen={pick}
+              recents={recents}
+              currentRecent={currentRecent}
+              onOpenRecent={openRecentById}
+              onForgetRecent={forgetRecent}
+            />
+          ),
+        }}
+      />
+      <div className="app-column">
+        {fileError !== undefined && (
+          <p id="file-error" className="notice notice-error" role="alert">
+            {fileError}
+          </p>
         )}
-        {dragging && (
-          <div id="drop-overlay" className="drop-overlay">
-            Drop a YAML file (structure) or a JSON file (work items) to load it
-          </div>
+        {focus && model && (
+          <FocusBar
+            filterOn={filterOn}
+            onFilterChange={switchFilter}
+            name={focusName() ?? '—'}
+            counts={
+              focused
+                ? ` · ${plural(focused.nodes.size, 'node')} · ${plural(focused.edges.size, 'edge')}`
+                : ' · not among the loaded data'
+            }
+            state={focusBarState()}
+            note={filterNote?.model === model ? filterNote.text : undefined}
+            showVisible={!sameSelection(selection, focus)}
+            onShow={() => (focus.type === 'flow' ? select(focus) : goToWorkItem(focus.id))}
+            onClear={() => setFocus(undefined)}
+          />
         )}
-      </main>
 
-      {parsed && (
-        <DiagnosticsPanel
-          key={`${loadId}:${work.status === 'done' ? work.loadId : 'loading'}`}
-          errors={parsed.errors}
-          warnings={parsed.warnings}
-          workItems={workDiagnostics}
-          hints={hints}
-        />
+        <main className="app-main">
+          {load.status === 'loading' && (
+            <p id="load-status" className="status">
+              Loading architecture…
+            </p>
+          )}
+          {load.status === 'empty' && (
+            <div id="empty-state" className="empty-state">
+              <h2>No architecture loaded</h2>
+              <p id="load-status">{load.reason}</p>
+              {recents.length > 0 && (
+                <div className="recent-start">
+                  <h3>Open again</h3>
+                  <RecentList
+                    id="recent-start"
+                    recents={recents}
+                    onOpen={openRecentById}
+                    onForget={forgetRecent}
+                  />
+                </div>
+              )}
+              <p>
+                <button type="button" className="primary" onClick={() => pick('map')}>
+                  Open YAML…
+                </button>
+              </p>
+              <p className="hint">
+                or drop an architecture.yaml file — with its workitems.json — anywhere on this page.
+              </p>
+            </div>
+          )}
+          {parsed && !model && (
+            <p id="load-status" className="status">
+              {source?.name} has errors — see the diagnostics below.
+            </p>
+          )}
+          {isEmptyModel && (
+            <p id="load-status" className="status">
+              {source?.name} contains no domains — nothing to draw.
+            </p>
+          )}
+          {model && !isEmptyModel && !current && (
+            <p id="layout-status" className="status">
+              Computing layout…
+            </p>
+          )}
+          {layoutPending && renderError === undefined && (
+            <p id="layout-status" className="status layout-pending" role="status">
+              Computing layout…
+            </p>
+          )}
+          {renderError !== undefined && (
+            <p id="layout-status" className="status notice-error" role="alert">
+              Layout failed: {renderError}
+            </p>
+          )}
+          {model && flow && shownFlow && layout && (
+            <div className="map-row">
+              <MapCanvas
+                key={`${loadId}:${layout.key}`}
+                flow={shownFlow}
+                onToggleCollapse={toggleCollapsed}
+                workItemCanvas={workItemCanvas}
+                onSelect={select}
+                initialViewport={initialViewport}
+                contentBounds={layout.bounds}
+                onViewportSettled={filteredTo ? noteFilteredView : storeViewport}
+                positionsUnlocked={positionsUnlocked}
+                onNodeMoved={moveNode}
+                lenses={lenses}
+                onHoverNode={edgesHeldBack ? setHoveredNode : undefined}
+              />
+              <div className="map-legends">
+                <EdgeLegend hiddenKinds={hiddenKinds} />
+                <ColorLegend coloring={coloring} />
+              </div>
+              {selection && (
+                <FilterContext.Provider value={filteredMap}>
+                  <DetailPanel
+                    model={model}
+                    rows={showRows && wholePlacement ? wholePlacement : NO_ROW_PLACEMENT}
+                    selection={selection}
+                    edges={flow.edges}
+                    hiddenKinds={hiddenKinds}
+                    onGoToNode={goToNode}
+                    onGoToEdge={goToEdge}
+                    overlay={overlay}
+                    storyMode={shownWorkItems?.mode ?? 'off'}
+                    onGoToWorkItem={goToWorkItem}
+                    onChooseStoryMode={chooseStoryMode}
+                    onGoToFlow={goToFlow}
+                    focus={focus}
+                    onFocus={setFocus}
+                    heat={heat}
+                    progress={progress}
+                    outside={selectionOutside}
+                    onShowOnMap={showSelectionOnMap}
+                    onClose={clearSelection}
+                  />
+                </FilterContext.Provider>
+              )}
+            </div>
+          )}
+        </main>
+
+        {parsed && (
+          <DiagnosticsPanel
+            key={`${loadId}:${work.status === 'done' ? work.loadId : 'loading'}`}
+            errors={parsed.errors}
+            warnings={parsed.warnings}
+            workItems={workDiagnostics}
+            hints={hints}
+          />
+        )}
+      </div>
+      <input
+        ref={fileInput}
+        id="yaml-file"
+        type="file"
+        accept=".yaml,.yml"
+        hidden
+        onChange={onPick('structure')}
+      />
+      <input
+        ref={workItemInput}
+        id="workitems-file"
+        type="file"
+        accept=".json"
+        hidden
+        onChange={onPick('workitems')}
+      />
+      {dragging && (
+        <div id="drop-overlay" className="drop-overlay">
+          Drop a YAML file (structure) or a JSON file (work items) to load it
+        </div>
       )}
     </div>
-  );
-}
-
-function ModelSummary({ model }: { model: ArchitectureModel }) {
-  const counts = [0, 0, 0];
-  for (const node of model.nodes.values()) counts[node.level] = (counts[node.level] ?? 0) + 1;
-  const parts = NODE_LEVEL_NAMES.map((name, level) => plural(counts[level] ?? 0, name));
-  parts.push(plural(model.edges.length, 'edge'));
-  if (model.rows.length > 0) parts.push(plural(model.rows.length, 'row'));
-  return (
-    <span
-      id="model-summary"
-      className="model-summary"
-      data-nodes={model.nodes.size}
-      data-edges={model.edges.length}
-      data-rows={model.rows.length}
-    >
-      {parts.join(' · ')}
-    </span>
   );
 }

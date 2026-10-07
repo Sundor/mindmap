@@ -102,6 +102,7 @@ describe('display settings', () => {
       progress: true,
       edgesOnDemand: true,
       colorBy: 'metric:churn',
+      focusMode: 'filter',
     };
     expect(parseDisplaySettings(serializeDisplaySettings(settings))).toEqual(settings);
     expect(parseDisplaySettings(serializeDisplaySettings(DEFAULT_DISPLAY_SETTINGS))).toEqual(
@@ -152,6 +153,24 @@ describe('display settings', () => {
     });
     expect(parseDisplaySettings('{"iteration":"  "}').iteration).toBeUndefined();
     expect(parseDisplaySettings('{"iteration":" Sprint 1 "}').iteration).toBe('Sprint 1');
+  });
+
+  it('pales the rest of a focus by default and reads the focus mode defensively', () => {
+    expect(DEFAULT_DISPLAY_SETTINGS.focusMode).toBe('focus');
+    expect(JSON.parse(serializeDisplaySettings(DEFAULT_DISPLAY_SETTINGS))).toMatchObject({
+      focusMode: 'focus',
+    });
+    expect(parseDisplaySettings('{"focusMode":"filter"}').focusMode).toBe('filter');
+    expect(parseDisplaySettings('{"focusMode":"focus"}').focusMode).toBe('focus');
+    for (const junk of ['"Filter"', '"hide"', 'true', '1', 'null', '["filter"]']) {
+      expect(parseDisplaySettings(`{"focusMode":${junk}}`).focusMode).toBe('focus');
+    }
+    // Text stored before there was a mode.
+    expect(parseDisplaySettings('{"compactCollapsed":true,"colorBy":"owner"}')).toMatchObject({
+      compactCollapsed: true,
+      colorBy: 'owner',
+      focusMode: 'focus',
+    });
   });
 
   it('reads and writes through a storage, and survives one that throws or is missing', () => {

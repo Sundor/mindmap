@@ -8,11 +8,13 @@ import {
   computeLayout,
   computeLayoutUncached,
   deserializeLayout,
+  rowPlacement,
   serializeLayout,
   type LayoutResult,
   type LayoutStorage,
   type Rect,
 } from './index';
+import type { ArchitectureModel } from '../model';
 import { centreY, layoutViolations, overlaps, parseOk, rectOf } from './test-helpers';
 
 const bottom = (r: Rect): number => r.y + r.height;
@@ -38,6 +40,13 @@ function expectInBand(layout: LayoutResult, id: string, row: string): void {
   expect(bottom(rect), `${id} bottom`).toBeLessThanOrEqual(bottom(b) - BAND_PADDING_Y);
 }
 
+/** Expects `rowPlacement` to name the rows the layout put the nodes in, in the same order. */
+function expectRowPlacement(model: ArchitectureModel, layout: LayoutResult): void {
+  const placement = rowPlacement(model);
+  expect([...placement.placedRow]).toEqual([...layout.placedRow]);
+  expect([...placement.rowOf]).toEqual([...layout.rowOf]);
+}
+
 const THREE_ROWS = `
 version: 1
 rows:
@@ -56,6 +65,7 @@ describe('computeLayout on examples/architecture.yaml', () => {
   it('gives every node a rect and satisfies all geometric invariants', () => {
     expect(layout.rects.size).toBe(model.nodes.size);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
   });
 
   it('lays out bands in YAML order with a label gutter', () => {
@@ -144,6 +154,7 @@ edges:
     const model = parseOk(yaml);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expect(layout.rows).toEqual([]);
     expect(layout.unassignedArea).toBeUndefined();
     expect(layout.gutterWidth).toBe(0);
@@ -177,6 +188,7 @@ domains:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expectCoversBands(layout, 'd', 'top', 'bot');
     const d = rectOf(layout, 'd');
     const c = rectOf(layout, 'd.c');
@@ -227,6 +239,7 @@ edges:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expect([...layout.placedRow]).toEqual([
       ['g.x', 'bot'], // 2 × bottom (via itself and its child) vs 1 × top
       ['g.y', 'top'], // top and bottom tied → the top-most tied row
@@ -260,6 +273,7 @@ edges:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expect([...layout.placedRow]).toEqual([
       ['g.tie', 'mid'], // mid and bot tied (top has no votes) → mid
       ['g.all', 'top'], // three-way tie → top
@@ -309,6 +323,7 @@ edges:
       const model = parseOk(yamlFor(order));
       const layout = await computeLayoutUncached(model);
       expect(layoutViolations(model, layout)).toEqual([]);
+      expectRowPlacement(model, layout);
       expect(new Map(layout.placedRow)).toEqual(expected);
       for (const [id, row] of layout.placedRow) expectInBand(layout, id, row);
     }
@@ -336,6 +351,7 @@ edges:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expect([...layout.placedRow]).toEqual([
       ['g.c3', 'bot'],
       ['g.c2', 'bot'],
@@ -373,6 +389,7 @@ domains:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     const tall = rectOf(layout, 'p.tall');
     const bandA = band(layout, 'a');
     expect(tall.height).toBeGreaterThan(300);
@@ -406,6 +423,7 @@ edges:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     const bot = band(layout, 'bot');
     const centre = centreY(rectOf(layout, 'u'));
     expect(centre).toBeGreaterThanOrEqual(bot.y);
@@ -443,6 +461,7 @@ edges:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     const ids = ['u1', 'u2', 'u3', 'u4', 'u5'];
     const byY = [...ids].sort((a, b) => rectOf(layout, a).y - rectOf(layout, b).y);
     // u2 → top band first; u1, u3, u5 all → bottom band (ties in YAML order); u4 has no
@@ -500,9 +519,70 @@ domains:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     expect(layout.rows.map((b) => b.height > 0)).toEqual([true, true, true]);
     expectInBand(layout, 'only', 'mid');
     expect(layout.bounds.height).toBe(bottom(band(layout, 'bot')));
+  });
+});
+
+describe('rowPlacement', () => {
+  it('names the rows of the example as its layout does, without a layout', async () => {
+    const model = parseOk(exampleYaml);
+    const placement = rowPlacement(model);
+    expect([...placement.placedRow]).toEqual([
+      ['operations.alerts', 'backoffice'],
+      ['data.analytics.feature-store', 'middle'],
+    ]);
+    expect(placement.rowOf.get('operations.alerts')).toBe('backoffice');
+    expect(placement.rowOf.get('operations.oms')).toBe('middle');
+    // Spanning groups and unassigned nodes sit in no single row.
+    expect(placement.rowOf.has('operations')).toBe(false);
+    expect(placement.rowOf.has('platform')).toBe(false);
+    expect([...placement.rowOf.keys()]).toEqual(
+      [...model.nodes.keys()].filter((id) => placement.rowOf.has(id)),
+    );
+    expectRowPlacement(model, await computeLayoutUncached(model));
+  });
+
+  it('gives the nodes below a node placed by its connections that row', () => {
+    const model = parseOk(`${THREE_ROWS}
+domains:
+  - id: g
+    name: G
+    components:
+      - { id: g.t, name: T, row: top }
+      - { id: g.b, name: B, row: bot }
+      - id: g.x
+        name: X
+        subcomponents:
+          - { id: g.x.inner, name: Inner }
+edges:
+  - { id: e1, from: g.x.inner, to: g.b, kind: dataflow }
+`);
+    const placement = rowPlacement(model);
+    expect([...placement.placedRow]).toEqual([['g.x', 'bot']]);
+    expect([...placement.rowOf]).toEqual([
+      ['g.t', 'top'],
+      ['g.b', 'bot'],
+      ['g.x', 'bot'],
+      ['g.x.inner', 'bot'],
+    ]);
+  });
+
+  it('is empty for a model without rows', () => {
+    const placement = rowPlacement(
+      parseOk(`
+version: 1
+domains:
+  - id: a
+    name: A
+    components:
+      - { id: a.x, name: X }
+`),
+    );
+    expect(placement.placedRow.size).toBe(0);
+    expect(placement.rowOf.size).toBe(0);
   });
 });
 
@@ -580,6 +660,7 @@ domains:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     const area = layout.unassignedArea;
     if (!area) throw new Error('no Unassigned area');
     const [first, last] = layout.rows;
@@ -606,6 +687,7 @@ domains:
 `);
     const layout = await computeLayoutUncached(model);
     expect(layoutViolations(model, layout)).toEqual([]);
+    expectRowPlacement(model, layout);
     const area = layout.unassignedArea;
     if (!area) throw new Error('no Unassigned area');
     expect(bandsBottom(layout)).toBe(area.y + area.height);

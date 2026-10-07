@@ -1,4 +1,4 @@
-// A closed group drawn shrunk (Settings → Shrink collapsed groups): a small box in the middle of
+// A closed group drawn shrunk (Detail tab → Shrink collapsed groups): a small box in the middle of
 // the group's full box, with the group name and the names of its children.
 
 import type { Rect } from './layout/types';

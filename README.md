@@ -58,11 +58,12 @@ with "Cannot read properties of undefined (reading 'config')".
 `npm run smoke` (after `npm run build`) opens `dist/viewer.html` from `file://` in headless Edge
 or Chrome and drives it with real mouse and keyboard input through the DevTools protocol:
 selection and dimming (including a click on the line of every single edge and merged edge), the
-detail panel and its links, search, aggregate → member edge, going to a long edge in a small
-window, the edge-kind filter, the work items (loaded, diagnosed, room reserved per story mode)
-and persistence across a reload. It uses Node built-ins only (Node 22+), finds
-the browser in its usual install location (set `BROWSER` to the executable to override), and
-closes the browser when done. The browser profile is one directory in the temp directory,
+detail panel and its links, search, the control panel (its tabs, hiding its body, the search
+while it is hidden), aggregate → member edge, going to a long edge in a small window, the
+edge-kind filter, the focus in both of its modes (Focus and Filter), the work items (loaded,
+diagnosed, room reserved per story mode) and persistence across a reload. It uses Node
+built-ins only (Node 22+), finds the browser in its usual install location (set `BROWSER` to
+the executable to override), and closes the browser when done. The browser profile is one directory in the temp directory,
 `arch-map-smoke-profile`, emptied before and after each run and removed when the system allows
 it: security software may keep other programs out of a browser profile even after the browser
 has exited, and then the directory stays and the next run uses it again (the run clears the
@@ -167,7 +168,7 @@ folder needs to know is in
 
 The project follows Semantic Versioning 2.0.0 (semver.org). The version is written in one
 place, the `version` of `package.json`, and everything else takes it from there: the viewer
-shows it beside its name in the toolbar, the built page names it
+shows it beside its name at the top of the control panel, the built page names it
 (`<meta name="generator" content="architecture-map 0.1.0">`), a release is the git tag
 `v<version>` on `main`, and the downloads of a release carry it in their file names.
 
@@ -234,7 +235,7 @@ another Node.js, change `KIT_NODE` in the script (version and SHA-256 from nodej
 ## Where the viewer gets its data
 
 Only from data files — `architecture.yaml` and `workitems.json` — never from a script. The
-toolbar shows the name of the file in use. In order:
+name of the file in use stands at the top of the control panel. In order:
 
 1. **`fetch`** of `viewer.html?data=<path>` if given, otherwise of `architecture.yaml` next to
    the page. Works over HTTP and in `npm run dev`. On `file://` browsers block fetching local
@@ -248,23 +249,24 @@ toolbar shows the name of the file in use. In order:
 3. Otherwise the start page: the **recent maps** to open again with a click, an **Open YAML…**
    button, and a drop of a `.yaml`/`.yml` file (with its `.json`) anywhere on the page.
 
-**Recent maps** (`src/core/recentMaps.ts`, `src/providers/recentFiles.ts`, `RecentMenu.tsx`).
+**Recent maps** (`src/core/recentMaps.ts`, `src/providers/recentFiles.ts`, `RecentList.tsx`).
 A page cannot learn or use the path of a file, but Edge and Chrome hand out a _reference_ to a
 file the user chose in their file dialog (`showOpenFilePicker`) or dropped
 (`getAsFileSystemHandle`). The viewer keeps the references of the last 8 maps in IndexedDB — a
 structure file with the work items it was opened with — and lists them on the start page and
-under **Recent** in the toolbar, by file name with the first domains and the date as a hint.
+under **Recent maps** on the **Files** tab of the control panel, by file name with the first
+domains and the date as a hint.
 Opening one reads the files again from the disk; the browser asks the user first when it has
-to, and only a click may make it ask. **↻ Reload** does the same for the map that is shown:
-the edit loop is edit, Reload. The same file opened again is the same entry (the browser tells
-whether two references mean one file). Where there are no references — Firefox, Safari, the
-API switched off — files are opened through a plain file input each time and nothing is
-remembered.
+to, and only a click may make it ask. **Reload**, at the foot of the control panel's rail, does
+the same for the map that is shown: the edit loop is edit, Reload. The same file opened again
+is the same entry (the browser tells whether two references mean one file). Where there are no
+references — Firefox, Safari, the API switched off — files are opened through a plain file
+input each time and nothing is remembered.
 
-The **Open YAML…** button and drag-and-drop stay available at all times, so a loaded file can be
-replaced without reloading the page. Nothing is uploaded anywhere: the file is read in the browser.
-A structure file and a work-items file can be opened or dropped together. Files over 50 MB are
-refused.
+The **Open YAML…** button (on the **Files** tab) and drag-and-drop stay available at all times,
+so a loaded file can be replaced without reloading the page. Nothing is uploaded anywhere: the
+file is read in the browser. A structure file and a work-items file can be opened or dropped
+together. Files over 50 MB are refused.
 
 Validation problems appear in the **Diagnostics** panel at the bottom (severity, source, line:col,
 path, message). With errors there is no map and the panel is open; with only warnings the map
@@ -280,8 +282,8 @@ like `?data=`) or of `workitems.json` next to the page (skipped on `file://`), e
 recent map was opened with, else none — which is not an error.
 The map is drawn once the work items are known, so the fetch is given up after 4 seconds; a file
 that arrives later than that can be loaded by hand.
-**Open work items…** in the toolbar loads another file at any time, and a dropped `.json` file
-is taken as work items (a `.yaml`/`.yml` file as the structure).
+**Open work items…** on the **Files** tab loads another file at any time, and a dropped `.json`
+file is taken as work items (a `.yaml`/`.yml` file as the structure).
 
 The file format (version 1):
 
@@ -323,14 +325,15 @@ problems in the file (a broken item is skipped, the rest still load), every `com
 names no node of the structure, and the items without any `comp:` tag, with the **tag
 coverage** in a line above them. A task whose parent has a `comp:` tag counts as tagged (for a
 task of a task: the first item above it that has one). The untagged items and the coverage are
-those of the items the filter shows (see Filter below; the line says how many are hidden and not
+those of the items the work-item filter shows (**Work items shown**, see
+[Work items on the map](#work-items-on-the-map); the line says how many are hidden and not
 counted); unknown `comp:` tags and problems of the file are reported for every item. The heading and the coverage line are
 there whenever a work-items file with items is loaded, also when there is nothing to report —
 the collapsed panel then shows just "_n_% tagged". A file that gave no items (not valid JSON,
 for example) has its error and no coverage, and its problems are listed even while the
-structure file has errors of its own. The toolbar shows the name of the work-items file, the
-number of work items (and how many of them are shown, when the filter hides some) and that
-coverage.
+structure file has errors of its own. The name of the work-items file stands at the top of the
+control panel, under that of the structure file; the **Files** tab shows the number of work
+items (and how many of them are shown, when the work-item filter hides some) and that coverage.
 
 **Your own work items:** write a `workitems.json` in the format above (the `comp:` tags must
 name IDs of your `architecture.yaml`) and either open it with **Open work items…** / drop it on
@@ -340,12 +343,13 @@ the viewer as `workitems.json` when it is served over HTTP (or name it with
 `fixtures/workitems.json` is the file to copy from. How they are shown is described under
 [Work items on the map](#work-items-on-the-map).
 
-The **Stories** selector in the toolbar (shown when there are work items) chooses what the map
-shows of them: **Off**, **Stories only** (the default) or **Stories + Tasks**. The layout
-reserves room for the lists inside the boxes — a leaf grows, a group gets a block between its
-header and its children — so the map is laid out again when the selector, the filter or the
-work items change, and at no other time: zooming and collapsing still never move anything. In
-mode Off the layout is exactly the one without work items.
+The buttons under **Work items on the map** on the **Detail** tab (shown when there are work
+items) choose what the map shows of them — the story mode: **Off**, **Stories only** (the
+default) or **Stories + Tasks**. The layout reserves room for the lists inside the boxes — a
+leaf grows, a group gets a block between its header and its children — so the map is laid out
+again when the story mode, the work-item filter or the work items change: zooming and
+collapsing still never move anything. In mode Off the layout is exactly the one without work
+items.
 
 ## Reading the map
 
@@ -372,24 +376,29 @@ mode Off the layout is exactly the one without work items.
   inside edges, work items) can be folded by clicking their heading and put in another order by
   dragging a heading onto another one or with the ↑ ↓ buttons next to it. The arrangement is
   remembered in the browser.
-- **Rows** can be switched off with **Settings → Arrange in rows**: the map is then laid out
+- **Rows** can be switched off with **Layout → Arrange in rows**: the map is then laid out
   without row bands, the nodes arranged by their connections alone.
-- **Moving things by hand**: click **Unlock positions** in the toolbar, then drag a group or a
-  node inside a group. A node stays inside its group, a group takes its contents along, and
+- **Moving things by hand**: click **Unlock positions** on the **Layout** tab, then drag a group
+  or a node inside a group. A node stays inside its group, a group takes its contents along, and
   nothing else moves; edges are redrawn when you drop. The positions are remembered in the
-  browser for that arrangement (rows on or off and each Stories mode have their own).
-  **Reset positions** undoes all moves; **Lock positions** makes dragging pan the view again.
-- **Level of detail** is chosen with the **Detail** buttons in the toolbar. **Auto** (the default)
-  follows the zoom; **Domains**, **Components**, **Subcomponents** and **Everything** pin that
-  level whatever the zoom. The filled button is the mode you picked; in Auto the level the zoom
-  currently selects is outlined. Search and the panel links raise a pinned level that is too
-  coarse to draw what they go to. Clicking any of the buttons also opens the groups collapsed
-  by hand, so the whole map shows the chosen level. Groups you collapse afterwards stay closed at
-  every level until the next click; "_n_ collapsed by hand" next to the buttons counts them.
+  browser for that arrangement (rows on or off, each story mode and each map filtered to a focus
+  have their own). **Reset positions** undoes all moves of the arrangement on screen; **Lock
+  positions** makes dragging pan the view again.
+- **Level of detail** is chosen with the buttons at the top of the **Detail** tab. **Auto** (the
+  default) follows the zoom; **Domains**, **Components**, **Subcomponents** and **Everything**
+  pin that level whatever the zoom. The filled button is the mode you picked; in Auto the level
+  the zoom currently selects is outlined. The tab also says on the rail which level is being
+  drawn — `Dom`, `Comp`, `Sub` or `All`, highlighted while the level is pinned — so it can be
+  read while the body of the panel is hidden. Search and the panel links raise a pinned level
+  that is too coarse to draw what they go to. Clicking any of the buttons also opens the groups
+  collapsed by hand, so the whole map shows the chosen level. Groups you collapse afterwards
+  stay closed at every level until the next click; "_n_ collapsed by hand" next to the buttons
+  counts them.
 
-  The three thresholds can be changed with the sliders under **Settings** in the toolbar (the
-  current zoom is shown beside them); **Reset thresholds** restores the defaults below.
-  **Settings → Shrink collapsed groups** draws a closed group as a small box in the middle of its
+  The three thresholds can be changed with the sliders under **Auto: zoom thresholds** on the
+  same tab (the current zoom is shown beside that heading); **Reset thresholds** restores the
+  defaults below.
+  **Detail → Shrink collapsed groups** draws a closed group as a small box in the middle of its
   area, with its name and the names of its contents, instead of keeping the full box. The small
   box is always large enough for the name and all the names: it grows taller with the list, and
   wider when the list would otherwise be taller than the group's area. Only a group whose whole
@@ -410,11 +419,40 @@ mode Off the layout is exactly the one without work items.
   keep the position and size of the one layout, and the row bands and the Unassigned area are
   always shown. A group **collapsed by hand stays collapsed** at every zoom. A group closed only
   by the level of detail has a disabled chevron — zoom in to open it. At the `domains` level the
-  domain and row titles are drawn larger so they stay readable. A fit to view (on load and with
-  **Fit view**) always uses the plain thresholds of the table. The thresholds are the
-  `LOD_CONFIG` object in `src/core/lod.ts`. With the shipped example, **Fit view** lands in
-  `components` on common window sizes (about 53% at 1366×768, 75% at 1920×1080), in `domains`
-  on windows narrower than roughly 1050 px, and in `subcomponents` only on very large ones.
+  domain and row titles are drawn larger so they stay readable. The thresholds are the
+  `LOD_CONFIG` object in `src/core/lod.ts`.
+
+  A view that starts fitted — on load when no viewport is remembered, and a map that has just
+  been filtered to a focus — is judged by the plain thresholds of the table. **Fit view** on the
+  rail glides to the fitted view, and the level follows the zoom on the way as with any other
+  zoom: a fit that ends within 5% of a threshold keeps the level it came from.
+
+  How far a fit zooms depends on the canvas: the page less the rail of the control panel
+  (56 px) and, from a width of 1400 px, less its open body (280 px). In a narrower page the
+  open body lies over the canvas, and the map is fitted into the part beside it. A fit also
+  keeps the boxes clear of the minimap (bottom right): where the plain fit would put a box under
+  it, the map is fitted to end beside the minimap or above it, whichever leaves the map larger.
+  Measured with the shipped example, whose plain fit leaves the minimap clear at all of these
+  sizes (sizes of the page, without the browser's own bars):
+
+  | Page      | Body hidden           | Body open             |
+  | --------- | --------------------- | --------------------- |
+  | 1024×768  | 37.1%, `domains`      | 26.2%, `domains`      |
+  | 1366×768  | 50.2%, `components`   | 39.6%, `domains`      |
+  | 1440×900  | 53.1%, `components`   | 42.4%, `components`   |
+  | 1920×1080 | 71.5%, `components`   | 60.8%, `components`   |
+  | 2560×1440 | 96.1%, `components`   | 85.3%, `components`   |
+  | 3440×1440 | 119%, `subcomponents` | 119%, `subcomponents` |
+
+  With the body hidden the fit is in `domains` below a width of about 1100 px and in
+  `subcomponents` from about 2660 px (given a height of 1210 px or more); with the body open, in
+  `domains` below 1376 px and in `subcomponents` from about 2940 px. Until it has been shown or
+  hidden by hand, the body starts hidden in a page narrower than 1400 px, so the example first
+  opens at 50% at 1366×768. Where the 5% matter with the body open: at 1366×768 **Fit view**
+  pressed at the `components` level ends at 39.6% and stays in `components`, while a fitted load
+  shows `domains`; at widths from 1400 to about 1430 px the fit ends between 40.8% and 42%, so a
+  fitted load shows `components` and **Fit view** pressed at the `domains` level stays in
+  `domains`.
 
 - **Minimap** (bottom right): always the whole map at the same scale, with the part the canvas
   shows as a rectangle. When the view is panned partly or wholly off the map, the rectangle is
@@ -425,30 +463,100 @@ mode Off the layout is exactly the one without work items.
 - **Work items** are listed inside the boxes at the `detail` level and counted in a badge
   elsewhere — see [Work items on the map](#work-items-on-the-map).
 
-- The layout is computed once per loaded file (and again when the **Stories** selector, the
-  work-item filter or the work items change) and never changes on pan, zoom or collapse; nodes cannot be
-  dragged. **Fit view** (toolbar, or the control at the bottom left) shows the whole map; a small map is
-  not magnified beyond 125%.
+- The layout is computed once per loaded file (and again when the story mode, the work-item
+  filter or the work items change, and for a map filtered to a focus) and never changes on pan,
+  zoom or collapse; nodes can be dragged only after **Layout → Unlock positions**. **Fit view**
+  on the rail of the control panel shows the whole map; a small map is not magnified beyond
+  125%. The fit button among the zoom controls at the bottom left is the canvas library's own:
+  it fits the map into the whole canvas, without that limit and without leaving room for the
+  open body of the control panel or for the minimap.
 
 ## Using the map
 
 | Action                                  | How                                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Pan / zoom                              | drag the canvas / mouse wheel or pinch; press, drag or wheel in the minimap (bottom right) |
-| Show the whole map                      | **Fit view**                                                                               |
-| Collapse / expand a group               | its chevron, or double-click it; **Collapse all** / **Expand all**                         |
+| Show the whole map                      | **Fit view** on the rail of the control panel                                              |
+| Choose how much is drawn                | **Detail** tab: Auto (follows the zoom), Domains, Components, Subcomponents, Everything    |
+| Collapse / expand a group               | its chevron, or double-click it; **Detail → Collapse all** / **Expand all**                |
 | Select a node, an edge or a merged edge | click it                                                                                   |
 | Select a story, bug or task             | click its line in a box (zoom in to **Everything** to see the lines)                       |
 | Clear the selection                     | click the empty canvas, press **Esc**, or **×** in the panel                               |
-| Find a node or a work item              | type in the search box; **/** or **Ctrl+K** puts the cursor there                          |
-| Show / hide an edge kind                | the four kind buttons in the toolbar                                                       |
-| Choose what the map shows of the work   | **Stories**: Off / Stories only / Stories + Tasks                                          |
-| Hide work items by state or iteration   | **Settings → Work items shown** (a path above a sprint, e.g. a PI, covers its sprints)     |
-| Follow one story through the map        | **Focus** (toolbar): a flow, an epic or a feature; or **Focus** in a work item's panel     |
-| See where the work is                   | **Settings → Heat by work**, **Progress bars**                                             |
-| Colour the boxes                        | **Settings → Colour by**: owner, status, tech or a metric (legend at the top left)         |
-| Calm the overview                       | **Settings → Edges on demand**                                                             |
-| Keep or share an arrangement            | **Views** (toolbar): save under a name, apply, delete, **Copy link**                       |
+| Find a node or a work item              | type in the search box; **/**, **Ctrl+K** or **Search** on the rail puts the cursor there  |
+| Show / hide an edge kind                | the four kind buttons under **Visibility → Edges** (the legend is on the canvas, top left) |
+| Choose what the map shows of the work   | **Detail → Work items on the map**: Off / Stories only / Stories + Tasks                   |
+| Hide work items by state or iteration   | **Visibility → Work items shown** (a path above a sprint, e.g. a PI, covers its sprints)   |
+| Follow one story through the map        | **Visibility → Focus**: a flow, an epic or a feature; or **Focus** in a work item's panel  |
+| Draw only what a focus involves         | the **Focus / Filter** switch (**Visibility** tab, or in the focus bar above the canvas)   |
+| See where the work is                   | **Lenses → Heat by work**, **Progress bars**                                               |
+| Colour the boxes                        | **Lenses → Colour by**: owner, status, tech or a metric (legend at the top left)           |
+| Calm the overview                       | **Visibility → Edges on demand**                                                           |
+| Keep or share an arrangement            | **Views** tab: save under a name, apply, delete, **Copy link**                             |
+| Lay out without the row bands           | **Layout → Arrange in rows**                                                               |
+| Move boxes by hand                      | **Layout → Unlock positions**, drag, **Lock positions**; **Reset positions** undoes it     |
+| Load other data, or a map opened before | **Files** tab: **Open YAML…**, **Open work items…**, **Recent maps**; or drop a file       |
+| Read the files of the map again         | **Reload** on the rail (maps opened from disk in Edge and Chrome)                          |
+| Get more room for the map               | **Hide** on the rail, or click the tab that is shown; **Show** or any tab brings it back   |
+
+### The control panel
+
+Everything that is chosen or set is in a panel at the left, as tall as the window: a **rail**
+that is always there and, beside it, a **body** that can be hidden. In this document
+"**Lenses → Colour by**" means the control _Colour by_ on the tab _Lenses_.
+
+The rail holds, from the top: **Search** (puts the cursor in the search box), the six tabs, and
+at its foot **Reload** (while the map shown is one the browser can read again from the disk),
+**Fit view** and **Hide** / **Show**. The body shows the name and version of the viewer with
+the names of the structure file and the work-items file, below them the search box, and then
+the tab that is chosen:
+
+| Tab            | Holds                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Detail**     | The level of detail; **Groups**: Collapse all, Expand all, Shrink collapsed groups; **Work items on the map**: the story mode; **Auto: zoom thresholds**    |
+| **Visibility** | **Focus**: the chooser and the Focus / Filter switch; **Edges**: the four kind buttons, Edges on demand; **Work items shown**: the states and the iteration |
+| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                      |
+| **Layout**     | **Rows**: Arrange in rows; **Positions**: Unlock / Lock positions, Reset positions                                                                          |
+| **Views**      | The saved views: save under a name, apply, delete; Copy link, of the current arrangement or of a saved view                                                 |
+| **Files**      | **Structure** and **Work items**: what each file holds, with Open YAML… and Open work items…; **Recent maps**                                               |
+
+The **Detail** tab is headed "Level of detail" in the body, so that it is not taken for the
+detail panel at the right. A control is offered when it has something to act on: the story
+mode, **Work items shown**, Heat by work and Progress bars when work items are loaded, the
+focus chooser when the structure has flows or work items are loaded, Colour by when the
+structure has attributes or metrics, **Recent maps** when there are any. A tab whose controls
+need a map says "Nothing is drawn yet." until one is drawn. While no structure is loaded (the
+start page, a file with errors) only **Files** can be chosen; the tab chosen before comes back
+with the map.
+
+The tabs say on the rail what is behind them: **Detail** the level being drawn, **Visibility**
+a dot while something is hidden, paled or filtered (an edge kind hidden, a focus set, Edges on
+demand holding edges back at the Domains or Components level, work items hidden by the
+work-item filter), **Views** the number of saved views. The tooltips say it in full ("Level of
+detail: Components — follows the zoom"), and that of **Files** names the files in use.
+
+- **Showing and hiding.** A click on a tab shows it. A click on the tab that is shown hides the
+  body, as does **Hide**: the rail stays, and **Show** or a click on any tab brings the body
+  back. With the keyboard, **↑ / ↓**, **Home** and **End** move among the tabs.
+- **Wide and narrow windows.** From a width of 1400 px the open body stands beside the canvas,
+  and hiding it gives the canvas its 280 px. In a narrower window the open body lies over the
+  left of the map instead. The canvas keeps its size there, so opening a tab moves nothing on
+  the map, and the viewer places the view clear of the body: **Fit view**, a map fitted when it
+  is drawn (on load, or filtered to a focus), and going to a search result or to a link in a
+  panel use the part of the canvas beside it. Everything else at the left begins where the open
+  body ends: the notices above the canvas (a file error, the focus bar), the status lines, the
+  start page, the legends, the zoom controls and the Diagnostics panel. Until the body has been
+  shown or hidden by hand (a click on a tab counts, and so does a key that moves among them), it
+  is open while the window is at least 1400 px wide and hidden while it is narrower.
+- **Search with the body hidden.** **/**, **Ctrl+K** and **Search** on the rail show the search
+  box alone, as a small card beside the rail. It goes when the cursor leaves it: a match
+  chosen, **Esc** twice, a click elsewhere.
+- **Not on any tab**, so there whichever tab is shown: above the canvas a file error and the
+  focus bar; on the canvas the legends (top left), the zoom controls (bottom left) and the
+  minimap (bottom right); the detail panel at the right and the Diagnostics panel below the
+  map.
+
+The tab shown and whether the body is hidden are remembered in the browser, once for the
+viewer.
 
 ### Selection and the detail panel
 
@@ -468,7 +576,7 @@ at 100% zoom), not whichever happens to be drawn on top. Where two such lines to
 (the bottom of two parallel arcs, for example) they cannot be told apart — click nearer to
 either end, where they run apart.
 
-The **detail panel** opens at the right of the canvas (below the toolbar) and shows:
+The **detail panel** opens at the right of the canvas and shows:
 
 - **Node:** name, ID, level, row, description, the **parent path** as a breadcrumb, the list of
   children, and its **incoming** and **outgoing** edges. The row reads as the row's name;
@@ -477,7 +585,7 @@ The **detail panel** opens at the right of the canvas (below the toolbar) and sh
   has no rows.) The edge lists are the original edges from the YAML, never merged ones, and for a
   group they include the edges of everything inside it, marked `via <descendant>`; edges with
   both ends inside the group are listed separately as **Edges inside**. An edge of a kind that is
-  currently filtered out is marked `hidden`.
+  currently hidden is marked `hidden`.
 - **Edge:** label, from → to, ID, kind, protocol, description.
 - **Merged edge:** source → target, kind, count, and the **member edges**.
 
@@ -489,21 +597,29 @@ Everything underlined in the panel is clickable:
   not move.
 - An **edge** (in a node's lists, or a member of a merged edge) selects that original edge: the
   collapsed groups around both of its ends are expanded, its kind is switched back on if it was
-  filtered out, and the view pans and zooms so that both ends are on screen and drawn. When the
+  hidden, and the view pans and zooms so that both ends are on screen and drawn. When the
   two ends are too far apart to fit at the zoom their level of detail needs (above 110% for
   subcomponents), drawing them wins and the view shows the edge's **source** end, placed at the
   side of the canvas away from the target so that as much of the edge as possible is visible;
   the **to** link in the edge panel takes you to the other end.
+
+While the map is filtered to a focus (see [Filter mode](#filter-mode)) the panel still lists
+the whole structure. A node, an edge, a step of a flow or a work item that the filtered map
+does not have is set in italics, and its tooltip ends "— not on the filtered map; click to show
+the whole map": the click switches back to Focus mode and goes there. When the selected thing
+itself is not on the filtered map — it was selected before the map was filtered — its panel
+stays and says "Not on the map: Filter leaves it out." with a **Show it** button that does the
+same.
 
 The node panel ends with its **work items**, and a selected work item has a panel of its own:
 see the next section.
 
 ### Work items on the map
 
-The **Stories** selector in the toolbar (next to **Detail**; shown when work items are loaded)
-chooses what the canvas shows of them. It is remembered.
+The buttons under **Work items on the map** on the **Detail** tab (shown when work items are
+loaded) choose what the canvas shows of them: the story mode. It is remembered.
 
-| Stories             | On the canvas                                                                          |
+| Story mode          | On the canvas                                                                          |
 | ------------------- | -------------------------------------------------------------------------------------- |
 | **Off**             | nothing — no lines, no badges. The panels still list the work items.                   |
 | **Stories only**    | every box lists the stories, bugs, features and epics tagged to it: type icon + title  |
@@ -531,10 +647,11 @@ chooses what the canvas shows of them. It is remembered.
 - Description, assignee, iteration and the other parameters are **never on the canvas** — only
   in the panel.
 
-Changing the selector (or the filter, or loading other work items) lays the map out again,
-because the boxes change size; "Computing layout…" shows at the top of the canvas meanwhile. The
-view **keeps its place**: the box in the middle of the canvas stays in the middle, at the same
-zoom, and that view is the one a reload comes back to. If that should ever leave the canvas
+Changing the story mode (or the work-item filter, or loading other work items) lays the map out
+again, because the boxes change size; "Computing layout…" shows at the top of the canvas
+meanwhile. The view **keeps its place**: the box in the middle of the canvas stays in the
+middle, at the same zoom, and that view is the one a reload comes back to (of the whole map: a
+map filtered to a focus leaves the remembered view alone). If that should ever leave the canvas
 without any of the map, the view is fitted.
 
 **Selecting.** Click a line to select that story, bug, feature, epic or task (the lines are
@@ -558,7 +675,7 @@ raises a pinned level to Everything — or in Auto zooms in to 176% — and pans
 name of the box with its list; when that does not fit, the line of the item itself); the same
 happens when you click a work item in a panel or choose one in the search. The story mode
 is never changed for you, because that lays the whole map out again: an item that has no line
-says why in its panel — the selector is Off, tasks are only listed in Stories + Tasks, the line
+says why in its panel — the story mode is Off, tasks are only listed in Stories + Tasks, the line
 is under "+_k_ more", or it has no usable `comp:` tag — and offers the mode that draws it; the
 box it belongs to is brought on screen instead.
 
@@ -567,86 +684,191 @@ itself ("On this node"), then those of every node inside it, each group under th
 node (clickable), with the tasks under their story. Each entry shows type, title, ID, state and
 assignee, and is clickable. This list is complete at every level, in every story mode.
 
-**Filter** (**Settings → Work items shown**): untick a state (for example Closed) to hide its
-items, and pick an iteration to show only that one ("All iterations" by default). Hidden items
-leave the lines, the badges, the counts, the panels and the search, and the map is laid out
-again without their room; a selected item that gets hidden is deselected. A task whose story is
-hidden stays on the map, listed on that story's nodes. States that differ only in letter case
-("Active", "active") are one choice. The tag coverage and the list of untagged items in the
-diagnostics follow the filter too: they cover the items that are shown. The filter is remembered; an iteration that the loaded file
-does not have is ignored.
+**Work items shown** (on the **Visibility** tab) is the work-item filter: untick a state (for
+example Closed) to hide its items, and pick an iteration to show only that one ("All
+iterations" by default). Hidden items leave the lines, the badges, the counts, the panels and
+the search, and the map is laid out again without their room; a selected item that gets hidden
+is deselected. A task whose story is hidden stays on the map, listed on that story's nodes.
+States that differ only in letter case ("Active", "active") are one choice. The tag coverage
+and the list of untagged items in the diagnostics follow the work-item filter too: they cover
+the items that are shown. The work-item filter is remembered; an iteration that the loaded file
+does not have is ignored. It is not the **Filter** of [Filter mode](#filter-mode), which draws
+only what a focus involves.
 
 ### Search
 
-Type part of a **name or ID** into the search box (case does not matter). Matches are listed
-with name, level and ID — exact matches first, then names/IDs starting with the text, then words
-or ID segments starting with it, then the rest; at most 12 are listed. **↑ / ↓** move through the
-list, **Enter** takes the highlighted match (the first one by default), a click takes any; **Esc**
-closes the list, and a second **Esc** clears the box. Choosing a match expands the groups around
-that node, pans and zooms to it (to at least 44% for a component and 110% for a subcomponent, so
-the level of detail is sure to draw it) and selects it.
+Type part of a **name or ID** into the search box at the top of the control panel (case does
+not matter). Matches are listed with name, level and ID — exact matches first, then names/IDs
+starting with the text, then words or ID segments starting with it, then the rest; at most 12
+are listed. **↑ / ↓** move through the list, **Enter** takes the highlighted match (the first
+one by default), a click takes any; **Esc** closes the list, and a second **Esc** clears the
+box. Choosing a match expands the groups around that node, pans and zooms to it (to at least
+44% for a component and 110% for a subcomponent, so the level of detail is sure to draw it) and
+selects it.
 
 The same box finds **work items**, listed after the nodes with their type icon, #ID and state:
 by `#1010` (or just the digits; IDs starting with them match too) and by words of the title, in
 any order. When both nodes and work items match, up to five of the twelve places go to work
 items. Choosing one selects it and shows it on the map as described above. Only the items the
-filter shows are found.
+work-item filter shows are found.
+
+On a map filtered to a focus the search still covers the whole structure. A match that the
+filtered map does not have has its name set in italics and is marked "not on the filtered map"
+after its ID; choosing it switches back to Focus mode and goes there (see
+[Filter mode](#filter-mode)).
 
 ### Edge-kind filter
 
-The four buttons `dataflow`, `dependency`, `control`, `config` each show a sample of the kind's
-line, so they are also the legend. Clicking one hides or shows all edges of that kind (hidden
-kinds are struck through). Hidden kinds are removed before edges are merged, so merged edges and
-their `×n` counts cover only what is shown. The filter does not change the layout.
+The four buttons `dataflow`, `dependency`, `control`, `config` under **Visibility → Edges**
+each show a sample of the kind's line. Clicking one hides or shows all edges of that kind
+(hidden kinds are struck through); its tooltip gives the number of edges of that kind on the
+map. Hidden kinds are removed before edges are merged, so merged edges and their `×n` counts
+cover only what is shown. Hiding a kind does not change the layout.
+
+The **edge legend** at the top left of the canvas shows the same four samples with the names of
+the kinds, two to a line, whichever tab is shown and also while the body of the control panel
+is hidden; a hidden kind is struck through and dimmed there. It is a key only: the kinds are
+switched on the **Visibility** tab. The legend of **Colour by** sits below it.
 
 ### Focus, lenses and views
 
-- **Focus** is one filter: choose a flow, an epic or a feature in the toolbar, or press **Focus**
-  in the panel of any work item or flow. The nodes and edges involved stay lit — for a work item
-  the nodes of everything under it (as far as the filter shows it) and the edges among them —
-  and the rest of the map is paled; a bar under the toolbar names the focus and **Clear focus**
-  ends it. Choosing a flow also opens its panel: description, the steps in order (each a link to
-  its edge) and the nodes it names. The panel of a node or an edge lists the flows it is part of.
-- **Heat by work** (Settings): a strip up both sides of each box, as tall as the open work in it
-  and inside it compared with the hottest box of the same level, coloured from the bottom up
-  like a bar of iron being heated — ember, red, yellow, white at the tip of the hottest. Hidden
-  items are no work (the filter counts).
-- **Progress bars** (Settings): the bottom edge of a box as a bar of completed over all items in
-  it, for the iteration chosen under **Work items shown** (a parent path covers its sprints) or
-  in total. The state filter does not affect them.
-- **Colour by** (Settings): the boxes tinted by `owner`, `status` or `tech` (one colour per
-  value, in the order the values first appear; from the ninth value on "Other") or by a metric
-  (light = smallest, dark = largest); a legend sits over the canvas. The node panel shows the
-  attributes (saying where an inherited one comes from), the metrics and the links.
-- **Edges on demand** (Settings): at the Domains and Components levels the edges are hidden
-  except at the box under the pointer, at the selected box or edge, and those of the focus.
-- **Views** (toolbar): the current arrangement — collapsed groups, hidden edge kinds, level of
-  detail, focus, colouring, story mode and the point in the middle of the view with the zoom —
-  saved under a name, per structure, in the browser; applied or deleted from the list.
-  **Copy link** puts `viewer.html#view=…` on the clipboard and in the address bar: the link
-  carries the view itself and is applied when the page opens with it.
+- **Focus** shows what one thing involves: choose a flow, an epic or a feature under
+  **Visibility → Focus**, or press **Focus** in the panel of any work item or flow. The nodes
+  and edges involved stay lit — for a work item the nodes of everything under it (as far as the
+  work-item filter shows it) and the edges among them — and the rest of the map is paled, except
+  what is selected: the selected node with what is drawn inside it, the selected edge with its
+  two ends, the nodes that show a selected work item, and the groups around them stay readable
+  although the focus does not involve them. A bar above the canvas names the focus and counts its nodes and edges; **Show** in it opens the
+  panel of the focus and **Clear focus** ends it. Choosing a flow also opens its panel —
+  description, the steps in order (each a link to its edge) and the nodes it names — and
+  brings what it involves on screen. The panel of a node or an edge lists the flows it is part
+  of. The **Focus / Filter** switch, under the chooser and again in the bar, leaves the rest of
+  the map out instead of paling it: see [Filter mode](#filter-mode).
+- **Heat by work** (**Lenses** tab): a strip up both sides of each box, as tall as the open
+  work in it and inside it compared with the hottest box of the same level, coloured from the
+  bottom up like a bar of iron being heated — ember, red, yellow, white at the tip of the
+  hottest. Hidden items are no work (the work-item filter counts).
+- **Progress bars** (**Lenses** tab): the bottom edge of a box as a bar of completed over all
+  items in it, for the iteration chosen under **Work items shown** (a parent path covers its
+  sprints) or in total. The state filter does not affect them.
+- **Colour by** (**Lenses** tab): the boxes tinted by `owner`, `status` or `tech` (one colour
+  per value, in the order the values first appear; from the ninth value on "Other") or by a
+  metric (light = smallest, dark = largest); its legend sits at the top left of the canvas,
+  below the edge legend. The node panel shows the attributes (saying where an inherited one
+  comes from), the metrics and the links.
+- **Edges on demand** (**Visibility** tab): at the Domains and Components levels the edges are
+  hidden except at the box under the pointer, at the selected box or edge, and those of the
+  focus.
+- **Views** (**Views** tab): the current arrangement — collapsed groups, hidden edge kinds,
+  level of detail, focus (and that the map is filtered to it, when it is), colouring, story
+  mode and the point in the middle of the view with the zoom — saved under a name, per
+  structure, in the browser; applied or deleted from the list. **Copy link** puts
+  `viewer.html#view=…` on the clipboard and in the address bar: the link carries the view
+  itself and is applied when the page opens with it. The tab shows the number of saved views
+  on the rail.
 - **Hints** at the end of the Diagnostics panel say what an author could add: nodes without a
   description or without any connection, domains without work items, no flows. They are
   neither errors nor warnings.
+
+### Filter mode
+
+The **Focus / Filter** switch says how a focus is shown. It stands under the focus chooser on
+the **Visibility** tab and again in the focus bar above the canvas; both are the one setting,
+which is remembered. **Focus** (the default) pales the rest of the map. **Filter** does not
+draw it: the map is reduced to what the focus involves and laid out again as a map of its own.
+The bar then begins "Filter:" instead of "Focus:" and adds "· the rest of the map is not
+drawn", and the line under the switch counts what is left out ("Not drawn: 31 of 45 nodes.").
+
+- **What is kept** is exactly what Focus leaves unpaled: the nodes the focus involves, the
+  groups around them, everything inside them, and the edges of the focus among them.
+- **The layout.** What is kept is laid out again, so it moves together. Every node stays in
+  the row it has on the whole map — one that is placed by its connections there keeps that row
+  and its dashed border — and a row left without a node is dropped, so the bands close up;
+  when no kept node has a row there are no bands. **Layout → Arrange in rows** applies as on
+  the whole map.
+- **The view.** A filtered map arrives fitted: when the switch is set to Filter with a focus
+  chosen, and when a focus, or another one, is chosen while it stands on Filter. Choosing a
+  flow then does not move the view first. A flow that cannot be filtered (see the next point)
+  is brought on screen on the whole map as in Focus mode — when a filtered map is on screen,
+  once the whole map is back. Leaving the filtered map — the switch back to Focus,
+  **Clear focus**, or going to something that is left out — brings the whole map back in the
+  view it had before, at the same zoom; if the whole map was laid out anew in between (another
+  story mode, for example), the place that was in the middle is in the middle again. Where
+  the whole map had not come to rest on screen before (a link that opens filtered), it is shown
+  at its remembered viewport, or fitted.
+- **Nothing to leave out.** Without a focus the switch only waits: the line under it ends
+  "Applies once a focus is chosen." A focus that cannot be filtered leaves the whole map, shown
+  as in Focus mode. One that involves every node and every edge leaves nothing out: the bar adds "· nothing to
+  leave out: the whole map is shown", and the line under the switch reads "The focus leaves
+  nothing out: the whole map is shown." One that involves no node, or is not among the loaded
+  data, would leave nothing to draw: the bar adds "· nothing of it is on the map: the whole map
+  is shown, paled", and the line reads "The focus involves nothing on the map: the whole map is
+  shown, paled." While a filtered map is being laid out, the line reads "The map is being laid
+  out again…".
+- **Asking for something that is left out.** The search, the detail panel and the Diagnostics
+  panel keep covering the whole structure, and the first two mark what the filtered map does
+  not have (see [Search](#search) and
+  [Selection and the detail panel](#selection-and-the-detail-panel)). Going to such a node,
+  edge or work item wins over Filter: the switch goes back to **Focus** — the focus itself
+  stays — the whole map returns, and the target is selected and brought on screen. The bar
+  says so ("Filter switched off to show _name_."), and its switch turns Filter on again with
+  one click. A work item is on the filtered map when at least one of the boxes that list it is.
+- **Level of detail and collapsing** work on the filtered map as on the whole one. In Auto the
+  level is the one the fitted zoom selects; a small part of the map is fitted closer in than
+  the whole. The groups collapsed by hand are one set for the structure, shared by both: a
+  group closed on the filtered map is closed on the whole map too, and **Collapse all**,
+  **Expand all** and "_n_ collapsed by hand" are about every group of the file. Entering
+  Filter in Auto while the Everything level is drawn can fit twice: the fit zooms to 125% at
+  most, which with the default thresholds leaves that level; the lists in the boxes then go,
+  and the smaller map is fitted once more.
+- **Edges.** Hidden edge kinds stay hidden, and the tooltips of the kind buttons count the
+  edges of the map on screen. **Edges on demand** holds nothing back on a filtered map: every
+  edge there is one of the focus.
+- **Positions moved by hand.** Each filtered map has positions of its own
+  (**Layout → Unlock positions**): they are kept in the browser and come back with that map,
+  the whole map keeps its own, and **Reset positions** undoes those of the map on screen.
+- **Work items and lenses** say about a box what they say on the whole map: it lists and
+  counts the same work items, the badge of a closed group counts everything inside it, heat is
+  measured against the hottest box of its level on the whole map, and progress and colours are
+  unchanged.
+  Changing the story mode or the work-item filter lays the filtered map out again and keeps
+  the place. With a work item as the focus, the work-item filter also changes what the focus
+  involves, and so what is kept.
+- **Saved views and links.** A view saved, or a link copied, while the map on screen is
+  filtered to its focus keeps that: applied, it sets the focus and Filter again and puts the
+  view where it was on the filtered map. A view with a focus that was saved on the whole map
+  is shown in Focus mode, and sets the switch to Focus when it stood on Filter; a view without
+  a focus leaves the switch as it is. If the focus of a view saved on a filtered map cannot be
+  filtered with the data that is loaded, the whole map is shown, fitted. Views and links saved
+  before the switch existed open as they did. A link copied on a filtered map needs a viewer
+  that has Filter mode: an older one (0.1.1 or before) shows its focus in Focus mode, with the
+  view at the wrong place.
+- **Reloading.** The focus is not remembered, the switch is: after a reload of the page, or
+  **Reload**, the whole map is shown at its remembered viewport with the switch still on
+  Filter. With a `#view=` link in the address bar the view of the link is applied again, its
+  focus and its mode included.
 
 ### What is remembered
 
 Per structure (identified by its domain IDs), in the browser's `localStorage`:
 
 - which groups are collapsed,
-- the last viewport (pan and zoom) — restored on the next load **instead of** fitting the view,
-  as long as it is valid and still shows a useful part of the map on the canvas as it is now
-  (at least about 48 px of it in each direction; otherwise the view is fitted); **Fit view**
-  gets you back to the whole map,
+- the last viewport (pan and zoom) of the whole map — restored on the next load **instead of**
+  fitting the view, as long as it is valid and still shows a useful part of the map on the
+  canvas as it is now (at least about 48 px of it in each direction; otherwise the view is
+  fitted); **Fit view** gets you back to the whole map. It is not updated while the map is
+  filtered to a focus,
 - which edge kinds are hidden.
 
-Per structure as well: the saved views. Once for the viewer (not per structure): the display
-settings — the thresholds, "Shrink collapsed groups", the story mode, the work-item filter, and
-the lenses (heat, progress, edges on demand, colour by).
+Per structure as well: the saved views. Per arrangement: the positions moved by hand. Once for
+the viewer (not per structure): the display settings — the thresholds, "Shrink collapsed
+groups", "Arrange in rows", the story mode, the work-item filter, the lenses (heat, progress,
+edges on demand, colour by) and the Focus / Filter switch — and the control panel: the tab
+shown and whether its body is hidden.
 
 In IndexedDB, once for the viewer: the recent maps — references to the files of the last 8 maps
 opened from disk (Edge and Chrome), not their content.
 
-The selection is not remembered. If `localStorage` is unavailable or blocked, the viewer works
-the same and simply starts fresh every time. Note that a page opened from `file://` has its own
-storage per browser, shared by all `file://` pages.
+The selection and the focus are not remembered. If `localStorage` is unavailable or blocked,
+the viewer works the same and simply starts fresh every time. Note that a page opened from
+`file://` has its own storage per browser, shared by all `file://` pages.

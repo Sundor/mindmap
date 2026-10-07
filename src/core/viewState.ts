@@ -93,7 +93,7 @@ export interface ViewportCheck {
   readonly zoomRange?: ZoomRange;
   /**
    * Size of everything laid out (from the canvas origin), with the size of the canvas element
-   * (not of the window: toolbar and panels take their share).
+   * (not of the window: the control panel and the detail panel take their share).
    */
   readonly content?: { readonly bounds: Size; readonly screen: Size };
 }

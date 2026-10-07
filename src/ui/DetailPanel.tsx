@@ -1,7 +1,7 @@
 // Right-side detail panel for the selected node, edge, aggregate or work item.
 // Everything shown is computed by pure helpers in src/core.
 
-import { useState, type ReactNode } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import {
   edgeLabelText,
   effectiveAttribute,
@@ -41,6 +41,7 @@ import {
 import { browserStorage } from './browserStorage';
 import { DETAIL_PANEL_WIDTH } from './constants';
 import { Field, NodeLink } from './detailParts';
+import { FilterContext, outsideTitle } from './filterContext';
 import { FlowDetail, FocusButton } from './FlowDetail';
 import { PanelSection } from './PanelSection';
 import { PanelSectionsContext, type PanelSections } from './panelSectionsContext';
@@ -48,7 +49,8 @@ import { NodeWorkItems, WorkItemDetail } from './WorkItemDetail';
 
 export interface DetailPanelProps {
   readonly model: ArchitectureModel;
-  readonly layout: LayoutResult;
+  /** The rows the nodes of `model` sit in; both maps empty while it is not arranged in rows. */
+  readonly rows: Pick<LayoutResult, 'placedRow' | 'rowOf'>;
   readonly selection: Selection;
   /** The rendered edges, to look up a selected aggregate. */
   readonly edges: readonly FlowEdge[];
@@ -72,11 +74,21 @@ export interface DetailPanelProps {
   /** Per node, when the heat / progress lenses are on: what the panel states in words. */
   readonly heat?: ReadonlyMap<string, NodeHeat> | undefined;
   readonly progress?: ReadonlyMap<string, NodeProgress> | undefined;
+  /**
+   * What is selected is not drawn: the filtered map leaves it out. The panel says so and offers
+   * `onShowOnMap`, which goes to it on the whole map.
+   */
+  readonly outside?: boolean | undefined;
+  readonly onShowOnMap?: (() => void) | undefined;
   readonly onClose: () => void;
 }
 
+/**
+ * The lists name the whole model whatever the map draws. Inside a `FilterContext` the links to
+ * what the filtered map leaves out are marked.
+ */
 export function DetailPanel(props: DetailPanelProps) {
-  const { selection, onClose } = props;
+  const { selection, outside = false, onShowOnMap, onClose } = props;
   const title = {
     node: 'Node',
     edge: 'Edge',
@@ -106,6 +118,14 @@ export function DetailPanel(props: DetailPanelProps) {
           ×
         </button>
       </header>
+      {outside && (
+        <p id="detail-outside-note" className="detail-outside-note">
+          Not on the map: Filter leaves it out.{' '}
+          <button type="button" id="detail-show-on-map" onClick={onShowOnMap}>
+            Show it
+          </button>
+        </p>
+      )}
       <div className="detail-body">
         {selection.type === 'node' && <NodeDetail {...props} id={selection.id} />}
         {selection.type === 'edge' && <EdgeDetail {...props} id={selection.id} />}
@@ -145,7 +165,10 @@ export function DetailPanel(props: DetailPanelProps) {
 
 type DetailProps = DetailPanelProps & { readonly id: string };
 
-/** One original edge in a list: `label [protocol]` (or its ID), kind, and the given context. */
+/**
+ * One original edge in a list: `label [protocol]` (or its ID), kind, and the given context. An
+ * edge the filtered map leaves out is marked, whether or not its kind is hidden as well.
+ */
 function EdgeItem({
   edge,
   hidden,
@@ -157,13 +180,17 @@ function EdgeItem({
   onGoToEdge: (id: string) => void;
   children: ReactNode;
 }) {
+  const filtered = useContext(FilterContext);
+  const outside = filtered !== undefined && !filtered.showsEdge(edge.id);
+  const hiddenTitle = hidden ? `${edge.id} — edge kind hidden; click to show` : edge.id;
   return (
     <li>
       <button
         type="button"
         className="detail-edge"
         data-edge-id={edge.id}
-        title={hidden ? `${edge.id} — hidden by the edge-kind filter; click to show` : edge.id}
+        data-outside={outside ? 'true' : undefined}
+        title={outside ? outsideTitle(edge.id) : hiddenTitle}
         onClick={() => onGoToEdge(edge.id)}
       >
         <span className={`kind-dot kind-dot-${edge.kind}`} aria-hidden="true" />
@@ -249,7 +276,7 @@ function EdgeRefList({
 
 function NodeDetail({
   model,
-  layout,
+  rows,
   id,
   hiddenKinds,
   overlay,
@@ -264,7 +291,7 @@ function NodeDetail({
   const node = model.nodes.get(id);
   if (!node) return null;
   const path = nodePath(model, id);
-  const row = nodeRowInfo(model, layout, id);
+  const row = nodeRowInfo(model, rows, id);
   const edges = nodeEdges(model, id);
   const listProps = { model, hiddenKinds, onGoToEdge };
 
@@ -465,7 +492,7 @@ function EdgeDetail({ model, id, hiddenKinds, onGoToNode, onGoToFlow }: DetailPr
         </Field>
         <Field label="Kind">
           <span className={`kind-dot kind-dot-${edge.kind}`} aria-hidden="true" /> {edge.kind}
-          {hiddenKinds.has(edge.kind) && ' (hidden by the filter)'}
+          {hiddenKinds.has(edge.kind) && ' (edge kind hidden)'}
         </Field>
         {edge.label !== undefined && <Field label="Label">{edge.label}</Field>}
         {edge.protocol !== undefined && <Field label="Protocol">{edge.protocol}</Field>}

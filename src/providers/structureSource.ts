@@ -16,7 +16,7 @@ export interface StructureSource {
   readonly origin: StructureOrigin;
   /** YAML text. */
   readonly text: string;
-  /** Name shown in the toolbar: the path, or the file name. */
+  /** Name shown in the control panel: the path, or the file name. */
   readonly name: string;
   /** Name used in diagnostics. */
   readonly diagnosticsName: string;

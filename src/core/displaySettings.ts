@@ -2,6 +2,7 @@
 // automatic level of detail and how collapsed groups are drawn. Stored once for the whole viewer
 // (not per structure). Pure: the storage is injected and nothing here throws.
 
+import { isFocusMode, type FocusMode } from './focus';
 import { LOD_CONFIG, LOD_THRESHOLD_KEYS, lodConfigFromStored, type LodConfig } from './lod';
 import type { ViewStateStorage } from './visibility';
 import { isStoryMode, type StoryMode } from './workitems';
@@ -34,6 +35,8 @@ export interface DisplaySettings {
   readonly edgesOnDemand: boolean;
   /** What the boxes are coloured by (`ColorBy`: `none`, an attribute, or `metric:<name>`). */
   readonly colorBy: string;
+  /** How a focus is shown: the rest of the map paled (`focus`), or not drawn at all (`filter`). */
+  readonly focusMode: FocusMode;
 }
 
 export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
@@ -47,6 +50,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   progress: false,
   edgesOnDemand: false,
   colorBy: 'none',
+  focusMode: 'focus',
 };
 
 /** `settings` showing the work items of `iteration` only, or of every iteration (undefined). */
@@ -86,6 +90,7 @@ export function serializeDisplaySettings(settings: DisplaySettings): string {
     progress: settings.progress,
     edgesOnDemand: settings.edgesOnDemand,
     colorBy: settings.colorBy,
+    focusMode: settings.focusMode,
     ...(settings.iteration !== undefined ? { iteration: settings.iteration } : {}),
   });
 }
@@ -117,6 +122,9 @@ export function parseDisplaySettings(text: string | null | undefined): DisplaySe
     // Checked against the loaded structure when used (`usableColorBy`).
     colorBy:
       typeof record.colorBy === 'string' && record.colorBy.length <= 200 ? record.colorBy : 'none',
+    focusMode: isFocusMode(record.focusMode)
+      ? record.focusMode
+      : DEFAULT_DISPLAY_SETTINGS.focusMode,
     ...(iteration !== '' ? { iteration } : {}),
   };
 }

@@ -3,6 +3,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import exampleYaml from '../../examples/architecture.yaml?raw';
 import { buildFlow } from './flow';
+import { focusSet } from './focus';
+import { filterToFocus } from './focusFilter';
 import { computeLayoutUncached, type LayoutResult } from './layout';
 import { parseOk } from './layout/test-helpers';
 import { LOD_CONFIG, lodForZoom } from './lod';
@@ -26,6 +28,7 @@ import {
   toggleEdgeKind,
   toScreen,
   unionRect,
+  viewportKeepingPlace,
   viewportToReveal,
   withoutEdgeKinds,
   FIT_MAX_ZOOM,
@@ -534,6 +537,84 @@ describe('viewport', () => {
       // … and the edge is then drawn as itself.
       expect(flow.edges.some((e) => e.data.memberEdgeIds.includes(edge.id))).toBe(true);
     }
+  });
+});
+
+describe('viewportKeepingPlace between layouts of different sets of nodes', () => {
+  const size = { width: 1000, height: 600 };
+  const rect = (x: number, y: number, width: number, height: number): Rect => ({
+    x,
+    y,
+    width,
+    height,
+  });
+  const whole = new Map([
+    ['a', rect(0, 0, 400, 300)],
+    ['a.x', rect(20, 60, 200, 100)],
+    ['b', rect(600, 0, 200, 300)],
+    ['c', rect(900, 0, 200, 300)],
+  ]);
+  /** Another arrangement, of `a` and `a.x` only. */
+  const part = new Map([
+    ['a', rect(0, 0, 260, 200)],
+    ['a.x', rect(30, 50, 200, 100)],
+  ]);
+  /** The canvas point in the middle of the screen. */
+  const centre = (viewport: Viewport) => ({
+    x: (size.width / 2 - viewport.x) / viewport.zoom,
+    y: (size.height / 2 - viewport.y) / viewport.zoom,
+  });
+  /** A viewport with canvas point (x, y) in the middle of the screen. */
+  const lookingAt = (x: number, y: number, zoom: number): Viewport => ({
+    x: size.width / 2 - x * zoom,
+    y: size.height / 2 - y * zoom,
+    zoom,
+  });
+
+  it('holds on to the node under the middle when both layouts have it', () => {
+    // The middle of a.x, there and back.
+    const next = viewportKeepingPlace(lookingAt(120, 110, 2), size, whole, part);
+    expect(next.zoom).toBe(2);
+    expect(centre(next)).toEqual({ x: 130, y: 100 });
+    expect(centre(viewportKeepingPlace(next, size, part, whole))).toEqual({ x: 120, y: 110 });
+  });
+
+  it('holds on to the nearest node both have when the one under the middle is in one only', () => {
+    // The middle of b, which `part` lacks: `a` is nearest, 500 left of it at the same height.
+    const next = viewportKeepingPlace(lookingAt(700, 150, 1), size, whole, part);
+    expect(centre(next)).toEqual({ x: 630, y: 100 });
+    // Back again the middle is on no node of `part`; `a` is still the nearest.
+    expect(centre(viewportKeepingPlace(next, size, part, whole))).toEqual({ x: 700, y: 150 });
+  });
+
+  it('returns the given viewport when the layouts share no node', () => {
+    const current = lookingAt(700, 150, 1.5);
+    const other = new Map([
+      ['b', rect(0, 0, 200, 300)],
+      ['c', rect(300, 0, 200, 300)],
+    ]);
+    expect(viewportKeepingPlace(current, size, part, other)).toBe(current);
+    expect(viewportKeepingPlace(current, size, other, part)).toBe(current);
+  });
+
+  it('keeps a node of the example in view when the map is reduced to a flow, and back', async () => {
+    const example = parseOk(exampleYaml);
+    const set = focusSet(example, { type: 'flow', id: 'rule-release' });
+    const reduced = set && filterToFocus(example, set)?.model;
+    if (!reduced) throw new Error('nothing to filter');
+    const kept = 'backoffice.config-manager.rule-editor';
+    const before = (await computeLayoutUncached(example)).absolute;
+    const after = (await computeLayoutUncached(reduced)).absolute;
+    const from = before.get(kept);
+    const to = after.get(kept);
+    if (!from || !to) throw new Error('no rectangle');
+    const current = lookingAt(from.x + from.width / 2, from.y + from.height / 2, 1.2);
+    const next = viewportKeepingPlace(current, size, before, after);
+    expect(centre(next).x).toBeCloseTo(to.x + to.width / 2, 6);
+    expect(centre(next).y).toBeCloseTo(to.y + to.height / 2, 6);
+    const back = viewportKeepingPlace(next, size, after, before);
+    expect(centre(back).x).toBeCloseTo(from.x + from.width / 2, 6);
+    expect(centre(back).y).toBeCloseTo(from.y + from.height / 2, 6);
   });
 });
 

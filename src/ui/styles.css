@@ -46,6 +46,10 @@
   --header-height: 40px;
   --unassigned-header: 36px;
 
+  /* Control panel: the rail that is always there, and the body beside it */
+  --cp-rail-width: 3.5rem;
+  --cp-body-width: 17.5rem;
+
   color-scheme: light dark;
   font-family:
     system-ui,
@@ -113,43 +117,41 @@ button {
   font: inherit;
 }
 
+/* There for a screen reader and for the outline of the page, not for the eye. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* --- Page frame ---------------------------------------------------------------------------- */
 
+/* The control panel at the left (see the end of this file), and beside it the column with the
+   notices, the map and the diagnostics. */
 .app {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
+  position: relative;
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  flex: none;
-}
-
-.toolbar h1 {
-  margin: 0;
-  font-size: 1.05rem;
-  white-space: nowrap;
-}
-
-/* The version, small beside the name: there to be read out when something is reported. */
-.app-version {
-  margin-left: -0.35rem;
-  color: var(--muted);
-  font-size: 0.7rem;
-  white-space: nowrap;
-}
-
-.toolbar-spacer {
+.app-column {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.toolbar button,
+/* The buttons in the body of the control panel and on the start page. A class on one of them
+   needs `button.<class>` further down, or two classes, to change what is set here. */
+.cp-body button,
 .empty-state button {
   padding: 0.3rem 0.75rem;
   border: 1px solid var(--border);
@@ -160,12 +162,12 @@ button {
   white-space: nowrap;
 }
 
-.toolbar button:hover:not(:disabled),
+.cp-body button:hover:not(:disabled),
 .empty-state button:hover {
   border-color: var(--accent);
 }
 
-.toolbar button:disabled {
+.cp-body button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -177,38 +179,21 @@ button {
   padding: 0.5rem 1.25rem;
 }
 
-.source-name {
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.8rem;
-  max-width: 28rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* What a loaded file holds, on the Files tab of the control panel. */
 .model-summary {
   color: var(--muted);
   font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
+/* A row of buttons of which one is chosen: the level of detail, the story mode. */
 .lod-indicator {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   color: var(--muted);
   font-size: 0.75rem;
-  white-space: nowrap;
   cursor: default;
-}
-
-.lod-indicator-caption {
-  margin-right: 0.15rem;
 }
 
 .lod-step {
@@ -219,6 +204,10 @@ button {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.cp-body .lod-step {
+  padding: 0.2rem 0.5rem;
 }
 
 .lod-step:hover {
@@ -871,22 +860,15 @@ input:focus-visible {
   outline-offset: 1px;
 }
 
-/* --- Toolbar: search and edge-kind filters ------------------------------------------------- */
-
-.toolbar {
-  flex-wrap: wrap;
-  row-gap: 0.4rem;
-  /* Above the canvas, so the search results can hang over it. */
-  position: relative;
-  z-index: 20;
-}
+/* --- Search and edge-kind filters (in the control panel) ----------------------------------- */
 
 .search {
   position: relative;
 }
 
 .search input {
-  width: 13rem;
+  box-sizing: border-box;
+  width: 100%;
   padding: 0.3rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -928,6 +910,12 @@ input:focus-visible {
   color: var(--bg);
 }
 
+/* On the accent the paled texts of a match would be too faint to read: at full strength there. */
+.search-option-active .search-option-level,
+.search-option-active .search-option-id {
+  opacity: 1;
+}
+
 .search-option-name {
   font-weight: 600;
   overflow: hidden;
@@ -943,14 +931,30 @@ input:focus-visible {
   align-self: center;
 }
 
-.search-option-id {
+/* The second line of a match: its ID and, at the end, what there is to say about it. */
+.search-option-more {
   grid-column: 1 / -1;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.search-option-id {
+  flex: 1;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.75rem;
   opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Choosing the match changes the map: said in the colour of the name, not paled like the ID. */
+.search-option-note {
+  flex: none;
+  font-size: 0.75rem;
 }
 
 .search-empty {
@@ -960,11 +964,12 @@ input:focus-visible {
 }
 
 .kind-filters {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
 }
 
-.toolbar button.kind-filter {
+.cp-body button.kind-filter {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -972,13 +977,13 @@ input:focus-visible {
   font-size: 0.78rem;
 }
 
-.toolbar button.kind-filter[aria-pressed='false'] {
+.cp-body button.kind-filter[aria-pressed='false'] {
   opacity: 0.5;
   text-decoration: line-through;
   border-style: dashed;
 }
 
-/* Legend sample: the same stroke as the edges of that kind. */
+/* Sample of a kind's line, on its button and in the legend: the same stroke as its edges. */
 .kind-sample {
   width: 28px;
   height: 8px;
@@ -1315,10 +1320,6 @@ input:focus-visible {
   cursor: default;
 }
 
-.settings-completed {
-  margin-bottom: 0.2rem;
-}
-
 /* Positions unlocked: the boxes can be dragged. */
 .app[data-positions-unlocked='true'] .arch-node {
   cursor: grab;
@@ -1334,54 +1335,9 @@ input:focus-visible {
   color: var(--bg);
 }
 
-/* --- Settings drop-down ---------------------------------------------------------------- */
+/* --- Rows of controls in the tabs of the control panel --------------------------------- */
 
-.settings {
-  position: relative;
-  font-size: 0.8rem;
-}
-
-.settings > summary {
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-
-.settings > summary::-webkit-details-marker {
-  display: none;
-}
-
-.settings[open] > summary {
-  border-color: var(--accent);
-}
-
-.settings-body {
-  position: absolute;
-  top: calc(100% + 4px);
-  /* Set by SettingsPanel so that the drop-down stays inside the window. */
-  left: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  width: min(22rem, 100vw - 1rem);
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-}
-
-.settings-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-weight: 600;
-}
-
+/* A value shown beside a section title: the zoom now, how many work items are shown. */
 .settings-zoom {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
@@ -1395,7 +1351,17 @@ input:focus-visible {
 
 .settings-label {
   flex: none;
-  width: 8.5rem;
+  min-width: 4.5rem;
+}
+
+/* The label on a line of its own, the control below it (the threshold sliders). */
+.settings-row-stacked {
+  flex-wrap: wrap;
+  row-gap: 0.1rem;
+}
+
+.settings-row-stacked .settings-label {
+  width: 100%;
 }
 
 .settings-row input[type='range'] {
@@ -1410,17 +1376,28 @@ input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.settings-check {
-  margin-top: 0.3rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
+/* A checkbox with what it does; the text wraps beside the box. */
+.settings-check,
+.settings-completed {
+  align-items: flex-start;
 }
 
-.settings-check small {
+.settings-check input,
+.settings-completed input {
+  flex: none;
+  margin-top: 0.15rem;
+}
+
+.settings-check small,
+.settings-completed small {
   color: var(--muted);
 }
 
-/* --- Collapsed groups drawn shrunk (Settings → Shrink collapsed groups) ------------------ */
+.settings-completed {
+  margin-bottom: 0.2rem;
+}
+
+/* --- Collapsed groups drawn shrunk (Detail tab → Shrink collapsed groups) ---------------- */
 
 /*
  * The box is sized in src/core/compactGroup.ts for exactly this layout: the type sizes, line
@@ -1763,14 +1740,11 @@ input:focus-visible {
   margin-right: 0.15rem;
 }
 
-/* The work-item filter in the Settings drop-down. */
+/* A group of controls in a tab of the control panel: the lenses, the work-item filter. */
 .settings-group {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  margin-top: 0.3rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
 }
 
 .settings-states {
@@ -1842,15 +1816,32 @@ input:focus-visible {
   display: none;
 }
 
+/* The text at the left, on as many lines as it needs; the controls at the right end of the
+   first line. Neither the length of the text nor the number of its lines moves a control. */
 .notice-focus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+/* Its share of the line does not depend on what it says: the controls go to a line of their own
+   only where the bar is too narrow for both. */
+.focus-bar-text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.focus-bar-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  margin-left: auto;
 }
 
-.notice-focus button {
+.notice-focus button:not(.switch) {
   padding: 0.1rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1859,14 +1850,21 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.toolbar-select {
-  display: inline-flex;
-  gap: 0.35rem;
-  align-items: center;
+/* What the viewer changed by itself, said in the bar whose switch changes it back. */
+#focus-bar-note {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-style: italic;
 }
 
-.toolbar-select select {
-  max-width: 14rem;
+/* A chooser as wide as the control panel: the focus. */
+.cp-select {
+  display: flex;
+}
+
+.cp-select select {
+  width: 100%;
+  font: inherit;
 }
 
 /* --- Lenses on the boxes (src/ui/nodes.tsx) --------------------------------------------- */
@@ -1968,23 +1966,56 @@ input:focus-visible {
     color-mix(in srgb, var(--tint) 14%, var(--collapsed-bg));
 }
 
-/* The legend of "Colour by", over the canvas. */
+/* The legends over the canvas, at its top left: the edge kinds, and what "Colour by" shows. */
 .map-row {
   position: relative;
 }
 
-.color-legend {
+.map-legends {
   position: absolute;
   top: 0.6rem;
   left: 0.6rem;
   z-index: 5;
-  max-width: 16rem;
-  padding: 0.4rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.edge-legend,
+.color-legend {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   font-size: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Two kinds to a line: the legend takes little of the height of the map below it. */
+.edge-legend {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.1rem 0.9rem;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  list-style: none;
+}
+
+.edge-legend li {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* A kind that is not drawn at present. */
+.edge-legend li[data-hidden='true'] {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.color-legend {
+  max-width: 16rem;
+  padding: 0.4rem 0.6rem;
 }
 
 .color-legend-title {
@@ -2093,16 +2124,31 @@ input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Saved views (src/ui/ViewsMenu.tsx) --------------------------------------------------- */
+/* --- Saved views (src/ui/ViewsTab.tsx) ---------------------------------------------------- */
 
+.views {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+/* The name and Save on one line; Copy link goes below them where the panel is narrow. */
 .views-save {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 
 .views-save input {
-  flex: 1;
+  flex: 1 1 7rem;
+  box-sizing: border-box;
   min-width: 0;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
 }
 
 .views-list {
@@ -2166,13 +2212,19 @@ input:focus-visible {
   margin: 0.15rem 0;
 }
 
-/* --- Recent maps: the toolbar drop-down and the start page ------------------- */
+/* --- Recent maps: the Files tab of the control panel and the start page ------ */
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
 
 .recent-list li {
   align-items: stretch;
 }
 
-.toolbar .recent-list .recent-open,
+.cp-body .recent-list .recent-open,
 .empty-state .recent-list .recent-open {
   display: flex;
   flex: 1;
@@ -2198,12 +2250,12 @@ input:focus-visible {
   font-weight: 600;
 }
 
+/* On as many lines as they need: the end of a long file name and the date at the end of the
+   second line tell two maps apart. */
 .recent-name,
 .recent-hint {
-  overflow: hidden;
   max-width: 100%;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .recent-hint {
@@ -2211,7 +2263,7 @@ input:focus-visible {
   font-size: 0.8rem;
 }
 
-.toolbar .recent-list .recent-forget,
+.cp-body .recent-list .recent-forget,
 .empty-state .recent-list .recent-forget {
   flex: none;
   align-self: center;
@@ -2222,7 +2274,7 @@ input:focus-visible {
   color: var(--muted);
 }
 
-.toolbar .recent-list .recent-forget:hover,
+.cp-body .recent-list .recent-forget:hover,
 .empty-state .recent-list .recent-forget:hover {
   border-color: var(--border);
   color: var(--fg);
@@ -2240,9 +2292,423 @@ input:focus-visible {
   font-size: 0.875rem;
 }
 
-/* Sits with the file names in the first row of the toolbar: as small as the menus next to it. */
-.toolbar .reload-files {
-  padding: 0.2rem 0.6rem;
-  border-radius: 4px;
+/* --- Control panel (src/ui/ControlPanel.tsx) --------------------------------------------- */
+
+/*
+ * A rail that is always there and, beside it, the body: the title, the search box and the tab
+ * that is shown. From 1400px of window width (CONTROL_PANEL_DOCK_WIDTH in
+ * src/core/controlPanel.ts) the open body stands beside the canvas; in a narrower window it lies
+ * over the left of the canvas, which then keeps its size whatever the panel shows. The rail and
+ * the body carry their own borders, so the panel is exactly as wide as the two custom
+ * properties say.
+ */
+.control-panel {
+  flex: none;
+  display: flex;
+  /* Above the canvas: the search results, and the body in a narrow window, hang over it. */
+  position: relative;
+  z-index: 20;
+  background: var(--panel);
   font-size: 0.8rem;
+}
+
+/* An author `display` would otherwise beat the attribute, and the tabs not shown would show. */
+.control-panel [hidden] {
+  display: none !important;
+}
+
+.cp-rail {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--cp-rail-width);
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem 0;
+  border-right: 1px solid var(--border);
+  /* In a very short window the rail scrolls rather than lose its last buttons. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.cp-tabs {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+/* Every item of the rail: an icon above its caption. */
+.cp-rail-button,
+.cp-tab {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.45rem 0 0.4rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.cp-rail-button:hover:not(:disabled),
+.cp-tab:hover:not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+
+/* Inside the button: the rail cuts off what reaches beyond it. */
+.cp-rail-button:focus-visible,
+.cp-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.cp-rail-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cp-tab[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The tab whose panel is on screen; with the body collapsed no panel is, and no tab is marked. */
+.control-panel[data-collapsed='false'] .cp-tab[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--accent);
+}
+
+.cp-icon {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.cp-tab-label {
+  white-space: nowrap;
+}
+
+.cp-rail-spacer {
+  flex: 1;
+  min-height: 0.5rem;
+}
+
+/* What a tab says about the controls behind it: a dot or a number at its top right corner… */
+.cp-tab-mark {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.45rem;
+  box-sizing: border-box;
+  min-width: 0.85rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--panel);
+  font-size: 0.56rem;
+  font-weight: 600;
+  line-height: 0.85rem;
+  text-align: center;
+}
+
+.cp-tab-mark-dot {
+  top: 0.4rem;
+  right: 0.75rem;
+  width: 0.45rem;
+  min-width: 0;
+  height: 0.45rem;
+  padding: 0;
+  background: var(--accent);
+}
+
+/* …and the level of detail being drawn, under the caption of its tab. */
+.cp-tab-mark-level {
+  position: static;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font-weight: 400;
+}
+
+/* A level pinned by hand, not following the zoom. */
+.cp-tab-mark-pinned {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+
+.cp-body {
+  box-sizing: border-box;
+  width: var(--cp-body-width);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  /* No `overflow`: the search results hang out of the body, over the canvas. */
+}
+
+/* The name and the version on one line, the names of the files in use below them. */
+.cp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: 0.5rem;
+  padding: 0.65rem 0.75rem 0.6rem;
+}
+
+.cp-head h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+
+/* The version, small beside the name: there to be read out when something is reported. */
+.app-version {
+  margin-left: 0.35rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.cp-files {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+
+/* The name of a file in use: cut where it is too long for the panel. */
+.source-name {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-search {
+  padding: 0 0.75rem 0.65rem;
+}
+
+/* The tab that is shown: the only part of the panel that scrolls. */
+.cp-panels {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.cp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.75rem 1.2rem;
+}
+
+.cp-panel-title {
+  margin: 0 0 0.15rem;
+  font-size: 0.95rem;
+}
+
+/* The title of a section of a tab, like those of the detail panel; a value may stand beside it. */
+.cp-section-title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The first section follows the title of the tab: nothing to be set apart from. */
+.cp-panel-title + .cp-section-title,
+.cp-panel-title + * > .cp-section-title:first-child {
+  margin-top: 0;
+}
+
+.cp-section-title .settings-zoom {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Buttons side by side, on as many lines as the panel needs. */
+.cp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cp-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Collapsed, the body holds the search box alone, and only while it is in use: a card beside
+   the rail, level with the Search button. */
+.cp-body.cp-body-flyout {
+  position: absolute;
+  top: 0.35rem;
+  bottom: auto;
+  left: calc(var(--cp-rail-width) + 0.35rem);
+  height: auto;
+  max-width: calc(100vw - var(--cp-rail-width) - 0.7rem);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.cp-body-flyout .cp-search {
+  padding: 0.4rem;
+}
+
+@media (max-width: 1399.98px) {
+  .cp-body {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--cp-rail-width);
+    width: min(var(--cp-body-width), calc(100vw - var(--cp-rail-width)));
+    background: var(--panel);
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.18);
+  }
+
+  /*
+   * The open body lies over the left of the column. Only the canvas stays under it, at its
+   * size; everything else there begins where the body ends: the notices above the canvas, the
+   * status lines, the start page and the diagnostics, and what stands at the left of the canvas
+   * (the legends, the zoom buttons).
+   */
+  .app[data-panel-collapsed='false'] {
+    --cp-covered: min(var(--cp-body-width), calc(100vw - var(--cp-rail-width)));
+  }
+
+  .app[data-panel-collapsed='false'] .app-column > .notice,
+  .app[data-panel-collapsed='false'] .app-main > .status:not(.layout-pending) {
+    padding-left: calc(var(--cp-covered) + 1rem);
+  }
+
+  /* The start page stays in the middle of what is left free. */
+  .app[data-panel-collapsed='false'][data-load='empty'] .app-main,
+  .app[data-panel-collapsed='false'] .diagnostics {
+    padding-left: var(--cp-covered);
+  }
+
+  .app[data-panel-collapsed='false'] .layout-pending {
+    left: calc(50% + var(--cp-covered) / 2);
+  }
+
+  .app[data-panel-collapsed='false'] .map-legends {
+    left: calc(var(--cp-covered) + 0.6rem);
+  }
+
+  .app[data-panel-collapsed='false'] .react-flow__controls {
+    margin-left: calc(var(--cp-covered) + 15px);
+  }
+}
+
+/* --- Switch between two named positions (src/ui/Switch.tsx) ------------------------------ */
+
+button.switch {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.1rem 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 2rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 30%, transparent);
+  transition: background-color 0.12s;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.1rem - 4px);
+  height: calc(1.1rem - 4px);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s;
+}
+
+.switch[aria-checked='true'] .switch-track {
+  background: var(--accent);
+}
+
+.switch[aria-checked='true'] .switch-thumb {
+  transform: translateX(0.9rem);
+}
+
+/* The name of the position in force. */
+.switch[aria-checked='false'] .switch-label-off,
+.switch[aria-checked='true'] .switch-label-on {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* --- What a map filtered to the focus leaves out, where it is still listed --------------- */
+
+/* A link or a list entry in the detail panel, a search result: not drawn at present. */
+.detail-link-outside,
+.detail-edge[data-outside='true'] .detail-edge-label,
+.detail-edge[data-outside='true'] .detail-workitem-title,
+.search-option-outside .search-option-name {
+  font-style: italic;
+}
+
+.detail-link-outside {
+  color: var(--muted);
+}
+
+/* Under the header of the detail panel: what it shows is not drawn, and the way to it. */
+.detail-outside-note {
+  flex: none;
+  margin: 0;
+  padding: 0.4rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.detail-outside-note button {
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
 }

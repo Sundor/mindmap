@@ -5,8 +5,10 @@ import {
   FADED_CLASS,
   flowsOfEdge,
   flowsOfNode,
+  FOCUS_MODES,
   focusFlow,
   focusSet,
+  isFocusMode,
   QUIET_CLASS,
   quietEdges,
   buildWorkItemOverlay,
@@ -89,6 +91,16 @@ describe('focusSet', () => {
   });
 });
 
+describe('isFocusMode', () => {
+  it('knows the two ways a focus is shown, and nothing else', () => {
+    expect(FOCUS_MODES).toEqual(['focus', 'filter']);
+    for (const mode of FOCUS_MODES) expect(isFocusMode(mode)).toBe(true);
+    for (const other of ['Filter', 'off', '', 0, true, null, undefined, ['filter']]) {
+      expect(isFocusMode(other)).toBe(false);
+    }
+  });
+});
+
 describe('focusFlow and quietEdges', async () => {
   const layout = await computeLayoutUncached(model);
 
@@ -125,6 +137,70 @@ describe('focusFlow and quietEdges', async () => {
     expect(isFaded('a')).toBe(false); // group around it
     expect(isFaded('a.y')).toBe(true);
     expect(isFaded('b.p')).toBe(false); // inside the named node b
+  });
+
+  it('never pales what the selection is on, with the groups around it', () => {
+    const set = focusSet(model, { type: 'flow', id: 'order' });
+    if (!set) throw new Error('set');
+    const flow = buildFlow(model, layout);
+    const fadedNodes = (shown: ReturnType<typeof focusFlow>) =>
+      shown.nodes
+        .filter((node) => node.className?.includes(FADED_CLASS))
+        .map((node) => node.id)
+        .sort();
+    const fadedEdges = (shown: ReturnType<typeof focusFlow>) =>
+      shown.edges
+        .filter((edge) => edge.className.includes(FADED_CLASS))
+        .flatMap((edge) => edge.data.memberEdgeIds)
+        .sort();
+    // Without a selection the flow leaves Beta and its component paled.
+    expect(fadedNodes(focusFlow(model, flow, set))).toEqual(['b', 'b.p']);
+    // A selected node, and the group it is drawn in; its edges stay as the focus has them.
+    const node = focusFlow(model, flow, set, { type: 'node', id: 'b.p' });
+    expect(fadedNodes(node)).toEqual([]);
+    expect(fadedEdges(node)).toEqual(['p-one', 'y-p']);
+    // A selected edge, with its two ends and their groups.
+    const selected = flow.edges.find((edge) => edge.data.memberEdgeIds.includes('y-p'));
+    if (!selected) throw new Error('edge');
+    const edge = focusFlow(model, flow, set, { type: 'edge', id: selected.id });
+    expect(fadedNodes(edge)).toEqual([]);
+    expect(fadedEdges(edge)).toEqual(['p-one']);
+    expect(edge.edges.find((candidate) => candidate.id === selected.id)?.data.faded).not.toBe(true);
+    // The nodes that show a selected work item.
+    const shownBy = focusFlow(model, flow, set, { type: 'workitem', id: 5, nodeIds: ['b.p'] });
+    expect(fadedNodes(shownBy)).toEqual([]);
+    // A selection inside the focus changes nothing, and one that is not drawn lights nothing.
+    expect(fadedNodes(focusFlow(model, flow, set, { type: 'node', id: 'a.y' }))).toEqual([
+      'b',
+      'b.p',
+    ]);
+    expect(fadedNodes(focusFlow(model, flow, set, { type: 'edge', id: 'nope' }))).toEqual([
+      'b',
+      'b.p',
+    ]);
+    // Only the group around the selected node: its other contents stay paled.
+    const deploy = focusSet(model, { type: 'flow', id: 'deploy' });
+    if (!deploy) throw new Error('set');
+    expect(fadedNodes(focusFlow(model, flow, deploy))).toEqual(['a.x.two', 'a.y']);
+    expect(fadedNodes(focusFlow(model, flow, deploy, { type: 'node', id: 'a.y' }))).toEqual([
+      'a.x.two',
+    ]);
+    // A selected group with what is drawn inside it; the ends of an edge without their contents.
+    expect(fadedNodes(focusFlow(model, flow, set, { type: 'node', id: 'b' }))).toEqual([]);
+    const order = focusSet(model, { type: 'flow', id: 'order' });
+    const closed = buildFlow(model, layout, { lodLevel: 'domains' });
+    const between = closed.edges.find((candidate) => candidate.data.memberEdgeIds.includes('y-p'));
+    if (!order || !between) throw new Error('domains');
+    expect(fadedNodes(focusFlow(model, closed, order))).toEqual(['b']);
+    expect(fadedNodes(focusFlow(model, closed, order, { type: 'edge', id: between.id }))).toEqual(
+      [],
+    );
+    const edgeAtGroup = focusFlow(model, flow, deploy, {
+      type: 'edge',
+      id: flow.edges.find((candidate) => candidate.data.memberEdgeIds.includes('two-y'))?.id ?? '',
+    });
+    // two-y runs from a.x.two to a.y: both ends light up, nothing else changes.
+    expect(fadedNodes(edgeAtGroup)).toEqual([]);
   });
 
   it('quietens every edge but those at the given nodes or in the focus', () => {

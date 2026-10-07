@@ -143,7 +143,7 @@ export function DiagnosticsPanel({
                   {coverage.hidden > 0 ? ' shown' : ''} linked to the structure by a comp: tag
                   (their own, or for a task that of the item it belongs to).
                   {coverage.hidden > 0
-                    ? ` ${plural(coverage.hidden, 'item')} hidden by the filter ${
+                    ? ` ${plural(coverage.hidden, 'item')} hidden by the work-item filter ${
                         coverage.hidden === 1 ? 'is' : 'are'
                       } not counted.`
                     : ''}

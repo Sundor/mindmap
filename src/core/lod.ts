@@ -98,7 +98,7 @@ export const LOD_THRESHOLD_KEYS: readonly LodThresholdKey[] = [
   'subcomponentsZoom',
   'detailZoom',
 ];
-/** Range offered for a threshold (the sliders in the settings). */
+/** Range offered for a threshold (the sliders on the Detail tab). */
 export const LOD_THRESHOLD_RANGE = { min: 0.05, max: 4, step: 0.05 } as const;
 
 /** Smallest ratio between consecutive thresholds: their dead bands must not touch. */

@@ -203,8 +203,9 @@ const PAGE_HELPERS = `
     clickPoint: (selector) => {
       const el = document.querySelector(selector);
       if (!el) return null;
-      // The detail panel scrolls; the canvas must not be scrolled by this.
-      if (el.closest('.detail-body')) el.scrollIntoView({ block: 'nearest' });
+      // The detail panel and the tabs of the control panel scroll; the canvas must not be
+      // scrolled by this.
+      if (el.closest('.detail-body, .cp-panels')) el.scrollIntoView({ block: 'nearest' });
       const hits = (x, y) => {
         const top = document.elementFromPoint(x, y);
         return top !== null && (el === top || el.contains(top));
@@ -226,6 +227,36 @@ const PAGE_HELPERS = `
         if (hits(x, y)) return { x, y };
       }
       return null;
+    },
+    // The ID of the tab of the control panel to click so that the element is shown: null when
+    // it is on the tab shown, or in no tab. Never the tab shown in an open body: a click on that
+    // one would collapse the body.
+    tabFor: (selector) => {
+      const panel = document.querySelector(selector)?.closest('[role="tabpanel"]');
+      if (!panel) return null;
+      const collapsed = window.__smoke.attr('data-panel-collapsed') === 'true';
+      return panel.hidden || collapsed ? panel.getAttribute('aria-labelledby') : null;
+    },
+    // The tabs of the control panel and their panels, as the page states them: which tab is
+    // selected, which cannot be chosen, whether each names its panel and is named by it, and
+    // which panels are on screen.
+    tabs: () => {
+      const tabs = [...document.querySelectorAll('#control-panel [role="tablist"] [role="tab"]')];
+      const panels = [...document.querySelectorAll('#control-panel [role="tabpanel"]')];
+      return {
+        tabs: tabs.map((tab) => tab.id),
+        selected: tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.id),
+        disabled: tabs.filter((tab) => tab.getAttribute('aria-disabled') === 'true').map((tab) => tab.id),
+        paired: tabs.every((tab) => {
+          const panel = document.getElementById(tab.getAttribute('aria-controls'));
+          return panel?.getAttribute('role') === 'tabpanel' && panel.getAttribute('aria-labelledby') === tab.id;
+        }),
+        panels: panels.length,
+        shown: panels.filter((panel) => panel.getClientRects().length > 0).map((panel) => panel.id),
+        tab: window.__smoke.attr('data-panel-tab'),
+        collapsed: window.__smoke.attr('data-panel-collapsed'),
+        active: document.activeElement?.id ?? null,
+      };
     },
     // A point of the canvas with nothing but the empty pane under it.
     emptyPoint: () => {
@@ -257,12 +288,43 @@ const PAGE_HELPERS = `
       return points;
     },
     edgeIds: () => [...document.querySelectorAll('.react-flow__edge')].map((e) => e.dataset.id),
+    // The IDs of the nodes drawn (the row bands are none), sorted; "only" narrows the selector.
+    nodeIds: (only = '') =>
+      [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)' + only)].map((n) => n.dataset.id).sort(),
     nodesOnCanvas: () => {
       const c = document.querySelector('.react-flow').getBoundingClientRect();
       return [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].filter((el) => {
         const r = el.getBoundingClientRect();
         return r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top;
       }).length;
+    },
+    // The boxes that hold no other box (leaves, closed groups) and lie partly under the minimap,
+    // and whether the whole map ends beside the minimap or above it.
+    underMinimap: () => {
+      const minimap = document.querySelector('.react-flow__minimap').getBoundingClientRect();
+      const boxes = [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => ({ id: el.dataset.id, r: el.getBoundingClientRect() }));
+      const holds = (a, b) => a !== b && b.r.left >= a.r.left && b.r.right <= a.r.right && b.r.top >= a.r.top && b.r.bottom <= a.r.bottom;
+      const under = boxes
+        .filter((a) => !boxes.some((b) => holds(a, b)))
+        .filter(({ r }) => Math.min(r.right, minimap.right) - Math.max(r.left, minimap.left) > 1 && Math.min(r.bottom, minimap.bottom) - Math.max(r.top, minimap.top) > 1)
+        .map(({ id }) => id);
+      const all = [...document.querySelectorAll('.react-flow__node')].map((el) => el.getBoundingClientRect());
+      const right = Math.max(...all.map((r) => r.right));
+      const bottom = Math.max(...all.map((r) => r.bottom));
+      return { under, clear: right <= minimap.left + 1 || bottom <= minimap.top + 1 };
+    },
+    // The nodes drawn that are not entirely on the canvas (none, when the map is fitted into it).
+    offCanvas: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      return [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left < c.left - 1 || r.right > c.right + 1 || r.top < c.top - 1 || r.bottom > c.bottom + 1;
+      }).map((el) => el.dataset.id);
+    },
+    // The viewport kept in the browser for the structure, as the text that is stored.
+    storedViewport: () => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith('architecture-map.viewport:'));
+      return key === undefined ? null : localStorage.getItem(key);
     },
     // Shrunk closed groups whose box is too small for what it holds (none should be): the
     // list of names or the name cut off, in either direction, or names left out ("+k more").
@@ -398,6 +460,20 @@ const PAGE_HELPERS = `
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     },
+    // Chooses an option of a select, as a pick from its list would.
+    choose: (selector, value) => {
+      const select = document.querySelector(selector);
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    // Waits until the page shows what an action just changed ("done" holds), and for no longer:
+    // it gives way to nothing that needs a frame or a timer, so no layout arrives meanwhile.
+    // For what the page shows between an action and the map that follows it.
+    rendered: async (done) => {
+      for (let turn = 0; turn < 50 && !done(); turn++) await null;
+      return done();
+    },
     // True when some of the element is on the canvas.
     partlyOnScreen: (selector) => {
       const el = document.querySelector(selector);
@@ -526,7 +602,8 @@ async function run(viewerPath, browserPath) {
       '--no-default-browser-check',
       ...OFFLINE_FLAGS,
       '--allow-file-access-from-files',
-      '--window-size=1500,950',
+      // Wide enough for the body of the control panel to stand beside the canvas.
+      '--window-size=1836,827',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
       'about:blank',
@@ -677,14 +754,43 @@ async function run(viewerPath, browserPath) {
         return still;
       }, 'the view to come to rest');
     };
+    /**
+     * Shows the tab of the control panel that holds the element, with a click on the rail.
+     * Nothing to do for an element on the tab shown, or in no tab.
+     * @param {string} selector
+     */
+    const showControl = async (selector) => {
+      /** @type {string | null} */
+      const tab = await evaluate(`window.__smoke.tabFor(${JSON.stringify(selector)})`);
+      if (tab === null) return;
+      const point = await until(`window.__smoke.clickPoint('#${tab}')`, `a clickable #${tab}`);
+      await clickAt(point, `#${tab}`);
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${tab.replace('tab-', '')}' && window.__smoke.attr('data-panel-collapsed') === 'false'`,
+        `the tab of ${selector}`,
+      );
+    };
     /** @param {string} selector */
     const click = async (selector) => {
       await settled();
+      await until(`window.__smoke.count(${JSON.stringify(selector)}) > 0`, selector);
+      await showControl(selector);
       const point = await until(
         `window.__smoke.clickPoint(${JSON.stringify(selector)})`,
         `a clickable ${selector}`,
       );
       await clickAt(point, selector);
+    };
+    /**
+     * Rests the pointer on the empty part of the rail of the control panel: on nothing of the
+     * map, and clear of the search results, which open to the right of the rail.
+     */
+    const park = async () => {
+      const point = await evaluate(`(() => {
+        const r = document.querySelector('.cp-rail-spacer').getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
     };
     /** @param {string} key @param {{ code?: string, keyCode?: number, text?: string, modifiers?: number }} [extra] */
     const press = async (key, extra = {}) => {
@@ -697,6 +803,37 @@ async function run(viewerPath, browserPath) {
       });
       await client.send('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
     };
+    /**
+     * Puts the cursor in the search box with its shortcut: "/", or Ctrl+K. The pointer is parked
+     * first: where a click on a control left it, the results would open under it, and a result
+     * under the pointer takes the highlight.
+     * @param {'/' | 'k'} [key]
+     */
+    const openSearch = async (key = '/') => {
+      await park();
+      if (key === 'k') await press('k', { code: 'KeyK', keyCode: 75, modifiers: 2 });
+      else await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    };
+    /** Left and right edge and the width of an element on screen. @param {string} selector */
+    const sides = (selector) =>
+      evaluate(`(() => {
+        const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return { left: r.left, right: r.right, width: r.width };
+      })()`);
+    /** Collapses the body of the control panel to the rail, or shows it again. @param {boolean} collapsed */
+    const togglePanel = async (collapsed) => {
+      await click('#panel-toggle');
+      await until(
+        `window.__smoke.attr('data-panel-collapsed') === '${collapsed}'`,
+        `the control panel ${collapsed ? 'collapsed' : 'open'}`,
+      );
+    };
+    /**
+     * Whether two viewports are the same view: within a pixel and a thousandth of the zoom.
+     * @param {{ x: number, y: number, zoom: number }} a @param {{ x: number, y: number, zoom: number }} b
+     */
+    const sameView = (a, b) =>
+      Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.zoom - b.zoom) < 0.001;
     const selection = () => evaluate(`window.__smoke.attr('data-selection')`);
     /** @param {string | null} value */
     const untilSelection = (value) =>
@@ -748,8 +885,8 @@ async function run(viewerPath, browserPath) {
       path.join(path.dirname(viewerPath), name),
     );
     /**
-     * Drops files on the page, as from the file manager. The pointer is parked in the gutter
-     * afterwards, so that it rests on nothing of the map.
+     * Drops files on the page, as from the file manager. The pointer is parked afterwards, so
+     * that it rests on nothing of the map.
      * @param {string[]} files
      */
     const dropFiles = async (files) => {
@@ -757,7 +894,7 @@ async function run(viewerPath, browserPath) {
       for (const type of ['dragEnter', 'dragOver', 'drop']) {
         await client.send('Input.dispatchDragEvent', { type, x: 700, y: 500, data });
       }
-      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 500 });
+      await park();
     };
     /** Waits for the page without a map: opened from disk it has to be given its files. */
     const startPage = () =>
@@ -783,6 +920,26 @@ async function run(viewerPath, browserPath) {
       await startPage();
       await dropFiles(dataFiles);
       await mapShown();
+    };
+    /**
+     * Reloads the page with the given fragment in its address and gives it its files again. (A
+     * navigation that only changes the fragment is no reload: the page is reloaded explicitly.)
+     * @param {string} hash
+     */
+    const reloadWith = async (hash) => {
+      await evaluate(
+        `window.history.replaceState(null, '', window.location.href.split('#')[0] + ${JSON.stringify(hash)})`,
+      );
+      await client.send('Page.reload');
+      await startPage();
+      await dropFiles(dataFiles);
+      await until(
+        `document.readyState === 'complete' && document.querySelectorAll('.react-flow__node').length > 0`,
+        'the map after the reload',
+      );
+      await evaluate(PAGE_HELPERS);
+      await until(`window.__smoke.attr('data-lines-laid-out') === 'true'`, 'the reloaded layout');
+      await sleep(300);
     };
 
     // --- Load ---------------------------------------------------------------------------------
@@ -821,20 +978,20 @@ async function run(viewerPath, browserPath) {
         (await evaluate(`document.querySelector('#source-name')?.dataset.origin`)) === 'file' &&
         (await evaluate(`window.__smoke.text('#source-name')`)) === 'architecture.yaml',
     );
-    // The version (README.md, "Versioning"): the one of package.json, in the
-    // toolbar and in the page itself.
+    // The version (README.md, "Versioning"): the one of package.json, at the head of the
+    // control panel and in the page itself.
     const packageVersion = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ).version;
     const shownVersion = await evaluate(`({
-      toolbar: document.querySelector('#app-version')?.textContent ?? null,
+      head: document.querySelector('#app-version')?.textContent ?? null,
       root: document.querySelector('.app')?.dataset.version ?? null,
       page: document.querySelector('meta[name="generator"]')?.content ?? null,
     })`);
     check(
       `the viewer shows its version, ${packageVersion}, and the page names it`,
       /^\d+\.\d+\.\d+/.test(packageVersion) &&
-        shownVersion.toolbar === packageVersion &&
+        shownVersion.head === packageVersion &&
         shownVersion.root === packageVersion &&
         shownVersion.page === `architecture-map ${packageVersion}`,
       shownVersion,
@@ -863,6 +1020,424 @@ async function run(viewerPath, browserPath) {
       (await selection()) === null &&
         (await evaluate(`window.__smoke.count('#detail-panel')`)) === 0,
     );
+
+    // --- Control panel: tabs, every control, the edge legend, collapsing, a reload ------------
+    const tabNames = ['detail', 'visibility', 'lenses', 'layout', 'views', 'files'];
+    const tabsState = () => evaluate(`window.__smoke.tabs()`);
+    /** @param {unknown} a @param {unknown} b */
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    /** Whether the open panel shows that tab and no other. @param {string} name */
+    const showsTab = async (name) => {
+      const state = await tabsState();
+      return (
+        same(state.selected, [`tab-${name}`]) &&
+        same(state.shown, [`panel-${name}`]) &&
+        state.tab === name &&
+        state.collapsed === 'false'
+      );
+    };
+    const tabsAtStart = await tabsState();
+    check(
+      'the control panel has six tabs, each with its panel, and shows the first: Level of detail',
+      same(
+        tabsAtStart.tabs,
+        tabNames.map((name) => `tab-${name}`),
+      ) &&
+        tabsAtStart.disabled.length === 0 &&
+        tabsAtStart.paired &&
+        tabsAtStart.panels === 6 &&
+        (await showsTab('detail')),
+      tabsAtStart,
+    );
+    // Until a tab or Hide is clicked the body follows the window: open where it stands beside
+    // the canvas, collapsed where it would lie over it. That is no choice, and nothing is stored.
+    const panelStored = () => evaluate(`localStorage.getItem('architecture-map.control-panel')`);
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: 1200,
+      height: 827,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await until(
+      `window.__smoke.attr('data-panel-collapsed') === 'true'`,
+      'the body collapsed in a narrow window',
+    );
+    const storedNarrow = await panelStored();
+    await client.send('Emulation.clearDeviceMetricsOverride');
+    await until(
+      `window.__smoke.attr('data-panel-collapsed') === 'false'`,
+      'the body open again in the wide window',
+    );
+    check(
+      'until the reader chooses, the body of the control panel is open in a wide window and collapsed in a narrow one',
+      storedNarrow === null && (await panelStored()) === null && (await showsTab('detail')),
+      { storedNarrow, stored: await panelStored() },
+    );
+    await click('#tab-visibility');
+    await until(`window.__smoke.attr('data-panel-tab') === 'visibility'`, 'the Visibility tab');
+    check(
+      'a click on another tab shows its panel and hides the others',
+      await showsTab('visibility'),
+      await tabsState(),
+    );
+    // The arrow keys go from tab to tab and around the ends, Home and End to the first and the
+    // last; the focus goes along.
+    /** @type {string[]} */
+    const wrongKeys = [];
+    for (const [key, keyCode, name] of /** @type {[string, number, string][]} */ ([
+      ['ArrowDown', 40, 'lenses'],
+      ['ArrowUp', 38, 'visibility'],
+      ['End', 35, 'files'],
+      ['ArrowDown', 40, 'detail'],
+      ['ArrowUp', 38, 'files'],
+      ['Home', 36, 'detail'],
+    ])) {
+      await press(key, { keyCode });
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${name}'`,
+        `the ${name} tab after ${key}`,
+      );
+      if (!(await showsTab(name)) || (await tabsState()).active !== `tab-${name}`) {
+        wrongKeys.push(`${key}: ${name}`);
+      }
+    }
+    check(
+      'ArrowDown, ArrowUp, Home and End move the selection among the tabs',
+      wrongKeys.length === 0,
+      wrongKeys,
+    );
+    // The panels of the tabs that are not shown stay in the page: every control is there, once,
+    // whichever tab is shown. (The note of collapsed groups, the list of saved views with its
+    // note and the search results come and go.)
+    const controlIds = [
+      'app-version',
+      'source-name',
+      'workitems-source',
+      'search-open',
+      'search',
+      'search-input',
+      'reload-files',
+      'fit-view',
+      'panel-toggle',
+      'lod-indicator',
+      'collapse-all',
+      'expand-all',
+      'compact-collapsed',
+      'story-mode',
+      'zoom-readout',
+      'reset-thresholds',
+      'focus-control',
+      'focus-select',
+      'focus-mode',
+      'focus-mode-hint',
+      'kind-filters',
+      'edges-on-demand',
+      'workitem-filter',
+      'workitem-filter-count',
+      'show-completed',
+      'workitem-iteration',
+      'lenses',
+      'color-by',
+      'heat',
+      'progress',
+      'show-rows',
+      'unlock-positions',
+      'reset-positions',
+      'views',
+      'view-name',
+      'save-view',
+      'copy-view-link',
+      'model-summary',
+      'open-yaml',
+      'workitems-summary',
+      'open-workitems',
+      'recent',
+      'recent-list',
+      'yaml-file',
+      'workitems-file',
+    ];
+    /** @type {Record<string, number>} */
+    const idCounts = await evaluate(
+      `Object.fromEntries(${JSON.stringify(controlIds)}.map((id) => [id, document.querySelectorAll('[id="' + id + '"]').length]))`,
+    );
+    const notOnce = controlIds
+      .filter((id) => idCounts[id] !== 1)
+      .map((id) => `${id}: ${idCounts[id]}`);
+    const choices = await evaluate(`({
+      kinds: window.__smoke.count('#kind-filters button[data-kind]'),
+      levels: window.__smoke.count('#lod-indicator button[data-lod-option]'),
+      stories: window.__smoke.count('#story-mode button[data-story-option]'),
+      thresholds: window.__smoke.count('input[data-threshold]'),
+    })`);
+    check(
+      'every control is in the page exactly once, whichever tab is shown',
+      notOnce.length === 0 &&
+        choices.kinds === 4 &&
+        choices.levels === 5 &&
+        choices.stories === 3 &&
+        choices.thresholds === 3,
+      { notOnce, choices },
+    );
+    // A tab is named by its caption alone; what its mark stands for is said in its tooltip, and
+    // the names in the head of the panel, which are cut where they are long, in theirs.
+    const tabTexts = await evaluate(`({
+      marks: [...document.querySelectorAll('.cp-tab .cp-tab-mark')].map((mark) => mark.getAttribute('aria-hidden')),
+      detail: document.querySelector('#tab-detail').title,
+      level: window.__smoke.attr('data-lod'),
+      structure: document.querySelector('#source-name').title,
+      workItems: document.querySelector('#workitems-source').title,
+    })`);
+    const levelNames = /** @type {Record<string, string>} */ ({
+      domains: 'Domains',
+      components: 'Components',
+      subcomponents: 'Subcomponents',
+      detail: 'Everything',
+    });
+    check(
+      'the tooltip of the Detail tab names the level its mark abbreviates, and the file names have tooltips',
+      tabTexts.marks.length > 0 &&
+        tabTexts.marks.every((/** @type {string | null} */ hidden) => hidden === 'true') &&
+        tabTexts.detail.startsWith(`Level of detail: ${levelNames[tabTexts.level]} — `) &&
+        tabTexts.structure.endsWith('architecture.yaml') &&
+        tabTexts.workItems.endsWith('workitems.json'),
+      tabTexts,
+    );
+    // The key to the edge kinds lies on the canvas, whatever the panel shows, and says which
+    // kinds are hidden.
+    const edgeLegend = () =>
+      evaluate(`(() => {
+        const legend = document.querySelector('#edge-legend');
+        const canvas = document.querySelector('#map-canvas').getBoundingClientRect();
+        const r = legend.getBoundingClientRect();
+        return {
+          kinds: [...legend.querySelectorAll('li')].map((li) => li.dataset.kind),
+          hidden: [...legend.querySelectorAll('li[data-hidden="true"]')].map((li) => li.dataset.kind),
+          onCanvas: r.width > 0 && r.left >= canvas.left && r.right <= canvas.right && r.top >= canvas.top && r.bottom <= canvas.bottom,
+        };
+      })()`);
+    const legendAtStart = await edgeLegend();
+    check(
+      'the edge legend on the canvas lists the four kinds',
+      same(legendAtStart.kinds, ['dataflow', 'dependency', 'control', 'config']) &&
+        legendAtStart.hidden.length === 0 &&
+        legendAtStart.onCanvas,
+      legendAtStart,
+    );
+    await click('#kind-filters [data-kind="control"]');
+    await until(`window.__smoke.attr('data-hidden-kinds') === 'control'`, 'a hidden kind');
+    const legendHidden = await edgeLegend();
+    await click('#kind-filters [data-kind="control"]');
+    await until(`window.__smoke.attr('data-hidden-kinds') === ''`, 'the kind shown again');
+    check(
+      'hiding a kind marks its entry in the edge legend',
+      same(legendHidden.hidden, ['control']) && (await edgeLegend()).hidden.length === 0,
+      legendHidden,
+    );
+    // Hide: the body goes and the rail stays; the canvas takes the room, and the view is left
+    // as it is.
+    const canvasOpen = await sides('#map-canvas');
+    const bodyOpen = await sides('#control-panel-body');
+    const viewOpen = await evaluate(`window.__smoke.viewport()`);
+    await togglePanel(true);
+    await settled();
+    const canvasCollapsed = await sides('#map-canvas');
+    const viewCollapsed = await evaluate(`window.__smoke.viewport()`);
+    check(
+      'Hide collapses the control panel to its rail: the canvas grows by the width of the body and the view stays',
+      bodyOpen.width > 0 &&
+        Math.abs(canvasCollapsed.width - canvasOpen.width - bodyOpen.width) < 1 &&
+        same(viewCollapsed, viewOpen) &&
+        (await evaluate(`document.querySelector('#control-panel-body').hidden`)) === true &&
+        (await evaluate(
+          `document.querySelector('#panel-toggle').getAttribute('aria-expanded')`,
+        )) === 'false',
+      { canvasOpen, bodyOpen, canvasCollapsed, viewOpen, viewCollapsed },
+    );
+    await click('#fit-view');
+    await until(
+      `JSON.stringify(window.__smoke.viewport()) !== ${JSON.stringify(JSON.stringify(viewOpen))}`,
+      'the view fitted to the wider canvas',
+    );
+    await settled();
+    check(
+      'with the panel collapsed Fit view fits the map into the wider canvas',
+      (await evaluate(`window.__smoke.offCanvas()`)).length === 0,
+      {
+        view: await evaluate(`window.__smoke.viewport()`),
+        off: await evaluate(`window.__smoke.offCanvas()`),
+      },
+    );
+    // Collapsed, "/" still reaches the search box: it shows beside the rail for as long as it
+    // is in use, and the canvas keeps its width.
+    const beforeSearch = await evaluate(`document.activeElement?.id ?? null`);
+    await openSearch();
+    check(
+      '"/" with the panel collapsed puts the cursor in the search box at once',
+      (await evaluate(`document.activeElement?.id ?? null`)) === 'search-input',
+    );
+    await client.send('Input.insertText', { text: 'iphone' });
+    await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
+    const flyout = await evaluate(`(() => {
+      const shown = (selector) => document.querySelector(selector).getClientRects().length > 0;
+      const rail = document.querySelector('.cp-rail').getBoundingClientRect();
+      const results = document.querySelector('#search-results').getBoundingClientRect();
+      return {
+        typed: document.querySelector('#search-input').value,
+        lists: window.__smoke.count('#search-results'),
+        body: shown('#control-panel-body'),
+        head: shown('.cp-head'),
+        panels: shown('.cp-panels'),
+        collapsed: window.__smoke.attr('data-panel-collapsed'),
+        canvas: document.querySelector('#map-canvas').getBoundingClientRect().width,
+        beside: results.left >= rail.right && results.right <= document.documentElement.clientWidth,
+      };
+    })()`);
+    check(
+      'the search box shows beside the rail while it is in use: the panel stays collapsed, the canvas keeps its width',
+      flyout.typed === 'iphone' &&
+        flyout.lists === 1 &&
+        flyout.body &&
+        !flyout.head &&
+        !flyout.panels &&
+        flyout.beside &&
+        flyout.collapsed === 'true' &&
+        Math.abs(flyout.canvas - canvasCollapsed.width) < 1,
+      flyout,
+    );
+    await press('Escape', { code: 'Escape', keyCode: 27 });
+    await press('Escape', { code: 'Escape', keyCode: 27 });
+    await until(`document.querySelector('#control-panel-body').hidden`, 'the search box gone');
+    check(
+      'Escape twice leaves the search, and the box beside the rail is gone',
+      (await evaluate(`document.querySelector('#search-input').value`)) === '' &&
+        (await evaluate(`document.activeElement?.id ?? null`)) !== 'search-input' &&
+        (await evaluate(`window.__smoke.attr('data-panel-collapsed')`)) === 'true',
+    );
+    // The box is gone, so the cursor goes back to where it was before the search (Fit view, on
+    // the rail), and the Tab key goes on from there. From nowhere it goes to the Search button.
+    const afterEscape = await evaluate(`document.activeElement?.id ?? null`);
+    await press('Tab', { code: 'Tab', keyCode: 9 });
+    const afterEscapeTab = await evaluate(`document.activeElement?.id ?? null`);
+    await evaluate(`document.activeElement?.blur()`);
+    await openSearch();
+    await press('Escape', { code: 'Escape', keyCode: 27 });
+    await until(`document.querySelector('#control-panel-body').hidden`, 'the search box gone');
+    const afterEscapeFromNowhere = await evaluate(`document.activeElement?.id ?? null`);
+    check(
+      'leaving the search beside the rail with Escape gives the cursor back to where it was, or to the Search button, and Tab goes on from there',
+      beforeSearch === 'fit-view' &&
+        afterEscape === 'fit-view' &&
+        afterEscapeTab === 'panel-toggle' &&
+        afterEscapeFromNowhere === 'search-open',
+      { beforeSearch, afterEscape, afterEscapeTab, afterEscapeFromNowhere },
+    );
+    // Tab in the box leaves the search as well: the list of matches, which scrolls when it is
+    // long, is no stop on the way, and the box beside the rail goes.
+    await openSearch();
+    await client.send('Input.insertText', { text: 's' });
+    await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
+    const longList = await evaluate(`(() => {
+      const list = document.querySelector('#search-results');
+      return { scrolls: list.scrollHeight > list.clientHeight, tabIndex: list.tabIndex };
+    })()`);
+    await press('Tab', { code: 'Tab', keyCode: 9 });
+    await sleep(200);
+    const afterTab = await evaluate(`({
+      card: !document.querySelector('#control-panel-body').hidden,
+      active: document.activeElement?.id || document.activeElement?.tagName,
+    })`);
+    check(
+      'Tab in the search box beside the rail leaves the search although the list of matches scrolls: the box goes',
+      longList.scrolls &&
+        !afterTab.card &&
+        afterTab.active !== 'search-results' &&
+        afterTab.active !== 'BODY',
+      { longList, afterTab },
+    );
+    // The query is still in the box: cleared, for the checks below.
+    await openSearch();
+    await press('Escape', { code: 'Escape', keyCode: 27 });
+    await press('Escape', { code: 'Escape', keyCode: 27 });
+    await until(`document.querySelector('#control-panel-body').hidden`, 'the search box gone');
+    await evaluate(`document.activeElement?.blur()`);
+    // Collapsed, the head of the panel is not on screen: the page keeps its one heading.
+    const headings = () =>
+      evaluate(
+        `[...document.querySelectorAll('h1')].filter((h) => h.getClientRects().length > 0).map((h) => h.textContent)`,
+      );
+    const headingsCollapsed = await headings();
+    await click('#tab-layout');
+    await until(
+      `window.__smoke.attr('data-panel-collapsed') === 'false'`,
+      'the body opened by a tab',
+    );
+    check(
+      'a click on a tab while the panel is collapsed opens it on that tab',
+      (await showsTab('layout')) &&
+        Math.abs((await sides('#map-canvas')).width - canvasOpen.width) < 1,
+      await tabsState(),
+    );
+    const headingsOpen = await headings();
+    check(
+      'the page has one level-one heading, with the panel collapsed and with it open',
+      same(headingsCollapsed, ['Architecture Map']) && same(headingsOpen, ['Architecture Map']),
+      { headingsCollapsed, headingsOpen },
+    );
+    await click('#fit-view');
+    await settled();
+    check(
+      'with the panel open again Fit view comes back to the view of before',
+      sameView(await evaluate(`window.__smoke.viewport()`), viewOpen),
+      { viewOpen, now: await evaluate(`window.__smoke.viewport()`) },
+    );
+    // A reload keeps the tab and whether the body is collapsed. Without a structure only Files
+    // can be chosen, and the tab kept for the map is not replaced by it.
+    await togglePanel(true);
+    await client.send('Page.navigate', { url: pathToFileURL(viewerPath).href });
+    await startPage();
+    await evaluate(PAGE_HELPERS);
+    const tabsReloaded = await tabsState();
+    await click('#tab-files');
+    await until(
+      `window.__smoke.attr('data-panel-collapsed') === 'false'`,
+      'the Files tab on the start page',
+    );
+    await clickAt(
+      await evaluate(`window.__smoke.clickPoint('#tab-detail')`),
+      'a tab that cannot be chosen',
+    );
+    const tabsOnStart = await tabsState();
+    const tabKept = await evaluate(
+      `JSON.parse(localStorage.getItem('architecture-map.control-panel') ?? '{}').tab ?? null`,
+    );
+    check(
+      'on the start page only Files can be chosen, and it is the tab shown',
+      same(tabsReloaded.selected, ['tab-files']) &&
+        same(
+          tabsReloaded.disabled,
+          tabNames.filter((name) => name !== 'files').map((name) => `tab-${name}`),
+        ) &&
+        same(tabsOnStart.disabled, tabsReloaded.disabled) &&
+        same(tabsOnStart.selected, ['tab-files']) &&
+        same(tabsOnStart.shown, ['panel-files']) &&
+        tabsOnStart.tab === 'files' &&
+        tabsOnStart.collapsed === 'false',
+      { tabsReloaded, tabsOnStart },
+    );
+    await dropFiles(dataFiles);
+    await mapShown();
+    check(
+      'a reload keeps the collapsed panel and, for the map, the tab chosen before',
+      tabsReloaded.collapsed === 'true' &&
+        tabsReloaded.shown.length === 0 &&
+        tabKept === 'layout' &&
+        (await showsTab('layout')),
+      { tabsReloaded, tabKept, now: await tabsState() },
+    );
+    // Back to the first tab, for the checks below.
+    await click('#tab-detail');
+    await until(`window.__smoke.attr('data-panel-tab') === 'detail'`, 'the first tab again');
+    await park();
 
     // --- Work items: loaded next to the structure, room reserved by the layout ---------------
     const work = await evaluate(`(() => {
@@ -962,7 +1537,7 @@ async function run(viewerPath, browserPath) {
     };
     const drawnProblems = () => evaluate(`window.__smoke.workItemProblems()`);
     check(
-      'the toolbar names the work-items file',
+      'the control panel names the work-items file',
       (await text('#workitems-source')) === 'workitems.json',
     );
     // The fitted map is zoomed far out: counts, no lines.
@@ -1078,7 +1653,7 @@ async function run(viewerPath, browserPath) {
     await pinLod('auto', await evaluate(`window.__smoke.attr('data-zoom-lod')`));
     // A story of a domain: the header strip of the group is many times wider than the screen at
     // that zoom, and the line is at its left end.
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: '#1001' });
     await until(
       `window.__smoke.count('#search-results [data-workitem-id="1001"]') === 1`,
@@ -1106,7 +1681,7 @@ async function run(viewerPath, browserPath) {
     await click('#fit-view');
     await settled();
     await until(`window.__smoke.attr('data-lod') !== 'detail'`, 'the fitted map');
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: '#1010' });
     await until(
       `window.__smoke.count('#search-results [data-workitem-id="1010"]') === 1`,
@@ -1280,13 +1855,12 @@ async function run(viewerPath, browserPath) {
     check('"Show on the map" raises the pinned level and marks the line', true);
 
     // Search by title words; the filter by state and iteration.
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: 'event archives' });
     await click('#search-results [data-workitem-id="1035"]');
     await untilSelection('workitem:1035');
     check('search finds a story by words of its title', true);
     const filterCount = () => text('#workitem-filter-count');
-    await evaluate(`document.querySelector('#settings').open = true`);
     const allShown = await filterCount();
     const closedLines = await countOf('.arch-workitem-closed');
     await evaluate(`document.querySelector('[data-workitem-state="Closed"]').click()`);
@@ -1424,10 +1998,12 @@ async function run(viewerPath, browserPath) {
       (await evaluate(`window.__smoke.count('.react-flow__edge.arch-dimmed')`)) > 0,
     );
     check(
-      'panel does not cover the toolbar',
-      await evaluate(
-        `document.querySelector('#detail-panel').getBoundingClientRect().top >= document.querySelector('.toolbar').getBoundingClientRect().bottom - 1`,
-      ),
+      'the detail panel and the control panel leave the canvas between them',
+      await evaluate(`(() => {
+        const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+        const [controls, canvas, detail] = ['#control-panel', '#map-canvas', '#detail-panel'].map(box);
+        return controls.right <= canvas.left + 1 && canvas.right <= detail.left + 1 && canvas.width > 0;
+      })()`),
     );
 
     // --- Escape and empty canvas clear --------------------------------------------------------
@@ -1546,10 +2122,7 @@ async function run(viewerPath, browserPath) {
     await sleep(600);
 
     // --- Search -------------------------------------------------------------------------------
-    // The pointer rests where the last click was; a result list opening under it would take the
-    // highlight (hover). Park it in the row gutter first.
-    await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 500 });
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     check(
       '"/" focuses the search box',
       (await evaluate(`document.activeElement?.id`)) === 'search-input',
@@ -1609,7 +2182,7 @@ async function run(viewerPath, browserPath) {
       )) === '0',
     );
 
-    await press('k', { code: 'KeyK', keyCode: 75, modifiers: 2 });
+    await openSearch('k');
     check(
       'Ctrl+K focuses the search box',
       (await evaluate(`document.activeElement?.id`)) === 'search-input',
@@ -1620,7 +2193,7 @@ async function run(viewerPath, browserPath) {
     check('a search result can be chosen with the mouse', true);
 
     // --- Node panel links ---------------------------------------------------------------------
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: 'storefront.apps.ios' });
     await press('Enter', { keyCode: 13, text: '\r' });
     await untilSelection('node:storefront.apps.ios');
@@ -1687,20 +2260,25 @@ async function run(viewerPath, browserPath) {
       collapsedLines,
     );
 
-    // --- Settings: shrunk collapsed groups, adjustable thresholds ------------------------------
+    // --- Control panel: its place, shrunk collapsed groups, adjustable thresholds --------------
     const domainWidths = () =>
       evaluate(
         `[...document.querySelectorAll('.react-flow__node-group')].map((n) => n.offsetWidth)`,
       );
     /** @type {number[]} */
     const fullWidths = await domainWidths();
-    await evaluate(`document.querySelector('#settings').open = true`);
-    await sleep(100);
     check(
-      'the settings drop-down opens inside the window',
+      'the control panel stands at the left, as tall as the window, and the canvas begins at its right edge',
       (await evaluate(`(() => {
-        const r = document.querySelector('#settings .settings-body').getBoundingClientRect();
-        return r.width > 0 && r.left >= 0 && r.right <= document.documentElement.clientWidth;
+        const panel = document.querySelector('#control-panel').getBoundingClientRect();
+        const canvas = document.querySelector('#map-canvas').getBoundingClientRect();
+        return (
+          panel.width > 0 &&
+          panel.left === 0 &&
+          panel.top === 0 &&
+          Math.abs(panel.bottom - window.innerHeight) < 1 &&
+          Math.abs(canvas.left - panel.right) < 1
+        );
       })()`)) === true,
     );
     await evaluate(`document.querySelector('#compact-collapsed').click()`);
@@ -1725,7 +2303,7 @@ async function run(viewerPath, browserPath) {
     // closed: by hand, by a pinned level, or by the zoom (where domain titles are larger).
     const setThreshold = (/** @type {string} */ key, /** @type {number} */ value) =>
       evaluate(`(() => {
-        const input = document.querySelector('#settings input[data-threshold="${key}"]');
+        const input = document.querySelector('input[data-threshold="${key}"]');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '${value}');
         input.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
@@ -1801,7 +2379,6 @@ async function run(viewerPath, browserPath) {
       `window.__smoke.count('.react-flow__node-band') === ${bandsBefore}`,
       'the row bands again',
     );
-    await evaluate(`document.querySelector('#settings').open = false`);
     await click('#fit-view');
     await sleep(600);
 
@@ -1928,8 +2505,6 @@ async function run(viewerPath, browserPath) {
       evaluate(
         `Number(document.querySelector('#workitem-filter-count').textContent.split(' ')[0])`,
       );
-    await evaluate(`document.querySelector('#settings').open = true`);
-    await sleep(100);
     const shownAll = await shownItems();
     await evaluate(`document.querySelector('#show-completed').click()`);
     await sleep(400);
@@ -1942,12 +2517,10 @@ async function run(viewerPath, browserPath) {
     await evaluate(`document.querySelector('#show-completed').click()`);
     await sleep(400);
     check('and on shows them again', (await shownItems()) === shownAll);
-    await evaluate(`document.querySelector('#settings').open = false`);
     // The Everything threshold at the top of its slider: no zoom reaches the level, so going to
     // a work item in Auto pins Everything, or its line would not be drawn.
     await setThreshold('detailZoom', 4);
-    await evaluate(`document.querySelector('#settings').open = false`);
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: '#1001' });
     await click('#search-results [data-workitem-id="1001"]');
     await untilSelection('workitem:1001');
@@ -1963,7 +2536,6 @@ async function run(viewerPath, browserPath) {
     await pin('auto');
     await click('#fit-view');
     await sleep(600);
-    await evaluate(`document.querySelector('#settings').open = false`);
     await click('#collapse-all');
     await until(`window.__smoke.count('.react-flow__edge.arch-edge-aggregate') > 0`, 'aggregates');
     await sleep(300);
@@ -2029,10 +2601,13 @@ async function run(viewerPath, browserPath) {
     );
 
     // --- Search results at every window width -------------------------------------------------
-    // The toolbar wraps on a narrow window; the results list must stay inside the window.
+    // In a narrow window the open body of the control panel lies over the canvas, and the
+    // results list hangs out of it; the list must stay inside the window. It starts at the left
+    // edge of the search box where there is room for that, and is pulled left of it in a window
+    // narrower than about 460px (the 420 here), keeping its distance from the window edge.
     /** @type {string[]} */
     const cutOff = [];
-    for (const width of [1280, 1024, 900, 800, 520]) {
+    for (const width of [1280, 1024, 900, 800, 420, 520]) {
       await client.send('Emulation.setDeviceMetricsOverride', {
         width,
         height: 700,
@@ -2040,25 +2615,111 @@ async function run(viewerPath, browserPath) {
         mobile: false,
       });
       await sleep(300);
-      await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+      await openSearch();
       await client.send('Input.insertText', { text: 'a' });
       await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
       await sleep(100);
       const span = await evaluate(
         `(() => { const r = document.querySelector('#search-results').getBoundingClientRect();
-          return [r.left, r.right, document.documentElement.clientWidth].join(' '); })()`,
+          return [r.left, r.right, document.documentElement.clientWidth, document.querySelector('#search').getBoundingClientRect().left].join(' '); })()`,
       );
-      const [left = NaN, right = NaN, viewport = NaN] = String(span).split(' ').map(Number);
-      if (!(left >= 0 && right <= viewport)) cutOff.push(`${width}: ${left}..${right}`);
+      const [left = NaN, right = NaN, viewport = NaN, box = NaN] = String(span)
+        .split(' ')
+        .map(Number);
+      const placed = width < 460 ? left < box && right <= viewport - 8 : Math.abs(left - box) < 1;
+      if (!(left >= 0 && right <= viewport && placed)) {
+        cutOff.push(`${width}: ${left}..${right}, the box at ${box}`);
+      }
       await press('Escape', { code: 'Escape', keyCode: 27 });
       await press('Escape', { code: 'Escape', keyCode: 27 });
     }
     check('the search results stay inside the window', cutOff.length === 0, cutOff.join('; '));
+    // Still 520 wide: the canvas is as wide under the open body as it is without it.
+    const narrow = { body: await sides('#control-panel-body'), canvas: await sides('#map-canvas') };
+    await togglePanel(true);
+    const narrowCollapsed = await sides('#map-canvas');
+    await togglePanel(false);
+    check(
+      'in a narrow window the open control panel lies over the canvas, which keeps its width',
+      narrow.body.width > 0 &&
+        narrow.body.left >= narrow.canvas.left - 1 &&
+        narrow.body.right > narrow.canvas.left + 1 &&
+        narrow.canvas.width > 0 &&
+        Math.abs(narrow.canvas.width - narrowCollapsed.width) < 1,
+      { ...narrow, collapsed: narrowCollapsed },
+    );
+    // Only the canvas lies under the open body. What else stands at the left of the column
+    // begins beside it: the notice above the canvas with its controls, the legend and the zoom
+    // buttons on the canvas, and the diagnostics below it.
+    await evaluate(`window.__smoke.choose('#focus-select', 'flow:campaign-run')`);
+    await until(`window.__smoke.count('#focus-bar') === 1`, 'the focus bar');
+    await settled();
+    const besideBody = await evaluate(`(() => {
+      const left = (selector) => document.querySelector(selector).getBoundingClientRect().left;
+      return {
+        body: document.querySelector('#control-panel-body').getBoundingClientRect().right,
+        barText: left('.focus-bar-text'),
+        legend: left('#edge-legend'),
+        zoom: left('.react-flow__controls'),
+        diagnostics: left('.diagnostics-toggle'),
+        reachable: ['#focus-bar-mode', '#focus-clear'].filter(
+          (selector) => window.__smoke.clickPoint(selector) !== null,
+        ),
+      };
+    })()`);
+    await click('#focus-clear');
+    await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared in the bar');
+    check(
+      'in a narrow window the focus bar, the legend, the zoom buttons and the diagnostics begin beside the open control panel, and the bar can be used',
+      besideBody.body > narrow.canvas.left + 1 &&
+        ['barText', 'legend', 'zoom', 'diagnostics'].every(
+          (part) => besideBody[part] >= besideBody.body,
+        ) &&
+        besideBody.reachable.length === 2,
+      besideBody,
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    // In a window too low for a tab, the tabs scroll in one area: another tab starts at its top,
+    // not where the tab before it was left.
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: 520,
+      height: 400,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
+    await showControl('#focus-select');
+    const scrolledTab = await evaluate(`(() => {
+      const area = document.querySelector('.cp-panels');
+      area.scrollTop = area.scrollHeight;
+      return area.scrollTop;
+    })()`);
+    await clickAt(await evaluate(`window.__smoke.clickPoint('#tab-detail')`), 'the Detail tab');
+    await until(`window.__smoke.attr('data-panel-tab') === 'detail'`, 'the Detail tab');
+    const otherTab = await evaluate(`(() => {
+      const area = document.querySelector('.cp-panels');
+      return { top: area.scrollTop, scrolls: area.scrollHeight > area.clientHeight };
+    })()`);
+    check(
+      'another tab of the control panel starts at its top, wherever the one before was scrolled to',
+      scrolledTab > 0 && otherTab.scrolls && otherTab.top === 0,
+      { scrolledTab, otherTab },
+    );
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: 520,
+      height: 700,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await sleep(300);
 
     // --- Long edges on a small window ---------------------------------------------------------
-    // When both ends do not fit at the zoom that draws them, the source is the end shown.
+    // When both ends do not fit at the zoom that draws them, the source is the end shown. With
+    // the body of the control panel collapsed: open, it would lie over the canvas in this window.
+    await togglePanel(true);
     await client.send('Emulation.setDeviceMetricsOverride', {
-      width: 1100,
+      width: 1156,
       height: 640,
       deviceScaleFactor: 1,
       mobile: false,
@@ -2086,7 +2747,7 @@ async function run(viewerPath, browserPath) {
         source: 'backoffice.config-manager.version-store',
       },
     ]) {
-      await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+      await openSearch();
       await client.send('Input.insertText', { text: node });
       await press('Enter', { keyCode: 13, text: '\r' });
       await untilSelection(`node:${node}`);
@@ -2102,6 +2763,7 @@ async function run(viewerPath, browserPath) {
     check('going to a long edge shows its source end', offScreen.length === 0, offScreen);
     await client.send('Emulation.clearDeviceMetricsOverride');
     await sleep(300);
+    await togglePanel(false);
 
     // --- Lenses, focus, saved views, hints ------------------------------------
     await press('Escape', { keyCode: 27 });
@@ -2112,19 +2774,14 @@ async function run(viewerPath, browserPath) {
     await click('#fit-view');
     await sleep(600);
     const setSetting = async (/** @type {string} */ id, /** @type {boolean} */ on) => {
-      await evaluate(`document.querySelector('#settings').open = true`);
       const checked = await evaluate(`document.querySelector('#${id}').checked`);
       if (checked !== on) await evaluate(`document.querySelector('#${id}').click()`);
-      await evaluate(`document.querySelector('#settings').open = false`);
       await sleep(250);
     };
     const chooseOption = async (/** @type {string} */ selector, /** @type {string} */ value) => {
-      await evaluate(`(() => {
-        const select = document.querySelector(${JSON.stringify(selector)});
-        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-        setter.call(select, ${JSON.stringify(value)});
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      })()`);
+      await evaluate(
+        `window.__smoke.choose(${JSON.stringify(selector)}, ${JSON.stringify(value)})`,
+      );
       await sleep(300);
     };
     // Hints: the example describes most nodes, not all.
@@ -2191,8 +2848,867 @@ async function run(viewerPath, browserPath) {
     await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared again');
     await press('Escape', { keyCode: 27 });
     await untilSelection(null);
-    // Showing the epic raised the pinned level to Everything: back to closed component boxes.
+
+    // --- Focus / Filter: the map reduced to what the focus involves ---------------------------
+    // At a level that draws every node, with every group open: the whole map has all 45.
+    const tabBeforeFilter = await evaluate(`window.__smoke.attr('data-panel-tab')`);
+    await pinLod('subcomponents');
+    await click('#fit-view');
+    await settled();
+    const attr = (/** @type {string} */ name) =>
+      evaluate(`window.__smoke.attr(${JSON.stringify(name)})`);
+    const viewNow = () => evaluate(`window.__smoke.viewport()`);
+    /** Holds in the page once the viewport kept for the whole map is the view on screen. */
+    const viewIsStored = `(() => {
+      const stored = JSON.parse(window.__smoke.storedViewport() ?? 'null');
+      const view = window.__smoke.viewport();
+      return stored !== null && Math.abs(stored.x - view.x) < 1 && Math.abs(stored.y - view.y) < 1 && Math.abs(stored.zoom - view.zoom) < 0.001;
+    })()`;
+    /**
+     * Waits for the map that is wanted — filtered to that focus, or the whole one (null) — to be
+     * on screen and at rest.
+     * @param {string | null} focus
+     */
+    const untilFiltered = async (focus) => {
+      await until(
+        `window.__smoke.attr('data-filtered') === ${JSON.stringify(focus)} && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.viewport() !== null`,
+        focus === null ? 'the whole map' : `the map filtered to ${focus}`,
+      );
+      await settled();
+    };
+    /**
+     * How the map on screen sits in the canvas. It is fitted when every node is on the canvas
+     * and Fit view leaves the view as it is: `off` are the nodes that are not, `view` and
+     * `refitted` the view before and after Fit view.
+     */
+    const fitOnScreen = async () => {
+      await settled();
+      const view = await viewNow();
+      /** @type {string[]} */
+      const off = await evaluate(`window.__smoke.offCanvas()`);
+      await click('#fit-view');
+      await settled();
+      const refitted = await viewNow();
+      return { fitted: off.length === 0 && sameView(view, refitted), off, view, refitted };
+    };
+    const switchState = () =>
+      evaluate(`(() => {
+        const control = document.querySelector('#focus-mode');
+        return {
+          role: control?.getAttribute('role') ?? null,
+          checked: control?.getAttribute('aria-checked') ?? null,
+          hint: window.__smoke.text('#focus-mode-hint'),
+          mode: window.__smoke.attr('data-focus-mode'),
+          filtered: window.__smoke.attr('data-filtered'),
+          nodes: window.__smoke.attr('data-drawn-nodes'),
+          edges: window.__smoke.attr('data-drawn-edges'),
+        };
+      })()`);
+    const switchAtStart = await switchState();
+    check(
+      'the Focus / Filter switch is off at first: a focus pales the rest of the map',
+      switchAtStart.role === 'switch' &&
+        switchAtStart.checked === 'false' &&
+        switchAtStart.mode === 'focus' &&
+        switchAtStart.filtered === null &&
+        switchAtStart.nodes === '45' &&
+        switchAtStart.hint === 'The rest of the map is paled.',
+      switchAtStart,
+    );
+    // A node without a row of its own, placed in one by its connections: marked as such.
+    const placedMark =
+      '.react-flow__node[data-id="data.analytics.feature-store"] .arch-node-placed';
+    const placedOnWhole = await countOf(placedMark);
+    const groupsOnWhole = await countOf('.react-flow__node-group');
+
+    // Focus first: what stays unfaded is what Filter is to draw.
+    const flowFocus = 'flow:telemetry-to-dashboards';
+    await chooseOption('#focus-select', flowFocus);
+    await until(`window.__smoke.attr('data-focus') === '${flowFocus}'`, 'the focus on the flow');
+    await untilSelection(flowFocus);
+    await settled();
+    const unfaded = {
+      nodes: await evaluate(`window.__smoke.nodeIds(':not(.arch-faded)')`),
+      edges: await evaluate(
+        `[...document.querySelectorAll('.react-flow__edge:not(.arch-faded)')].map((e) => e.dataset.id).sort()`,
+      ),
+    };
+    /** The edges of the flow, as its panel lists them. @type {string[]} */
+    const flowSteps = await evaluate(
+      `[...document.querySelectorAll('#detail-flow-steps [data-edge-id]')].map((step) => step.dataset.edgeId)`,
+    );
+    const viewFocused = await viewNow();
+    // The height of the hint under the switch in every frame from here on: while the reduced
+    // map is laid out the hint says so on one line, like the texts before and after it.
+    await showControl('#focus-mode');
+    await evaluate(`(() => {
+      const seen = new Set();
+      window.__hintHeights = seen;
+      const step = () => {
+        seen.add(Math.round(document.querySelector('#focus-mode-hint').getBoundingClientRect().height));
+        if (window.__hintHeights === seen) requestAnimationFrame(step);
+      };
+      step();
+    })()`);
+    await click('#focus-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode');
+    await untilFiltered(flowFocus);
+    /** @type {number[]} */
+    const hintHeights = await evaluate(`(() => {
+      const seen = [...window.__hintHeights];
+      window.__hintHeights = null;
+      return seen;
+    })()`);
+    const switchOn = await switchState();
+    check(
+      'the switch turns Filter on: the map is reduced to the 14 nodes and 7 edges of the focused flow',
+      switchOn.checked === 'true' &&
+        switchOn.mode === 'filter' &&
+        switchOn.filtered === flowFocus &&
+        switchOn.nodes === '14' &&
+        switchOn.edges === '7',
+      switchOn,
+    );
+    const drawnFiltered = {
+      nodes: await evaluate(`window.__smoke.nodeIds()`),
+      edges: (await evaluate(`window.__smoke.edgeIds()`)).sort(),
+    };
+    check(
+      'Filter draws exactly what Focus leaves unfaded, and pales nothing',
+      same(drawnFiltered, unfaded) &&
+        drawnFiltered.nodes.length === 14 &&
+        drawnFiltered.edges.length === 7 &&
+        (await countOf('.arch-faded')) === 0 &&
+        drawnFiltered.nodes.includes('data.event-store') &&
+        drawnFiltered.nodes.includes('data') &&
+        !drawnFiltered.nodes.includes('platform'),
+      { unfaded, drawnFiltered },
+    );
+    const fitFiltered = await fitOnScreen();
+    const viewFiltered = fitFiltered.view;
+    check(
+      'the filtered map is laid out again and fitted: every node on the canvas, drawn no smaller than before',
+      fitFiltered.fitted && viewFiltered.zoom >= viewFocused.zoom,
+      { viewFocused, ...fitFiltered },
+    );
+    const barFiltered = await text('#focus-bar');
+    check(
+      'the focus bar and the hint at the switch say what Filter leaves out',
+      barFiltered.startsWith('Filter:') &&
+        barFiltered.includes('8 nodes') &&
+        barFiltered.includes('the rest of the map is not drawn') &&
+        (await evaluate(`document.querySelector('#focus-bar').dataset.mode`)) === 'filter' &&
+        (await evaluate(
+          `document.querySelector('#focus-bar-mode').getAttribute('aria-checked')`,
+        )) === 'true' &&
+        (await text('#focus-mode-hint')) === 'Not drawn: 31 of 45 nodes.',
+      { barFiltered, hint: await text('#focus-mode-hint') },
+    );
+    check(
+      'the hint at the switch keeps its height while the reduced map is laid out: nothing below it moves',
+      hintHeights.length === 1 && Number(hintHeights[0]) > 0,
+      hintHeights,
+    );
+    // The detail panel lists the whole model: what the filtered map leaves out is marked there.
+    await click('.react-flow__node[data-id="data.analytics"] .arch-node-name');
+    await untilSelection('node:data.analytics');
+    /** @type {{ id: string, outside: boolean, title: string }[]} */
+    const nodeLinks = await evaluate(
+      `[...document.querySelectorAll('#detail-panel .detail-link[data-node-id]')].map((link) => ({ id: link.dataset.nodeId, outside: link.dataset.outside === 'true', title: link.title }))`,
+    );
+    /** @type {{ id: string, outside: boolean, title: string }[]} */
+    const edgeLinks = await evaluate(
+      `[...document.querySelectorAll('#detail-panel .detail-edge[data-edge-id]')].map((link) => ({ id: link.dataset.edgeId, outside: link.dataset.outside === 'true', title: link.title }))`,
+    );
+    const marked = [...nodeLinks, ...edgeLinks].filter((link) => link.outside);
+    check(
+      'the panel of a node on the filtered map marks the links to nodes and edges that are not drawn',
+      nodeLinks.some((link) => link.outside) &&
+        nodeLinks.every((link) => link.outside !== drawnFiltered.nodes.includes(link.id)) &&
+        flowSteps.length === 7 &&
+        edgeLinks.some((link) => link.outside) &&
+        edgeLinks.every((link) => link.outside !== flowSteps.includes(link.id)) &&
+        marked.every((link) => link.title.includes('not on the filtered map')),
+      { nodeLinks, edgeLinks, flowSteps },
+    );
+    // The view of a filtered map is its own: moving it stores nothing.
+    const storedWhole = await evaluate(`window.__smoke.storedViewport()`);
+    const hold = await evaluate(`window.__smoke.emptyPoint()`);
+    await drag(hold, { x: hold.x - 150, y: hold.y + 40 });
+    await settled();
+    const viewMoved = await viewNow();
+    await sleep(600); // a view that is stored would be by now
+    check(
+      'panning the filtered map leaves the stored viewport of the whole map as it is',
+      storedWhole !== null &&
+        viewMoved.x < viewFiltered.x - 100 &&
+        (await evaluate(`window.__smoke.storedViewport()`)) === storedWhole,
+      { storedWhole, now: await evaluate(`window.__smoke.storedViewport()`), viewMoved },
+    );
+    // Leaving Filter is a round trip: the whole map is back where it was. The switch that does
+    // it stays where it is, under the pointer, although the text of the bar gets shorter.
+    const switchFiltered = await sides('#focus-bar-mode');
+    await click('#focus-bar-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode');
+    await untilFiltered(null);
+    const switchFocused = await sides('#focus-bar-mode');
+    check(
+      'the switch in the focus bar stays in its place when it is used',
+      Math.abs(switchFocused.left - switchFiltered.left) < 4 &&
+        Math.abs(switchFocused.right - switchFiltered.right) < 4,
+      { switchFiltered, switchFocused },
+    );
+    const viewBack = await viewNow();
+    // The component selected on the filtered map is still selected: besides what the flow
+    // involves, what is drawn inside it is not paled either. Without the selection the focus
+    // pales exactly what it paled before Filter.
+    /** @type {string[]} */
+    const unfadedSelected = await evaluate(`window.__smoke.nodeIds(':not(.arch-faded)')`);
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    check(
+      'the switch in the focus bar turns Filter off: the whole map is back, paled, in the view it had',
+      (await attr('data-drawn-nodes')) === '45' &&
+        (await countOf('.react-flow__node.arch-faded')) > 0 &&
+        same(await evaluate(`window.__smoke.nodeIds(':not(.arch-faded)')`), unfaded.nodes) &&
+        unfaded.nodes.every((/** @type {string} */ id) => unfadedSelected.includes(id)) &&
+        unfadedSelected
+          .filter((id) => !unfaded.nodes.includes(id))
+          .every((id) => id.startsWith('data.analytics.')) &&
+        sameView(viewBack, viewFocused),
+      { viewFocused, viewBack, unfadedSelected },
+    );
+    // What is selected stays selected when Filter leaves it out: its panel says so and offers
+    // the way to it. (The whole map in view first, to click a domain the flow does not involve.)
+    await click('#fit-view');
+    await settled();
+    await click('.react-flow__node[data-id="platform"] .arch-group-header');
+    await untilSelection('node:platform');
+    await click('#focus-mode');
+    await untilFiltered(flowFocus);
+    const outsideNote = await text('#detail-outside-note');
+    check(
+      'a node selected before Filter leaves it out keeps its panel, which says that it is not on the map',
+      (await selection()) === 'node:platform' &&
+        outsideNote !== null &&
+        outsideNote.startsWith('Not on the map') &&
+        (await countOf('.react-flow__node[data-id="platform"]')) === 0 &&
+        (await countOf('.react-flow__node.selected')) === 0,
+      { outsideNote, selection: await selection() },
+    );
+    // Filter is left at once and the whole map follows. In between the filtered map is still on
+    // screen, and the panel no longer says that Filter leaves the node out.
+    const leavingFilter = await evaluate(`(async () => {
+      document.querySelector('#detail-show-on-map').click();
+      await window.__smoke.rendered(() => window.__smoke.attr('data-focus-mode') === 'focus');
+      return {
+        mode: window.__smoke.attr('data-focus-mode'),
+        filtered: window.__smoke.attr('data-filtered'),
+        notes: window.__smoke.count('#detail-outside-note'),
+      };
+    })()`);
+    check(
+      'the note that the selected node is not on the map goes when Filter is left, before the whole map has arrived',
+      leavingFilter.mode === 'focus' &&
+        leavingFilter.filtered === flowFocus &&
+        leavingFilter.notes === 0,
+      leavingFilter,
+    );
+    await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode again');
+    await untilFiltered(null);
+    await until(
+      `window.__smoke.count('.react-flow__node.selected[data-id="platform"]') === 1`,
+      'the node on the whole map',
+    );
+    await settled();
+    check(
+      '"Show it" brings the whole map back with the node on it, and the focus bar says that Filter was switched off',
+      (await selection()) === 'node:platform' &&
+        (await countOf('#detail-outside-note')) === 0 &&
+        (await attr('data-focus')) === flowFocus &&
+        (await evaluate(`window.__smoke.onScreen('.react-flow__node[data-id="platform"]')`)) ===
+          true &&
+        (await text('#focus-bar-note')) === 'Filter switched off to show Platform Services.',
+      { note: await text('#focus-bar-note'), view: await viewNow() },
+    );
+    // Another focus while filtering is another map, fitted in turn.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await click('#focus-bar-mode');
+    await untilFiltered(flowFocus);
+    const noteAfterSwitch = await countOf('#focus-bar-note');
+    await chooseOption('#focus-select', 'flow:rule-release');
+    await untilFiltered('flow:rule-release');
+    const ruleRelease = {
+      nodes: await attr('data-drawn-nodes'),
+      bands: await countOf('.arch-band-even, .arch-band-odd'),
+      ...(await fitOnScreen()),
+    };
+    await chooseOption('#focus-select', 'flow:campaign-run');
+    await untilFiltered('flow:campaign-run');
+    const campaignRun = { nodes: await attr('data-drawn-nodes'), ...(await fitOnScreen()) };
+    check(
+      'another focus while filtering is another map, fitted in turn: 7 nodes in two rows, then 11 nodes',
+      noteAfterSwitch === 0 &&
+        ruleRelease.nodes === '7' &&
+        ruleRelease.bands === 2 &&
+        ruleRelease.fitted &&
+        campaignRun.nodes === '11' &&
+        campaignRun.fitted,
+      { noteAfterSwitch, ruleRelease, campaignRun },
+    );
+    // An epic: its nodes keep the rows they have on the whole map, the one placed by its
+    // connections too.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    const epicFocus = 'workitem:1001';
+    await chooseOption('#focus-select', epicFocus);
+    await untilFiltered(epicFocus);
+    const epic = {
+      nodes: await attr('data-drawn-nodes'),
+      placed: await countOf(placedMark),
+      bands: await countOf('.arch-band-even, .arch-band-odd'),
+      unassigned: await countOf('.arch-band-unassigned'),
+    };
+    check(
+      'filtered to an epic the map keeps its three rows, and the node placed by its connections its mark',
+      placedOnWhole === 1 &&
+        epic.nodes === '23' &&
+        epic.placed === 1 &&
+        epic.bands === 3 &&
+        epic.unassigned === 0,
+      { placedOnWhole, ...epic },
+    );
+    // This map fills the canvas down to the corner the minimap takes: it is fitted with room
+    // for the minimap, on arrival as by Fit view, and none of its boxes lies under it.
+    const epicFit = await fitOnScreen();
+    const epicCorner = await evaluate(`window.__smoke.underMinimap()`);
+    check(
+      'a filtered map that reaches the corner of the minimap is fitted clear of it: no box lies under the minimap',
+      epicFit.fitted && epicCorner.under.length === 0 && epicCorner.clear,
+      { ...epicFit, ...epicCorner },
+    );
+    // Navigation wins: the search lists the whole model, and going to what the filtered map
+    // leaves out shows the whole map again, with the focus kept.
+    await openSearch();
+    await client.send('Input.insertText', { text: 'platform' });
+    await until(
+      `window.__smoke.count('#search-results [data-node-id="platform"]') === 1`,
+      'the domain among the search results',
+    );
+    // The mark is a note of its own on the line of the ID, at full strength: the line of the
+    // name keeps its width, and the level beside the name says the level alone. On the
+    // highlighted match, the one Enter takes, the level and the ID are at full strength too.
+    const leftOut = await evaluate(`(() => {
+      const option = document.querySelector('#search-results [role="option"]');
+      const note = option.querySelector('.search-option-note');
+      const top = (selector) => Math.round(option.querySelector(selector).getBoundingClientRect().top);
+      return {
+        id: option.dataset.nodeId ?? null,
+        outside: option.dataset.outside ?? null,
+        text: option.textContent,
+        note: note?.textContent ?? null,
+        level: option.querySelector('.search-option-level').textContent,
+        noteOpacity: note ? getComputedStyle(note).opacity : null,
+        active: option.classList.contains('search-option-active'),
+        activeOpacity: ['.search-option-level', '.search-option-id'].map(
+          (selector) => getComputedStyle(option.querySelector(selector)).opacity,
+        ),
+        onIdLine: note !== null && top('.search-option-note') > top('.search-option-name'),
+      };
+    })()`);
+    check(
+      'the search marks a node that the filtered map leaves out',
+      leftOut.id === 'platform' &&
+        leftOut.outside === 'true' &&
+        leftOut.text.includes('not on the filtered map') &&
+        leftOut.note === 'not on the filtered map' &&
+        leftOut.level === 'domain' &&
+        leftOut.noteOpacity === '1' &&
+        leftOut.active &&
+        leftOut.activeOpacity.join(' ') === '1 1' &&
+        leftOut.onIdLine,
+      leftOut,
+    );
+    await press('Enter', { keyCode: 13, text: '\r' });
+    await until(
+      `window.__smoke.attr('data-focus-mode') === 'focus'`,
+      'Focus mode after going to the node',
+    );
+    await untilFiltered(null);
+    await untilSelection('node:platform');
+    await until(
+      `window.__smoke.count('.react-flow__node.selected[data-id="platform"]') === 1`,
+      'the found node on the whole map',
+    );
+    await settled();
+    check(
+      'going to it switches Filter off and keeps the focus: the node is selected on the whole map, and the focus bar says so',
+      (await attr('data-focus')) === epicFocus &&
+        (await evaluate(`window.__smoke.onScreen('.react-flow__node[data-id="platform"]')`)) ===
+          true &&
+        (await text('#focus-bar-note')) === 'Filter switched off to show Platform Services.',
+      { focus: await attr('data-focus'), note: await text('#focus-bar-note') },
+    );
+    // The focus does not involve the node gone to, and pales what it does not involve — but not
+    // what is selected: the node shown can be read, with what is drawn inside it.
+    const goneTo = await evaluate(`(() => {
+      const node = document.querySelector('.react-flow__node.selected[data-id="platform"]');
+      const inside = [...document.querySelectorAll('.react-flow__node[data-id^="platform."]')];
+      return {
+        faded: node.classList.contains('arch-faded'),
+        opacity: getComputedStyle(node).opacity,
+        inside: inside.length,
+        insideFaded: inside.filter((el) => el.classList.contains('arch-faded')).length,
+        otherFaded: window.__smoke.count('.react-flow__node.arch-faded'),
+      };
+    })()`);
+    check(
+      'the node gone to is not paled by the focus that does not involve it, the rest still is',
+      !goneTo.faded && goneTo.opacity === '1' && goneTo.insideFaded === 0 && goneTo.otherFaded > 0,
+      goneTo,
+    );
+    // A focus that involves nothing of the map (a bug tagged to no node) cannot reduce it: the
+    // whole map stays, all of it paled, and bar and hint say that — not that nothing is left out.
+    await openSearch();
+    await client.send('Input.insertText', { text: '1065' });
+    await until(
+      `window.__smoke.count('#search-results [data-workitem-id="1065"]') === 1`,
+      'the untagged bug among the search results',
+    );
+    await press('Enter', { keyCode: 13, text: '\r' });
+    await untilSelection('workitem:1065');
+    await click('#detail-panel .detail-focus');
+    await until(`window.__smoke.attr('data-focus') === 'workitem:1065'`, 'the focus on the bug');
+    await click('#focus-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode for the bug');
+    await until(
+      `window.__smoke.text('#focus-mode-hint') !== 'The rest of the map is paled.'`,
+      'the hint for a focus that involves nothing',
+    );
+    const nothingInvolved = {
+      bar: await text('#focus-bar'),
+      hint: await text('#focus-mode-hint'),
+      filtered: await attr('data-filtered'),
+      drawn: await attr('data-drawn-nodes'),
+      unfaded: (await evaluate(`window.__smoke.nodeIds(':not(.arch-faded)')`)).length,
+    };
+    await click('#focus-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode again');
+    await chooseOption('#focus-select', epicFocus);
+    await until(`window.__smoke.attr('data-focus') === '${epicFocus}'`, 'the focus on the epic');
+    check(
+      'a focus that involves nothing of the map is said to: the whole map stays, paled, and nothing is called left out',
+      nothingInvolved.filtered === null &&
+        nothingInvolved.drawn === '45' &&
+        nothingInvolved.unfaded === 0 &&
+        nothingInvolved.bar.includes('0 nodes') &&
+        nothingInvolved.bar.includes('nothing of it is on the map') &&
+        !nothingInvolved.bar.includes('nothing to leave out') &&
+        nothingInvolved.hint ===
+          'The focus involves nothing on the map: the whole map is shown, paled.',
+      nothingInvolved,
+    );
+    // Positions set by hand belong to one arrangement: the filtered map has its own.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await click('#focus-bar-mode');
+    await untilFiltered(epicFocus);
+    await click('#unlock-positions');
+    await until(`window.__smoke.attr('data-positions-unlocked') === 'true'`, 'unlocked positions');
+    // The header of a domain, right of its name.
+    const handle = await evaluate(`(() => {
+      for (const node of document.querySelectorAll('.react-flow__node-group')) {
+        if (node.dataset.id.includes('.')) continue;
+        const r = node.getBoundingClientRect();
+        const point = { x: r.right - 30, y: r.top + 14 };
+        if (node.contains(document.elementFromPoint(point.x, point.y))) return point;
+      }
+      return null;
+    })()`);
+    if (handle === null) throw new Error('no domain to drag on the filtered map');
+    await drag(handle, { x: handle.x - 60, y: handle.y + 40 });
+    await until(
+      `window.__smoke.attr('data-moved-count') === '1'`,
+      'one node moved by hand on the filtered map',
+    );
+    await click('#focus-bar-mode');
+    await untilFiltered(null);
+    const movedOnWhole = await attr('data-moved-count');
+    await click('#focus-bar-mode');
+    await untilFiltered(epicFocus);
+    const movedOnFiltered = await attr('data-moved-count');
+    await click('#reset-positions');
+    await until(`window.__smoke.attr('data-moved-count') === '0'`, 'the positions reset');
+    await click('#unlock-positions');
+    await until(`window.__smoke.attr('data-positions-unlocked') === 'false'`, 'locked positions');
+    check(
+      'a node moved by hand on the filtered map is moved there only: not on the whole map, and again after coming back',
+      movedOnWhole === '0' && movedOnFiltered === '1',
+      { movedOnWhole, movedOnFiltered },
+    );
+    // Collapsing, the level of detail and the hidden kinds act on the filtered map as they do
+    // on the whole one; none of them lays it out again. The collapsed groups are those of the
+    // whole map: the note counts them all.
+    const viewEpic = await viewNow();
+    const groupsFiltered = await countOf('.react-flow__node-group');
+    const domainsOnly = `window.__smoke.nodeIds().every((id) => !id.includes('.'))`;
+    await click('#collapse-all');
+    await until(
+      `window.__smoke.attr('data-collapsed-count') !== '0' && ${domainsOnly}`,
+      'closed domains',
+    );
+    const collapsedFiltered = {
+      drawn: (await evaluate(`window.__smoke.nodeIds()`)).length,
+      model: await attr('data-drawn-nodes'),
+      notes: await countOf('#collapsed-note'),
+      note: await text('#collapsed-note'),
+    };
+    await click('#expand-all');
+    await until(
+      `window.__smoke.attr('data-collapsed-count') === '0' && window.__smoke.nodeIds().length === 23`,
+      'every node of the filtered map again',
+    );
+    await pinLod('domains');
+    const domainsFiltered = (await evaluate(`window.__smoke.nodeIds()`)).length;
+    const domainsAlone = await evaluate(domainsOnly);
+    await pinLod('subcomponents');
+    const edgesFiltered = await countOf('.react-flow__edge');
+    const dataflowFiltered = await countOf('.react-flow__edge.arch-edge-dataflow');
+    await click('#kind-filters [data-kind="dataflow"]');
+    await until(
+      `window.__smoke.attr('data-hidden-kinds') === 'dataflow' && window.__smoke.count('.react-flow__edge.arch-edge-dataflow') === 0`,
+      'the kind hidden on the filtered map',
+    );
+    const withoutDataflow = {
+      edges: await countOf('.react-flow__edge'),
+      nodes: (await evaluate(`window.__smoke.nodeIds()`)).length,
+      filtered: await attr('data-filtered'),
+    };
+    await click('#kind-filters [data-kind="dataflow"]');
+    await until(`window.__smoke.attr('data-hidden-kinds') === ''`, 'the kind shown again');
+    check(
+      'Collapse all, a pinned level and a hidden edge kind act on the filtered map',
+      collapsedFiltered.drawn > 0 &&
+        collapsedFiltered.drawn < 23 &&
+        collapsedFiltered.drawn === domainsFiltered &&
+        domainsAlone &&
+        collapsedFiltered.model === '23' &&
+        groupsFiltered < groupsOnWhole &&
+        collapsedFiltered.notes === 1 &&
+        collapsedFiltered.note === `${groupsOnWhole} collapsed by hand` &&
+        dataflowFiltered > 0 &&
+        withoutDataflow.edges === edgesFiltered - dataflowFiltered &&
+        withoutDataflow.nodes === 23 &&
+        withoutDataflow.filtered === epicFocus &&
+        sameView(await viewNow(), viewEpic),
+      {
+        collapsedFiltered,
+        groupsOnWhole,
+        groupsFiltered,
+        domainsFiltered,
+        edgesFiltered,
+        dataflowFiltered,
+        withoutDataflow,
+      },
+    );
+    // A saved view keeps Filter with the focus, and its place on the filtered map.
+    await chooseOption('#focus-select', flowFocus);
+    await untilFiltered(flowFocus);
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    const grip = await evaluate(`window.__smoke.emptyPoint()`);
+    await drag(grip, { x: grip.x + 120, y: grip.y + 50 });
+    await settled();
+    const viewSaved = await viewNow();
+    /** Saves the map as it is under a name, on the Views tab. @param {string} name */
+    const saveView = async (name) => {
+      await evaluate(`(() => {
+        const input = document.querySelector('#view-name');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, ${JSON.stringify(name)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await evaluate(`document.querySelector('#save-view').click()`);
+    };
+    await saveView('Telemetry alone');
+    await until(
+      `window.__smoke.count('#views-list li') === 1`,
+      'the view saved on the filtered map',
+    );
+    const savedNote = {
+      lists: await countOf('#views-list'),
+      notes: await countOf('#views-note'),
+      note: await text('#views-note'),
+    };
+    await click('#focus-clear');
+    await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+    await untilFiltered(null);
+    await evaluate(`document.querySelector('#views-list .views-apply').click()`);
+    await until(
+      `window.__smoke.attr('data-focus') === '${flowFocus}' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the focus of the view',
+    );
+    await settled();
+    check(
+      'a view saved on a filtered map brings back the focus, Filter and the place',
+      savedNote.lists === 1 &&
+        savedNote.notes === 1 &&
+        savedNote.note === 'Saved "Telemetry alone".' &&
+        (await attr('data-filtered')) === flowFocus &&
+        (await attr('data-focus-mode')) === 'filter' &&
+        sameView(await viewNow(), viewSaved) &&
+        // The Views tab says so where it lists what a view keeps.
+        (await text('#views')).includes(
+          'focus (and Filter, when the map was reduced to the focus)',
+        ),
+      { savedNote, filtered: await attr('data-filtered'), viewSaved, now: await viewNow() },
+    );
+    // What a view or a link keeps is the map on screen. Between a change of the focus and the
+    // arrival of its map that is still the map before: a link copied then is one of the filtered
+    // map, whose place it carries.
+    const linkedMeanwhile = await evaluate(`(async () => {
+      window.__smoke.choose('#focus-select', '');
+      await window.__smoke.rendered(() => window.__smoke.attr('data-focus') === null);
+      document.querySelector('#copy-view-link').click();
+      return {
+        focus: window.__smoke.attr('data-focus'),
+        filtered: window.__smoke.attr('data-filtered'),
+        hash: window.location.hash,
+      };
+    })()`);
+    const viewMeanwhile = JSON.parse(
+      Buffer.from(linkedMeanwhile.hash.slice('#view='.length), 'base64url').toString('utf8'),
+    );
+    check(
+      'a link copied after the focus was cleared, before the whole map has arrived, is one of the filtered map still on screen',
+      linkedMeanwhile.focus === null &&
+        linkedMeanwhile.filtered === flowFocus &&
+        same(viewMeanwhile.focus, { type: 'flow', id: flowFocus.slice('flow:'.length) }) &&
+        viewMeanwhile.focusMode === 'filter',
+      { focus: linkedMeanwhile.focus, filtered: linkedMeanwhile.filtered, view: viewMeanwhile },
+    );
+    await untilFiltered(null);
+    // The place of a view waits for the map of that view only: the reader's next choice drops
+    // it. With the focus cleared before the filtered map of the view has arrived, the whole map
+    // stays where it is. (Moved first, so that it is not where a fit would put it.)
+    const gripWhole = await evaluate(`window.__smoke.emptyPoint()`);
+    await drag(gripWhole, { x: gripWhole.x + 90, y: gripWhole.y + 60 });
+    await settled();
+    const viewKept = await viewNow();
+    await until(viewIsStored, 'the moved view of the whole map stored');
+    const storedKept = await evaluate(`window.__smoke.storedViewport()`);
+    const overtaken = await evaluate(`(async () => {
+      document.querySelector('#views-list .views-apply').click();
+      await window.__smoke.rendered(() => window.__smoke.attr('data-focus') !== null);
+      const applied = {
+        focus: window.__smoke.attr('data-focus'),
+        pending: window.__smoke.attr('data-layout-pending'),
+      };
+      window.__smoke.choose('#focus-select', '');
+      await window.__smoke.rendered(() => window.__smoke.attr('data-focus') === null);
+      return { applied, focus: window.__smoke.attr('data-focus') };
+    })()`);
+    await untilFiltered(null);
+    await sleep(600); // a view that is fitted, and then stored, would be by now
+    check(
+      'the focus cleared before the map of an applied view has arrived: the whole map stays where it was, and so does its stored viewport',
+      overtaken.applied.focus === flowFocus &&
+        overtaken.applied.pending === 'true' &&
+        overtaken.focus === null &&
+        sameView(await viewNow(), viewKept) &&
+        (await evaluate(`window.__smoke.storedViewport()`)) === storedKept,
+      { overtaken, viewKept, now: await viewNow() },
+    );
+    // Likewise a view of the whole map applied on a filtered one, with another focus chosen
+    // before the whole map has arrived: the map of that focus arrives fitted, like any.
+    await saveView('Whole map');
+    await until(`window.__smoke.count('#views-list li') === 2`, 'the view of the whole map saved');
+    await chooseOption('#focus-select', flowFocus);
+    await untilFiltered(flowFocus);
+    await evaluate(`(async () => {
+      document.querySelector('#views-list li[data-view-name="Whole map"] .views-apply').click();
+      await window.__smoke.rendered(() => window.__smoke.attr('data-focus') === null);
+      window.__smoke.choose('#focus-select', 'flow:rule-release');
+    })()`);
+    await untilFiltered('flow:rule-release');
+    const fitOvertaken = await fitOnScreen();
+    check(
+      'another focus chosen before the whole map of an applied view has arrived: its map is fitted, not put at the place of the view',
+      fitOvertaken.fitted,
+      fitOvertaken,
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="Whole map"] .views-delete').click()`,
+    );
+    await until(
+      `window.__smoke.count('#views-list li') === 1`,
+      'the view of the whole map deleted',
+    );
+    // Back on the filtered map of the first view, where the link below is made.
+    await evaluate(`document.querySelector('#views-list .views-apply').click()`);
+    await untilFiltered(flowFocus);
+    await evaluate(`document.querySelector('#views-list .views-delete').click()`);
+    await until(`window.__smoke.count('#views-list li') === 0`, 'the view deleted');
+    // A link made on a filtered map carries Filter too.
+    await evaluate(`document.querySelector('#copy-view-link').click()`);
+    await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
+    /** @type {string} */
+    const filteredHash = await evaluate(`window.location.hash`);
+    await reloadWith(filteredHash);
+    await until(
+      `window.__smoke.attr('data-focus') === '${flowFocus}' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the focus of the link',
+    );
+    await settled();
+    check(
+      'a link copied on a filtered map opens the map filtered, at the same place',
+      (await attr('data-filtered')) === flowFocus &&
+        (await attr('data-focus-mode')) === 'filter' &&
+        (await attr('data-drawn-nodes')) === '14' &&
+        sameView(await viewNow(), viewSaved),
+      { filtered: await attr('data-filtered'), viewSaved, now: await viewNow() },
+    );
+    const linkedView = JSON.parse(
+      Buffer.from(filteredHash.slice('#view='.length), 'base64url').toString('utf8'),
+    );
+    const linkOf = (/** @type {object} */ view) =>
+      `#view=${Buffer.from(JSON.stringify(view)).toString('base64url')}`;
+    // The same link opened where the structure does not have the flow: its place is one of a
+    // map that cannot be shown, so the whole map is fitted instead of being put there. (The
+    // pinned level of the link says that the link has been applied.)
+    await reloadWith(linkOf({ ...linkedView, focus: { type: 'flow', id: 'no-such-flow' } }));
+    await until(
+      `window.__smoke.attr('data-lod-mode') === ${JSON.stringify(linkedView.lodMode)}`,
+      'the level of the link without its flow',
+    );
+    await sleep(300); // the view of the link follows its level
+    const fitWithoutFlow = await fitOnScreen();
+    check(
+      'a link made on a filtered map, opened where its flow is gone, shows the whole map fitted',
+      linkedView.lodMode === 'subcomponents' &&
+        (await attr('data-focus')) === null &&
+        (await attr('data-filtered')) === null &&
+        (await attr('data-drawn-nodes')) === '45' &&
+        fitWithoutFlow.fitted,
+      { lodMode: linkedView.lodMode, ...fitWithoutFlow },
+    );
+    // A link without the mode was made on the whole map: it opens with the rest paled, although
+    // the switch was left on.
+    const { focusMode: linkedMode, ...viewWithoutMode } = linkedView;
+    const switchStored = await evaluate(
+      `JSON.parse(localStorage.getItem('architecture-map.settings') ?? '{}').focusMode ?? null`,
+    );
+    await reloadWith(linkOf(viewWithoutMode));
+    await until(
+      `window.__smoke.attr('data-focus') === '${flowFocus}' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the focus of the link without the mode',
+    );
+    await settled();
+    check(
+      'a link without the mode opens in Focus mode although the switch was on',
+      linkedMode === 'filter' &&
+        switchStored === 'filter' &&
+        (await attr('data-focus-mode')) === 'focus' &&
+        (await attr('data-filtered')) === null &&
+        (await countOf('.react-flow__node.arch-faded')) > 0,
+      { linkedMode, switchStored, mode: await attr('data-focus-mode') },
+    );
+    // The focus is not remembered, the switch is: a plain reload shows the whole map where it
+    // was, with Filter waiting for a focus.
+    await until(viewIsStored, 'the view of the whole map stored');
+    const viewWhole = await viewNow();
+    await click('#focus-mode');
+    await untilFiltered(flowFocus);
+    await sleep(600); // the view of the filtered map would be stored by now, if it were
+    await reloadWith('');
+    await settled();
+    check(
+      'a reload without a link keeps the switch and drops the focus: the whole map, in the view it had before',
+      (await attr('data-focus-mode')) === 'filter' &&
+        (await attr('data-focus')) === null &&
+        (await attr('data-filtered')) === null &&
+        (await attr('data-drawn-nodes')) === '45' &&
+        (await text('#focus-mode-hint')).includes('Applies once a focus is chosen') &&
+        sameView(await viewNow(), viewWhole),
+      { mode: await attr('data-focus-mode'), viewWhole, now: await viewNow() },
+    );
+    // So do the files read again while the map is filtered: they are another model, whose map
+    // is the whole one.
+    await chooseOption('#focus-select', flowFocus);
+    await untilFiltered(flowFocus);
+    await click('#reload-files');
+    await until(
+      `window.__smoke.attr('data-focus') === null && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.count('.react-flow__node') > 0`,
+      'the map of the files read again',
+    );
+    await settled();
+    check(
+      'Reload on a filtered map shows the whole map again, in the view it had, with the switch still on',
+      (await attr('data-focus-mode')) === 'filter' &&
+        (await attr('data-filtered')) === null &&
+        (await attr('data-drawn-nodes')) === '45' &&
+        (await countOf('#focus-bar')) === 0 &&
+        sameView(await viewNow(), viewWhole),
+      { mode: await attr('data-focus-mode'), viewWhole, now: await viewNow() },
+    );
+    // In Auto at the Everything level the filtered map arrives with its lists and is fitted,
+    // which takes the zoom out of that level: the map laid out again without the lists is
+    // fitted once more.
+    await pinLod('auto', await attr('data-zoom-lod'));
+    const middle = await evaluate(`(() => {
+      const r = document.querySelector('.react-flow').getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    for (let turn = 0; turn < 8 && (await attr('data-zoom-lod')) !== 'detail'; turn++) {
+      const { zoom } = await viewNow();
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        ...middle,
+        deltaX: 0,
+        deltaY: -300,
+      });
+      await until(`window.__smoke.viewport().zoom > ${zoom}`, 'the zoom after a wheel turn');
+      await settled();
+    }
+    await until(
+      `window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the Everything level by zoom, with its lists',
+    );
+    const linesBefore = await countOf('.arch-workitem');
+    await chooseOption('#focus-select', flowFocus);
+    await until(
+      `window.__smoke.attr('data-filtered') === '${flowFocus}' && window.__smoke.attr('data-lod') !== 'detail' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the filtered map below the Everything level, laid out without the lists',
+    );
+    const linesAfter = await countOf('.arch-workitem');
+    const fitWithoutLists = await fitOnScreen();
+    check(
+      'entering Filter at the Everything level in Auto: the map laid out again without the lists is fitted again',
+      linesBefore > 0 && linesAfter === 0 && fitWithoutLists.fitted,
+      { linesBefore, linesAfter, ...fitWithoutLists },
+    );
+    // Back to what the checks below start from: nothing focused, the rest paled when something
+    // is, and the whole map in view with closed component boxes.
+    await click('#focus-clear');
+    await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared at the end');
+    await click('#focus-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode at the end');
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
     await pinLod('components');
+    await click('#fit-view');
+    await settled();
+    if ((await attr('data-panel-tab')) !== tabBeforeFilter) {
+      await click(`#tab-${tabBeforeFilter}`);
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${tabBeforeFilter}'`,
+        'the tab shown before',
+      );
+    }
+
     // Heat and progress on the boxes.
     await setSetting('heat', true);
     await until(`window.__smoke.count('.arch-heat') > 0`, 'the heat strips');
@@ -2260,9 +3776,7 @@ async function run(viewerPath, browserPath) {
       (await countOf('.arch-heat')) === 0 && (await countOf('.arch-progress')) === 0,
     );
     // Colour by an attribute and by a metric.
-    await evaluate(`document.querySelector('#settings').open = true`);
     await chooseOption('#color-by', 'owner');
-    await evaluate(`document.querySelector('#settings').open = false`);
     await until(`window.__smoke.attr('data-color-by') === 'owner'`, 'colour by owner');
     const legend = await evaluate(
       `[...document.querySelectorAll('#color-legend [data-legend-value]')].map((e) => e.dataset.legendValue)`,
@@ -2275,9 +3789,7 @@ async function run(viewerPath, browserPath) {
         (await countOf('.react-flow__node[data-id="data.event-store"] .arch-tinted')) === 1,
       legend,
     );
-    await evaluate(`document.querySelector('#settings').open = true`);
     await chooseOption('#color-by', 'metric:churn');
-    await evaluate(`document.querySelector('#settings').open = false`);
     await until(`window.__smoke.attr('data-color-by') === 'metric:churn'`, 'colour by churn');
     check(
       'colour by a metric shows the range of the ramp and tints only the nodes that have it',
@@ -2286,16 +3798,14 @@ async function run(viewerPath, browserPath) {
         (await countOf('.react-flow__node[data-id="data.event-store"] .arch-tinted')) === 0 &&
         (await countOf('.react-flow__node[data-id="backoffice.studio"] .arch-tinted')) === 1,
     );
-    await evaluate(`document.querySelector('#settings').open = true`);
     await chooseOption('#color-by', 'none');
-    await evaluate(`document.querySelector('#settings').open = false`);
     await until(`window.__smoke.attr('data-color-by') === 'none'`, 'colour by nothing');
     check('colour by nothing tints nothing', (await countOf('.arch-tinted')) === 0);
     // Edges on demand at the coarse levels.
     await setSetting('edges-on-demand', true);
     await until(`window.__smoke.attr('data-edges-quiet') === 'true'`, 'edges on demand');
-    // The pointer rests on the last box clicked, whose edges would stay: park it in the gutter.
-    await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 500 });
+    // The pointer rests on the last box clicked, whose edges would stay: park it.
+    await park();
     await sleep(300);
     const edgesAll = await countOf('.react-flow__edge');
     check(
@@ -2324,7 +3834,6 @@ async function run(viewerPath, browserPath) {
     await setSetting('edges-on-demand', false);
     await pinLod('components');
     // Saved views: save, change the map, come back; a link carries the view.
-    await evaluate(`document.querySelector('#views').open = true`);
     await evaluate(`(() => {
       const input = document.querySelector('#view-name');
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -2336,40 +3845,19 @@ async function run(viewerPath, browserPath) {
     await evaluate(`document.querySelector('#copy-view-link').click()`);
     await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
     const viewHash = await evaluate(`window.location.hash`);
-    await evaluate(`document.querySelector('#views').open = false`);
     await click('#collapse-all');
     await until(`Number(window.__smoke.attr('data-collapsed-count')) > 0`, 'groups collapsed');
     await pinLod('subcomponents');
-    await evaluate(`document.querySelector('#views').open = true`);
     await evaluate(`document.querySelector('#views-list .views-apply').click()`);
-    await evaluate(`document.querySelector('#views').open = false`);
     await until(`window.__smoke.attr('data-collapsed-count') === '0'`, 'the view applied');
     await until(`window.__smoke.attr('data-lod-mode') === 'components'`, 'its level of detail');
     check(
       'a saved view brings back the collapsed groups and the level of detail',
       (await evaluate(`window.__smoke.attr('data-lod-mode')`)) === 'components',
     );
-    await evaluate(`document.querySelector('#views').open = true`);
     await evaluate(`document.querySelector('#views-list .views-delete').click()`);
     await until(`window.__smoke.count('#views-list li') === 0`, 'the view deleted');
-    await evaluate(`document.querySelector('#views').open = false`);
-    // The link: collapse again, reload with the fragment, and the view is back. (A navigation
-    // that only changes the fragment is no reload: the page is reloaded explicitly.)
-    const reloadWith = async (/** @type {string} */ hash) => {
-      await evaluate(
-        `window.history.replaceState(null, '', window.location.href.split('#')[0] + ${JSON.stringify(hash)})`,
-      );
-      await client.send('Page.reload');
-      await startPage();
-      await dropFiles(dataFiles);
-      await until(
-        `document.readyState === 'complete' && document.querySelectorAll('.react-flow__node').length > 0`,
-        'the map after the reload',
-      );
-      await evaluate(PAGE_HELPERS);
-      await until(`window.__smoke.attr('data-lines-laid-out') === 'true'`, 'the reloaded layout');
-      await sleep(300);
-    };
+    // The link: collapse again, reload with the fragment, and the view is back.
     await click('#collapse-all');
     await until(
       `Number(window.__smoke.attr('data-collapsed-count')) > 0`,
@@ -2447,7 +3935,7 @@ async function run(viewerPath, browserPath) {
 
     // The view kept across a change of the story mode is the stored one: a reload comes back
     // to the same place, not to where the view was in the layout before.
-    await press('/', { code: 'Slash', keyCode: 191, text: '/' });
+    await openSearch();
     await client.send('Input.insertText', { text: 'data.event-store' });
     await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
     await press('Enter', { keyCode: 13, text: '\r' });
@@ -2548,11 +4036,9 @@ async function run(viewerPath, browserPath) {
         tagged.rows === 0,
       tagged,
     );
-    await evaluate(`document.querySelector('#settings').open = true`);
     const stateBoxes = await evaluate(
       `[...document.querySelectorAll('[data-workitem-state]')].map((e) => e.dataset.workitemState)`,
     );
-    await evaluate(`document.querySelector('#settings').open = false`);
     check(
       'states that differ only in letter case are one filter choice',
       stateBoxes.length === 2 && stateBoxes.includes('New') && stateBoxes.includes('Active'),
@@ -2622,13 +4108,24 @@ async function run(viewerPath, browserPath) {
         reloaded.entries[0].hint.startsWith('Alpha, Beta'),
       reloaded,
     );
-    await evaluate(`document.querySelector('#recent').open = true`);
-    await sleep(100);
+    await showControl('#recent-list');
     check(
-      'the recent drop-down opens inside the window',
+      'the recent maps are listed on the Files tab',
       (await evaluate(`(() => {
-        const r = document.querySelector('#recent .settings-body').getBoundingClientRect();
-        return r.width > 0 && r.left >= 0 && r.right <= document.documentElement.clientWidth;
+        const list = document.querySelector('#recent-list').getBoundingClientRect();
+        const panel = document.querySelector('#control-panel').getBoundingClientRect();
+        return (
+          window.__smoke.attr('data-panel-tab') === 'files' &&
+          list.width > 0 &&
+          list.left >= panel.left &&
+          list.right <= panel.right &&
+          list.top >= panel.top &&
+          list.bottom <= panel.bottom &&
+          // Names, hints and the dates after them are there in full, on as many lines as needed.
+          [...document.querySelectorAll('#recent-list .recent-name, #recent-list .recent-hint')].every(
+            (line) => line.scrollWidth <= line.clientWidth + 1 && line.getBoundingClientRect().right <= list.right + 1,
+          )
+        );
       })()`)) === true,
     );
     await click('#recent-list li[data-recent="small.yaml"] .recent-forget');
@@ -2641,7 +4138,104 @@ async function run(viewerPath, browserPath) {
         (await countOf('.react-flow__node[data-id="beta"]')) === 1,
       forgotten,
     );
-    await evaluate(`document.querySelector('#recent').open = false`);
+
+    // --- Focus / Filter: a flow that leaves nothing out ---------------------------------------
+    // Such a flow is shown on the whole map, in Filter mode too, and brought on screen there as
+    // in Focus mode: at once when the whole map is on screen, and once it is back when the map
+    // on screen is filtered to another flow.
+    await openFile(
+      '#yaml-file',
+      'flows.yaml',
+      [
+        'version: 1',
+        'domains:',
+        '  - id: a',
+        '    name: Alpha',
+        '    components:',
+        '      - { id: a.x, name: X }',
+        '      - { id: a.y, name: Y }',
+        '  - id: b',
+        '    name: Beta',
+        '    components:',
+        '      - { id: b.p, name: P }',
+        'edges:',
+        '  - { id: x-y, from: a.x, to: a.y, kind: dataflow }',
+        '  - { id: y-p, from: a.y, to: b.p, kind: dataflow }',
+        'flows:',
+        '  - { id: all, name: All, edges: [x-y, y-p] }',
+        '  - { id: part, name: Part, edges: [x-y] }',
+        '',
+      ].join('\n'),
+    );
+    await until(`window.__smoke.text('#source-name') === 'flows.yaml'`, 'the map with two flows');
+    await until(`window.__smoke.count('.react-flow__node[data-id="a"]') === 1`, 'its domains');
+    await pinLod('subcomponents');
+    if ((await attr('data-focus-mode')) !== 'filter') await click('#focus-mode');
+    await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode for the flows');
+    /**
+     * Fits the map and pans it down until the lower half of its first domain is below the
+     * canvas: enough of the map stays in view for a canvas to start from that view, whatever
+     * the detail panel takes of its width. Returns the nodes then not entirely on the canvas.
+     */
+    const panAway = async () => {
+      await click('#fit-view');
+      await settled();
+      const hold = await evaluate(`window.__smoke.emptyPoint()`);
+      /** @type {number} */
+      const down = await evaluate(`(() => {
+        const canvas = document.querySelector('.react-flow').getBoundingClientRect();
+        const domain = document.querySelector('.react-flow__node[data-id="a"]').getBoundingClientRect();
+        return canvas.bottom - domain.top - domain.height / 2;
+      })()`);
+      await drag(hold, { x: hold.x, y: hold.y + down });
+      await settled();
+      return evaluate(`window.__smoke.offCanvas()`);
+    };
+    /**
+     * Whether every node drawn comes to lie on the canvas: the move that brings it there may be
+     * yet to start.
+     */
+    const allOnCanvas = () =>
+      until(`window.__smoke.offCanvas().length === 0`, 'every node on the canvas').then(
+        () => true,
+        () => false,
+      );
+    const offWhole = await panAway();
+    await chooseOption('#focus-select', 'flow:all');
+    await until(
+      `window.__smoke.attr('data-focus') === 'flow:all'`,
+      'the focus that leaves nothing out',
+    );
+    const shownAtOnce = await allOnCanvas();
+    await settled();
+    check(
+      'in Filter mode a flow that leaves nothing out is brought on screen on the whole map',
+      offWhole.length > 0 &&
+        shownAtOnce &&
+        (await attr('data-filtered')) === null &&
+        (await attr('data-drawn-nodes')) === '5' &&
+        (await text('#focus-bar')).includes('nothing to leave out'),
+      { offWhole, shownAtOnce, bar: await text('#focus-bar') },
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    const offBeforePart = await panAway();
+    await chooseOption('#focus-select', 'flow:part');
+    await untilFiltered('flow:part');
+    const partNodes = await attr('data-drawn-nodes');
+    await chooseOption('#focus-select', 'flow:all');
+    await untilFiltered(null);
+    const shownOnceBack = await allOnCanvas();
+    await settled();
+    check(
+      'a flow that leaves nothing out, chosen on a map filtered to another flow, is brought on screen once the whole map is back',
+      offBeforePart.length > 0 &&
+        partNodes === '3' &&
+        shownOnceBack &&
+        (await attr('data-drawn-nodes')) === '5' &&
+        (await selection()) === 'flow:all',
+      { offBeforePart, partNodes, shownOnceBack, view: await viewNow() },
+    );
 
     // --- Offline: nothing left the folder, and the policy would not have let it ---------------
     const policy = await evaluate(

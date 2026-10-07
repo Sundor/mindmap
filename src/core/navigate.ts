@@ -445,12 +445,14 @@ export function rowInfoText(info: NodeRowInfo): string {
 // --- Keeping the place across layouts ---------------------------------------------------------
 
 /**
- * The viewport that shows, in another layout of the same nodes, the place `current` shows now
- * (the layout changed because the work-item content did: another story mode, filter or file).
- * The zoom is kept. The anchor is the innermost node under the middle of the screen: the point
- * of that node that is in the middle now (as a fraction of its box) is in the middle afterwards.
- * With no node under the middle, the nearest node keeps its distance to the middle. Returns
- * `current` itself when there is nothing to hold on to (no node in both layouts, no screen).
+ * The viewport that shows, in another layout of the same model, the place `current` shows now
+ * (the layout changed because the work-item content did — another story mode, filter or file —
+ * or because the map was reduced to a focus or made whole again, so one may lack nodes of the
+ * other). The zoom is kept. The anchor is the innermost node under the middle of the screen:
+ * the point of that node that is in the middle now (as a fraction of its box) is in the middle
+ * afterwards. With no node under the middle, the nearest node keeps its distance to the middle.
+ * Returns `current` itself when there is nothing to hold on to (no node in both layouts, no
+ * screen).
  *
  * `before` and `after` are the absolute rectangles of the two layouts (`LayoutResult.absolute`).
  */

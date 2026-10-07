@@ -2,6 +2,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildFlow, type FlowGraph } from './flow';
+import { submodel } from './focusFilter';
 import { computeLayoutUncached, type LayoutResult } from './layout';
 import { parseOk } from './layout/test-helpers';
 import type { ArchitectureModel } from './model';
@@ -15,7 +16,10 @@ import {
   sameSelection,
   selectionExists,
   selectionOfRenderedEdge,
+  workItemDrawnOn,
 } from './selection';
+import { buildWorkItemOverlay, type WorkItemOverlay } from './workItemOverlay';
+import type { WorkItemSummary } from './workitems';
 
 const YAML = `
 version: 1
@@ -298,5 +302,64 @@ describe('selection against the rendered flow', () => {
       .filter((n) => n.type !== 'band' && !(n.className ?? '').includes(DIMMED_CLASS))
       .map((n) => n.id);
     expect(litNodes.sort()).toEqual(['a.x', 'b.p']);
+  });
+});
+
+describe('selection against the flow of a reduced model', () => {
+  let model: ArchitectureModel;
+  let reduced: ArchitectureModel;
+  let layout: LayoutResult;
+  let open: FlowGraph;
+  let overlay: WorkItemOverlay;
+  const story = (id: number, componentIds: string[]): WorkItemSummary => ({
+    id,
+    type: 'User Story',
+    title: `Item ${id}`,
+    state: 'Active',
+    componentIds,
+    tags: [],
+  });
+
+  beforeAll(async () => {
+    model = parseOk(YAML);
+    reduced = submodel(model, {
+      nodes: new Set(['a', 'a.x', 'a.x.one', 'b', 'b.p']),
+      edges: new Set(['one-p']),
+    }).model;
+    layout = await computeLayoutUncached(reduced);
+    open = buildFlow(reduced, layout);
+    overlay = buildWorkItemOverlay(model, [
+      story(1, ['a.x.one', 'a.x.two', 'b.q']),
+      story(2, ['a.x.two', 'c']),
+    ]);
+  });
+
+  it('a node the model lacks is not drawn: no group around it is marked in its place', () => {
+    const selection = { type: 'node', id: 'a.x.two' } as const;
+    expect(renderedSelection(reduced, open, selection)).toBeUndefined();
+    expect(renderedSelection(reduced, open, { type: 'node', id: 'c' })).toBeUndefined();
+    // Asked with the model the flow was not built from, the group would stand in for it.
+    expect(renderedSelection(model, open, selection)).toEqual({ type: 'node', id: 'a.x' });
+  });
+
+  it('a kept node maps to itself, or to its nearest visible ancestor while it is hidden', () => {
+    const selection = { type: 'node', id: 'a.x.one' } as const;
+    expect(renderedSelection(reduced, open, selection)).toEqual(selection);
+    const closed = buildFlow(reduced, layout, { collapsedIds: new Set(['a.x']) });
+    expect(renderedSelection(reduced, closed, selection)).toEqual({ type: 'node', id: 'a.x' });
+  });
+
+  it('a work item is drawn on the kept nodes that list it only', () => {
+    const visible = new Set(open.nodes.filter((n) => n.type !== 'band').map((n) => n.id));
+    expect(workItemDrawnOn(reduced, overlay, visible, 1)).toEqual(['a.x.one']);
+    expect(workItemDrawnOn(model, overlay, visible, 1)).toEqual(['a.x.one', 'a.x', 'b']);
+    expect(renderedSelection(reduced, open, { type: 'workitem', id: 1 }, overlay)).toEqual({
+      type: 'workitem',
+      id: 1,
+      nodeIds: ['a.x.one'],
+    });
+    // Listed on nodes that are left out only.
+    expect(workItemDrawnOn(reduced, overlay, visible, 2)).toEqual([]);
+    expect(renderedSelection(reduced, open, { type: 'workitem', id: 2 }, overlay)).toBeUndefined();
   });
 });

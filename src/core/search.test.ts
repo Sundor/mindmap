@@ -124,27 +124,31 @@ describe('moveActiveIndex', () => {
 describe('dropdownOffset', () => {
   const width = 384;
 
-  it('right-aligns the list with the box where there is room', () => {
-    // Search box at the right end of a wide toolbar.
-    expect(dropdownOffset({ left: 800, right: 1008 }, width, 1024)).toBe(1008 - width - 800);
-  });
-
-  it('keeps the list in the window when the box sits at the left (wrapped toolbar)', () => {
-    const anchor = { left: 16, right: 224 };
-    for (const viewport of [900, 800, 520]) {
-      const left = anchor.left + dropdownOffset(anchor, width, viewport);
-      expect(left).toBe(8);
-      expect(left + width).toBeLessThanOrEqual(viewport - 8);
+  it('starts the list at the left edge of the box where there is room', () => {
+    // Search box beside the rail of the control panel: the list hangs over the canvas.
+    const anchorLeft = 68;
+    for (const viewport of [1836, 1366, 520, 460]) {
+      expect(dropdownOffset(anchorLeft, width, viewport)).toBe(0);
+      expect(anchorLeft + width).toBeLessThanOrEqual(viewport - 8);
     }
   });
 
   it('pulls the list back from the right window edge', () => {
-    const anchor = { left: 300, right: 508 };
-    const left = anchor.left + dropdownOffset(anchor, width, 500, 8);
+    const anchorLeft = 300;
+    const left = anchorLeft + dropdownOffset(anchorLeft, width, 500, 8);
     expect(left).toBe(500 - 8 - width);
+    // Beside the rail, in a window too narrow for the list to start at the box.
+    expect(68 + dropdownOffset(68, width, 420)).toBe(420 - 8 - width);
   });
 
   it('starts a list wider than the window at the left margin', () => {
-    expect(dropdownOffset({ left: 16, right: 224 }, width, 300, 8)).toBe(8 - 16);
+    expect(dropdownOffset(68, width, 300, 8)).toBe(8 - 68);
+  });
+
+  it('stays at a box at the far left, and never goes left of the margin', () => {
+    for (const viewport of [900, 800, 520]) {
+      expect(dropdownOffset(16, width, viewport)).toBe(0);
+    }
+    expect(dropdownOffset(0, width, 1024)).toBe(8);
   });
 });

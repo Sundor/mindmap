@@ -167,6 +167,60 @@ export function deriveAttractedRows(
   return derived;
 }
 
+/** The rows the nodes of a model sit in, by row ID. */
+export interface RowPlacement {
+  /** Row-less children of spanning groups → the row their connections place them in (YAML order). */
+  readonly placedRow: Map<string, string>;
+  /** Every node that sits in one row → that row (model order). */
+  readonly rowOf: Map<string, string>;
+}
+
+/**
+ * Rows of the single-row nodes of `model`: effective rows, then attraction (order-independent,
+ * see `deriveAttractedRows`). `itemRow` holds them as row indexes, for the geometry.
+ */
+function placeInRows(model: ArchitectureModel): RowPlacement & {
+  readonly itemRow: Map<string, number>;
+} {
+  const rowIndex = new Map(model.rows.map((row, i) => [row.id, i]));
+  const itemRow = new Map<string, number>();
+  for (const node of model.nodes.values()) {
+    const r = node.effectiveRow === undefined ? undefined : rowIndex.get(node.effectiveRow);
+    if (r !== undefined) itemRow.set(node.id, r);
+  }
+  const candidates: AttractionCandidate[] = [];
+  for (const node of model.nodes.values()) {
+    if (roleOf(node) !== 'free' || node.parentId === undefined) continue;
+    const parent = model.nodes.get(node.parentId);
+    if (!parent || roleOf(parent) !== 'span' || !parent.rowRange) continue;
+    candidates.push({ id: node.id, range: parent.rowRange });
+  }
+  const derivedRows = deriveAttractedRows(model, candidates, itemRow);
+  // Reported in YAML order, whatever order the rows were resolved in.
+  const placedRow = new Map<string, string>();
+  for (const { id, range } of candidates) {
+    const r = derivedRows.get(id) ?? range.top;
+    placedRow.set(id, model.rows[r]?.id ?? '');
+    for (const sub of subtreeIds(model, id)) itemRow.set(sub, r);
+  }
+  const rowOf = new Map<string, string>();
+  for (const id of model.nodes.keys()) {
+    const r = itemRow.get(id);
+    if (r !== undefined) rowOf.set(id, model.rows[r]?.id ?? '');
+  }
+  return { itemRow, placedRow, rowOf };
+}
+
+/**
+ * The rows the nodes of `model` sit in, as the row layout decides them, without laying anything
+ * out. Both maps are empty for a model without rows.
+ */
+export function rowPlacement(model: ArchitectureModel): RowPlacement {
+  if (model.rows.length === 0) return { placedRow: new Map(), rowOf: new Map() };
+  const { placedRow, rowOf } = placeInRows(model);
+  return { placedRow, rowOf };
+}
+
 /**
  * Row-aware layout of `model`. `content` reserves a block inside the nodes it names: single-row
  * items and unassigned nodes get it from ELK (`layoutHierarchy`); a spanning group keeps it free
@@ -178,35 +232,14 @@ export async function layoutWithRows(
   content: ContentSizes = new Map(),
 ): Promise<TieredLayout> {
   const rowCount = model.rows.length;
-  const rowIndex = new Map(model.rows.map((row, i) => [row.id, i]));
   const nodeOf = (id: string): ArchNode => {
     const node = model.nodes.get(id);
     if (!node) throw new Error(`Unknown node ${id}`);
     return node;
   };
 
-  // --- Rows of single-row nodes: effective rows, then attraction (order-independent, see
-  // `deriveAttractedRows`).
-  const itemRow = new Map<string, number>();
-  for (const node of model.nodes.values()) {
-    const r = node.effectiveRow === undefined ? undefined : rowIndex.get(node.effectiveRow);
-    if (r !== undefined) itemRow.set(node.id, r);
-  }
-  const candidates: AttractionCandidate[] = [];
-  for (const node of model.nodes.values()) {
-    if (roleOf(node) !== 'free' || node.parentId === undefined) continue;
-    const parent = nodeOf(node.parentId);
-    if (roleOf(parent) !== 'span' || !parent.rowRange) continue;
-    candidates.push({ id: node.id, range: parent.rowRange });
-  }
-  const derivedRows = deriveAttractedRows(model, candidates, itemRow);
-  // Reported in YAML order, whatever order the rows were resolved in.
-  const placedRow = new Map<string, string>();
-  for (const { id, range } of candidates) {
-    const r = derivedRows.get(id) ?? range.top;
-    placedRow.set(id, model.rows[r]?.id ?? '');
-    for (const sub of subtreeIds(model, id)) itemRow.set(sub, r);
-  }
+  // --- Rows of single-row nodes.
+  const { itemRow, placedRow, rowOf } = placeInRows(model);
 
   // --- Boxes: single-row items and unassigned top-level nodes, each laid out by plain ELK.
   const boxes = new Map<string, HierarchyLayout>();
@@ -431,15 +464,12 @@ export async function layoutWithRows(
   // --- Assemble in model order.
   const rects = new Map<string, Rect>();
   const absoluteOrdered = new Map<string, Rect>();
-  const rowOf = new Map<string, string>();
   for (const id of model.nodes.keys()) {
     const rel = relative.get(id);
     const abs = absolute.get(id);
     if (!rel || !abs) throw new Error(`Node ${id} was not placed`);
     rects.set(id, rel);
     absoluteOrdered.set(id, abs);
-    const r = itemRow.get(id);
-    if (r !== undefined) rowOf.set(id, model.rows[r]?.id ?? '');
   }
   return {
     rects,

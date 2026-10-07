@@ -1,6 +1,6 @@
-// Toolbar search: finds a node by name or ID, or a work item by #ID or title. All
-// matching and ranking is in `searchNodes` / `searchWorkItems` (src/core/search.ts); this only
-// shows the list and handles the keys.
+// The search box of the control panel: finds a node by name or ID, or a work item by #ID or
+// title. All matching and ranking is in `searchNodes` / `searchWorkItems` (src/core/search.ts);
+// this only shows the list and handles the keys.
 
 import {
   useLayoutEffect,
@@ -37,7 +37,7 @@ const NO_ITEMS: readonly WorkItemSummary[] = [];
 
 export interface SearchBoxProps {
   readonly model: ArchitectureModel;
-  /** The work items that can be found: those the filter shows. */
+  /** The work items that can be found: those the work-item filter shows. */
   readonly workItems?: readonly WorkItemSummary[] | undefined;
   /** The node the user chose (Enter or click). */
   readonly onChoose: (id: string) => void;
@@ -45,6 +45,19 @@ export interface SearchBoxProps {
   readonly onChooseWorkItem: (id: number) => void;
   /** Lets the app focus the box ("/" and Ctrl+K). */
   readonly inputRef: RefObject<HTMLInputElement | null>;
+  /**
+   * Given while the map is filtered to the focus: whether it leaves a node or a work item out.
+   * Such a match is listed all the same, and marked: choosing it shows the whole map again.
+   */
+  readonly outside?: SearchOutside | undefined;
+  /** The box was left by a key (Escape, or Enter on a match): the cursor is nowhere then. */
+  readonly onLeave?: (() => void) | undefined;
+}
+
+/** What the filtered map leaves out, of what can be found. */
+export interface SearchOutside {
+  node(id: string): boolean;
+  workItem(id: number): boolean;
 }
 
 /** Mount with a `key` per loaded file, so that the query does not outlive its model. */
@@ -54,6 +67,8 @@ export function SearchBox({
   onChoose,
   onChooseWorkItem,
   inputRef,
+  outside,
+  onLeave,
 }: SearchBoxProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -74,7 +89,8 @@ export function SearchBox({
   const listed = open && query.trim() !== '';
   const list = useRef<HTMLUListElement | null>(null);
 
-  // Keep the list inside the window wherever the toolbar's wrapping has put the box.
+  // The list starts at the left edge of the box and hangs over the canvas; in a window too
+  // narrow for that it is kept inside the window.
   useLayoutEffect(() => {
     if (!listed) return;
     const place = () => {
@@ -82,19 +98,26 @@ export function SearchBox({
       const anchor = element?.parentElement?.getBoundingClientRect();
       if (!element || !anchor) return;
       const viewportWidth = document.documentElement.clientWidth;
-      element.style.left = `${dropdownOffset(anchor, element.offsetWidth, viewportWidth)}px`;
+      element.style.left = `${dropdownOffset(anchor.left, element.offsetWidth, viewportWidth)}px`;
     };
     place();
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
   }, [listed]);
 
-  const choose = (option: Option) => {
+  const isOutside = (option: Option): boolean =>
+    outside !== undefined &&
+    (option.kind === 'node'
+      ? outside.node(option.match.id)
+      : outside.workItem(option.match.item.id));
+
+  const choose = (option: Option, byKey = false) => {
     setQuery('');
     setOpen(false);
     inputRef.current?.blur();
     if (option.kind === 'node') onChoose(option.match.id);
     else onChooseWorkItem(option.match.item.id);
+    if (byKey) onLeave?.();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -111,7 +134,7 @@ export function SearchBox({
         const match = shown[active] ?? shown[0];
         if (listed && match) {
           event.preventDefault();
-          choose(match);
+          choose(match, true);
         }
         break;
       }
@@ -122,6 +145,7 @@ export function SearchBox({
         else {
           setQuery('');
           inputRef.current?.blur();
+          onLeave?.();
         }
         break;
     }
@@ -161,46 +185,59 @@ export function SearchBox({
           className="search-results"
           role="listbox"
           aria-label="Matching nodes and work items"
+          // Not a stop of the Tab key, which a list that scrolls would otherwise be: the cursor
+          // stays in the box, and Tab leaves the search.
+          tabIndex={-1}
           data-count={total}
           data-nodes={nodeMatches.length}
           data-workitems={itemMatches.length}
+          // Keep the focus in the input: a blur would close the list before the click.
+          onMouseDown={(event) => event.preventDefault()}
         >
-          {shown.map((option, index) => (
-            <li
-              key={option.kind === 'node' ? option.match.id : `#${option.match.item.id}`}
-              id={`search-option-${index}`}
-              role="option"
-              aria-selected={index === active}
-              className={`search-option${index === active ? ' search-option-active' : ''}`}
-              {...(option.kind === 'node'
-                ? { 'data-node-id': option.match.id }
-                : { 'data-workitem-id': option.match.item.id })}
-              // Keep the focus in the input: a blur would close the list before the click.
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActive(index)}
-              onClick={() => choose(option)}
-            >
-              {option.kind === 'node' ? (
-                <>
-                  <span className="search-option-name">{option.match.name}</span>
-                  <span className="search-option-level">
-                    {NODE_LEVEL_NAMES[option.match.level]}
-                  </span>
-                  <span className="search-option-id">{option.match.id}</span>
-                </>
-              ) : (
-                <>
-                  <span className="search-option-name">
-                    <WorkItemIcon type={option.match.item.type} /> {option.match.item.title}
-                  </span>
-                  <span className="search-option-level">{option.match.item.type}</span>
+          {shown.map((option, index) => {
+            const leftOut = isOutside(option);
+            return (
+              <li
+                key={option.kind === 'node' ? option.match.id : `#${option.match.item.id}`}
+                id={`search-option-${index}`}
+                role="option"
+                aria-selected={index === active}
+                className={`search-option${index === active ? ' search-option-active' : ''}${
+                  leftOut ? ' search-option-outside' : ''
+                }`}
+                data-outside={leftOut ? 'true' : undefined}
+                {...(option.kind === 'node'
+                  ? { 'data-node-id': option.match.id }
+                  : { 'data-workitem-id': option.match.item.id })}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => choose(option)}
+              >
+                {option.kind === 'node' ? (
+                  <>
+                    <span className="search-option-name">{option.match.name}</span>
+                    <span className="search-option-level">
+                      {NODE_LEVEL_NAMES[option.match.level]}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="search-option-name">
+                      <WorkItemIcon type={option.match.item.type} /> {option.match.item.title}
+                    </span>
+                    <span className="search-option-level">{option.match.item.type}</span>
+                  </>
+                )}
+                <span className="search-option-more">
                   <span className="search-option-id">
-                    #{option.match.item.id} · {option.match.item.state}
+                    {option.kind === 'node'
+                      ? option.match.id
+                      : `#${option.match.item.id} · ${option.match.item.state}`}
                   </span>
-                </>
-              )}
-            </li>
-          ))}
+                  {leftOut && <span className="search-option-note">not on the filtered map</span>}
+                </span>
+              </li>
+            );
+          })}
           {total === 0 && (
             <li className="search-empty">
               {workItems.length > 0 ? 'No node or work item matches' : 'No node matches'}

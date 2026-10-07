@@ -69,31 +69,24 @@ export function moveActiveIndex(current: number, delta: number, count: number): 
   return (((current + delta) % count) + count) % count;
 }
 
-/** Horizontal extent of an element on screen, in pixels. */
-export interface HorizontalSpan {
-  readonly left: number;
-  readonly right: number;
-}
-
 /** Free space kept between the results list and the window edges, in screen pixels. */
 export const DROPDOWN_MARGIN = 8;
 
 /**
- * Where to put a results list of `width` under its `anchor` (the search box): the offset of the
- * list's left edge from the anchor's left edge. The list is right-aligned with the anchor where
- * there is room for that, and otherwise moved just far enough to lie within a window of
- * `viewportWidth` with `margin` at both sides; a list wider than the window starts at the left
- * margin, so that the start of every entry can be read.
+ * Where to put a results list of `width` under the search box, whose left edge is at
+ * `anchorLeft` on screen: the offset of the list's left edge from that edge. The list starts at
+ * the left edge of the box where it then lies within a window of `viewportWidth` with `margin`
+ * at the right, and is otherwise moved left just far enough; a list wider than the window starts
+ * at the left margin, so that the start of every entry can be read.
  */
 export function dropdownOffset(
-  anchor: HorizontalSpan,
+  anchorLeft: number,
   width: number,
   viewportWidth: number,
   margin: number = DROPDOWN_MARGIN,
 ): number {
-  const rightAligned = anchor.right - width;
-  const left = Math.max(margin, Math.min(rightAligned, viewportWidth - margin - width));
-  return left - anchor.left;
+  const left = Math.max(margin, Math.min(anchorLeft, viewportWidth - margin - width));
+  return left - anchorLeft;
 }
 
 // --- Work items ---------------------------------------------------------------------------------

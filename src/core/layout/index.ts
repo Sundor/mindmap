@@ -13,7 +13,13 @@ export * from './constants';
 export { buildHierarchyGraph, ELK_ROOT_ID, orderItems, type ContentSizes } from './elk';
 export { fnv1a64, LAYOUT_ALGORITHM_VERSION, layoutKey, layoutStructureJson } from './hash';
 export { sweep1D } from './sweep';
-export { attractedRow, deriveAttractedRows, type AttractionCandidate } from './tiered';
+export {
+  attractedRow,
+  deriveAttractedRows,
+  rowPlacement,
+  type AttractionCandidate,
+  type RowPlacement,
+} from './tiered';
 export { edgeContainer } from './tree';
 export type { LayoutResult, Rect, RowBand, Size } from './types';
 
