@@ -841,7 +841,7 @@ drawn", and the line under the switch counts what is left out ("Not drawn: 31 of
   a focus leaves the switch as it is. If the focus of a view saved on a filtered map cannot be
   filtered with the data that is loaded, the whole map is shown, fitted. Views and links saved
   before the switch existed open as they did. A link copied on a filtered map needs a viewer
-  that has Filter mode: an older one (0.1.1 or before) shows its focus in Focus mode, with the
+  that has Filter mode (0.2.0 or later): an older one shows its focus in Focus mode, with the
   view at the wrong place.
 - **Reloading.** The focus is not remembered, the switch is: after a reload of the page, or
   **Reload**, the whole map is shown at its remembered viewport with the switch still on

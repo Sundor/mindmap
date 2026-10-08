@@ -5,7 +5,7 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
-## Unreleased
+## 0.2.0 — 2026-10-08
 
 - **Changed behaviour — the controls are in a panel at the left.** The toolbar at the top and
   its Settings drop-down are gone. A rail at the left edge is always there, with **Search**,

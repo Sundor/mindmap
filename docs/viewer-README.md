@@ -728,7 +728,7 @@ The version of the viewer stands beside its name at the top of the control panel
   - When the focus of such a view cannot be filtered with the data that is loaded, the whole
     map is shown, fitted.
   - Views and links saved with version 0.1.1 or earlier open as before. A link copied on a
-    filtered map needs a viewer newer than 0.1.1: an older one shows the focus in Focus mode,
+    filtered map needs version 0.2.0 or later: an older one shows the focus in Focus mode,
     with the view at the wrong place.
 - **Remembered in the browser** (`localStorage`): collapsed groups, the view of the whole map,
   hidden edge kinds, hand-moved positions and saved views per structure; once for the viewer
