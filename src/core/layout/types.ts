@@ -53,4 +53,10 @@ export interface LayoutResult {
    * node. In model order; empty when the layout was computed without content.
    */
   readonly content: ReadonlyMap<string, Rect>;
+  /**
+   * The layout this one was made from by moving or resizing boxes by hand. Edge routes are
+   * remembered for that base, keyed by the rectangles they depend on, so a hand move reroutes
+   * only the edges it touches.
+   */
+  readonly routeBase?: LayoutResult;
 }

@@ -143,8 +143,7 @@ export async function loadInitialStructure(env: LoaderEnv): Promise<InitialLoad>
     const text = await response.text();
     return { source: { origin: 'url', text, name, diagnosticsName: name } };
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return { reason: `Could not load ${name} (${detail}).` };
+    return { reason: `Could not load ${name} (${fetchFailureDetail(err)}).` };
   }
 }
 
@@ -158,11 +157,23 @@ export const DATA_FETCH_OPTIONS = {
   referrerPolicy: 'no-referrer',
 } as const satisfies RequestInit;
 
+/** How long a data file may take to arrive before the request is given up. */
+export const DATA_FETCH_TIMEOUT_MS = 20_000;
+
+/** What a failed request is reported as: a request given up reads as such, not as an abort. */
+export function fetchFailureDetail(err: unknown): string {
+  if (err instanceof Error && err.name === 'TimeoutError') {
+    return `no answer within ${String(DATA_FETCH_TIMEOUT_MS / 1000)} s`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** The loader environment of the current page. */
 export function browserLoaderEnv(): LoaderEnv {
   return {
     pageUrl: window.location.href,
-    fetch: (url) => fetch(url, DATA_FETCH_OPTIONS),
+    fetch: (url) =>
+      fetch(url, { ...DATA_FETCH_OPTIONS, signal: AbortSignal.timeout(DATA_FETCH_TIMEOUT_MS) }),
   };
 }
 

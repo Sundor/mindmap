@@ -136,6 +136,10 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
   notice in its states, light and dark, and the whole app in a few situations — for restyling in
   a design tool. `npm run design:extract <page>` says what a restyled page changed in the
   stylesheet and can write it back. The pages are not part of the viewer.
+- Moving or resizing a box by hand no longer routes every edge of the map again: only the edges
+  at the box and those passing near it are routed anew, so a move on a large map is quick.
+- A structure file fetched over HTTP that has not arrived within 20 seconds is given up, and
+  the page says so, instead of waiting without end.
 
 ## 0.2.0 — 2026-10-08
 

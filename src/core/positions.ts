@@ -326,6 +326,7 @@ function place(model: ArchitectureModel, layout: LayoutResult, by: HandOverrides
   return {
     layout: {
       ...layout,
+      routeBase: layout.routeBase ?? layout,
       rects,
       absolute,
       bounds: { width, height },

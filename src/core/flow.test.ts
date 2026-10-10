@@ -746,6 +746,33 @@ describe('buildFlow: routes are kept across rebuilds of the same layout', () => 
     expect(added).toBeLessThan(pairCount(collapsed));
   });
 
+  it('keeps the routes of the edges a hand move does not touch', () => {
+    const first = buildFlow(model, layout);
+    const before = routeCacheSize(layout);
+    const leaf = [...model.nodes.values()].find((node) => node.childIds.length === 0);
+    if (!leaf) throw new Error('the example has no leaf');
+    const moved = applyHandOverrides(
+      model,
+      layout,
+      movedByHand(NO_HAND_OVERRIDES, model, layout, leaf.id, { x: 25, y: 0 }),
+    );
+    expect(moved).not.toBe(layout);
+    const after = buildFlow(model, moved);
+    // The routes are kept with the layout the move was made on: only those at the moved box
+    // and those passing near it are new, and every other edge keeps its curve.
+    expect(routeCacheSize(moved)).toBe(0);
+    const added = routeCacheSize(layout) - before;
+    expect(added).toBeGreaterThan(0);
+    expect(added).toBeLessThan(pairCount(after));
+    const kept = after.edges.filter((edge) =>
+      first.edges.some(
+        (was) =>
+          was.id === edge.id && JSON.stringify(was.data.curve) === JSON.stringify(edge.data.curve),
+      ),
+    );
+    expect(kept.length).toBeGreaterThan(after.edges.length / 2);
+  });
+
   it('gives the same flow as an unshared layout in every view, whatever was built before', () => {
     const groups = [...model.nodes.values()].filter((node) => node.childIds.length > 0);
     const views: FlowView[] = [
@@ -1161,9 +1188,10 @@ describe('buildFlow with the positions unlocked', () => {
       Math.abs(small.position.y + small.height / 2 - (box.y + box.height / 2)),
     ).toBeLessThanOrEqual(0.5);
 
-    // The routes worked out for the layout before the resize are those it had.
-    expect(routeCacheSize(layout)).toBe(routed);
-    expect(routeCacheSize(resized)).toBeGreaterThan(0);
+    // The routes are kept with the layout the resize was made on: the ones at the resized group
+    // and near it are new there, and the resized layout holds none of its own.
+    expect(routeCacheSize(layout)).toBeGreaterThan(routed);
+    expect(routeCacheSize(resized)).toBe(0);
   });
 });
 

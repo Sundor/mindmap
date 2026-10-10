@@ -549,7 +549,11 @@ function buildEdges(
     shrunk.size > 0
       ? `shrunk ${[...shrunk].map(([id, rect]) => `${id}:${rect.width}x${rect.height}`).join(' ')}\n`
       : '';
-  const routes = routeCacheOf(layout);
+  // Routes are kept for the base of a layout changed by hand, so that moving one box keeps the
+  // routes of every edge it does not touch: the key names the rectangles a route depends on.
+  const routes = routeCacheOf(layout.routeBase ?? layout);
+  const rectKey = (rect: Rect): string =>
+    `${String(rect.x)},${String(rect.y)},${String(rect.width)},${String(rect.height)}`;
   const routeBetween = (
     sourceId: string,
     source: Rect,
@@ -560,7 +564,7 @@ function buildEdges(
     const reach = routeReach(source, target);
     const near = obstacles.filter((obstacle) => rectsTouch(obstacle.rect, reach));
     // Node IDs contain neither spaces nor line breaks.
-    const key = `${keyPrefix}${sourceId}\n${targetId}\n${acrossRows ? 1 : 0}\n${near.map((o) => o.id).join(' ')}`;
+    const key = `${keyPrefix}${sourceId}@${rectKey(source)}\n${targetId}@${rectKey(target)}\n${acrossRows ? 1 : 0}\n${near.map((o) => `${o.id}@${rectKey(o.rect)}`).join(' ')}`;
     let route = routes.get(key);
     if (!route) {
       route = routeEdge(
