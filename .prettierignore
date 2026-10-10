@@ -1,6 +1,7 @@
 dist
 release
 coverage
+design-template
 node_modules
 package-lock.json
 # Local working folder (see .gitignore).

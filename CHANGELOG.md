@@ -131,6 +131,11 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
   side and 64 million pixels: a larger picture is saved reduced, and the tab says to what; SVG
   and HTML have no limit. Nothing is sent anywhere, the Content Security Policy of the viewer
   is unchanged, and an exported page runs no script and loads nothing.
+- **Design pages.** `npm run design` writes `design-template/kit.html` and `screens.html`: the
+  viewer's interface as static pages around its real stylesheet — every control, panel, box and
+  notice in its states, light and dark, and the whole app in a few situations — for restyling in
+  a design tool. `npm run design:extract <page>` says what a restyled page changed in the
+  stylesheet and can write it back. The pages are not part of the viewer.
 
 ## 0.2.0 — 2026-10-08
 

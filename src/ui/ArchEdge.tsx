@@ -9,6 +9,7 @@ import {
   flowEdgeLabel,
   labelPoint,
   routeCurve,
+  type ArchEdgeData,
   type EdgeKind,
 } from '../core';
 import type { AppEdge } from './flowTypes';
@@ -43,6 +44,48 @@ export function EdgeMarkers() {
   );
 }
 
+/** What an edge says on the canvas: its text, in which form, and whether that is drawn. */
+function edgeLabelOf(data: ArchEdgeData) {
+  // An aggregate shows how many edges it stands for; a single edge its own label.
+  const text = flowEdgeLabel(data);
+  const aggregate = data.count > 1;
+  // Parallel edges list their labels (one per line) instead of the count.
+  const countShown = aggregate && text === aggregateCountLabel(data.count);
+  // A label that has no place where it would not cover what a box says is not drawn
+  // (`labelHidden`): the tooltip of the line says it instead.
+  const hidden = data.labelHidden === true && text !== undefined;
+  return { text, aggregate, countShown, hidden };
+}
+
+export interface EdgeLabelProps {
+  readonly id: string;
+  readonly data: ArchEdgeData;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** The label of an edge at a point of its curve; nothing when the edge has none to draw. */
+export function EdgeLabel({ id, data, x, y }: EdgeLabelProps) {
+  const { text, aggregate, countShown, hidden } = edgeLabelOf(data);
+  if (text === undefined || hidden) return null;
+  return (
+    <div
+      className={`arch-edge-label arch-edge-label-${data.kind}${
+        countShown ? ' arch-edge-label-count' : ''
+      }${data.dimmed ? ' arch-dimmed' : ''}${data.faded ? ' arch-faded' : ''}${
+        data.quiet ? ' arch-quiet' : ''
+      }`}
+      data-edge-id={id}
+      data-count={data.count}
+      title={aggregate ? `${data.count} ${data.kind} edges` : undefined}
+      style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
+    >
+      {/* The same words, on more lines where one line would cover the text of a box. */}
+      {data.labelText ?? text}
+    </div>
+  );
+}
+
 export function ArchEdgeView({
   id,
   sourceX,
@@ -58,14 +101,7 @@ export function ArchEdgeView({
   const { route } = data;
   const curve = routeCurve({ x: sourceX, y: sourceY }, { x: targetX, y: targetY }, route);
   const label = labelPoint(curve, route.labelT);
-  // An aggregate shows how many edges it stands for; a single edge its own label.
-  const text = flowEdgeLabel(data);
-  const aggregate = data.count > 1;
-  // Parallel edges list their labels (one per line) instead of the count.
-  const countShown = aggregate && text === aggregateCountLabel(data.count);
-  // A label that has no place where it would not cover what a box says is not drawn
-  // (`labelHidden`): the tooltip of the line says it instead.
-  const hidden = data.labelHidden === true && text !== undefined;
+  const { text, aggregate, countShown, hidden } = edgeLabelOf(data);
   const tooltip = [
     hidden ? (aggregate && countShown ? `${data.count} ${data.kind} edges` : text) : undefined,
     data.description,
@@ -82,20 +118,7 @@ export function ArchEdgeView({
       />
       {text !== undefined && !hidden && (
         <EdgeLabelRenderer>
-          <div
-            className={`arch-edge-label arch-edge-label-${data.kind}${
-              countShown ? ' arch-edge-label-count' : ''
-            }${data.dimmed ? ' arch-dimmed' : ''}${data.faded ? ' arch-faded' : ''}${
-              data.quiet ? ' arch-quiet' : ''
-            }`}
-            data-edge-id={id}
-            data-count={data.count}
-            title={aggregate ? `${data.count} ${data.kind} edges` : undefined}
-            style={{ transform: `translate(-50%, -50%) translate(${label.x}px, ${label.y}px)` }}
-          >
-            {/* The same words, on more lines where one line would cover the text of a box. */}
-            {data.labelText ?? text}
-          </div>
+          <EdgeLabel id={id} data={data} x={label.x} y={label.y} />
         </EdgeLabelRenderer>
       )}
     </>

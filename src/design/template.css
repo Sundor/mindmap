@@ -1,0 +1,106 @@
+/* The design pages' own styles. Every selector starts with .tpl- or #tpl-: nothing here reaches
+   the app's elements, and nothing of the app's stylesheet is repeated. */
+
+.tpl-switch {
+  position: fixed;
+  top: 0.6rem;
+  right: 1rem;
+  z-index: 10;
+}
+.tpl-switch-label {
+  position: fixed;
+  top: 0.45rem;
+  right: 2.6rem;
+  z-index: 10;
+  font:
+    13px system-ui,
+    sans-serif;
+  color: var(--fg);
+}
+.tpl-intro,
+.tpl-section,
+.tpl-specimen,
+.tpl-screen-section {
+  margin: 0 1.5rem;
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+  color: var(--fg);
+}
+.tpl-intro {
+  max-width: 60rem;
+  padding: 1.5rem 0 0.5rem;
+}
+.tpl-intro h1 {
+  font-size: 1.5rem;
+  margin: 0 0 0.5rem;
+}
+.tpl-section {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 1.2rem;
+}
+.tpl-specimen,
+.tpl-screen-section {
+  margin-top: 1.5rem;
+}
+.tpl-label {
+  font-size: 1rem;
+  margin: 0 0 0.2rem;
+}
+.tpl-states {
+  margin-left: 0.6rem;
+  font-weight: normal;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.tpl-note {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+}
+.tpl-stage,
+.tpl-screen {
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  border: 1px dashed var(--border);
+  background: var(--bg);
+}
+.tpl-stage[data-kind='block'] {
+  display: block;
+  padding: 0.75rem;
+}
+.tpl-screen {
+  resize: both;
+}
+.tpl-tokens {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tpl-tokens th,
+.tpl-tokens td {
+  padding: 0.2rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, monospace;
+}
+.tpl-swatch {
+  display: inline-block;
+  width: 1.4rem;
+  height: 1rem;
+  vertical-align: middle;
+  border: 1px solid var(--border);
+}
+.tpl-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+.tpl-icons figure {
+  margin: 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+}

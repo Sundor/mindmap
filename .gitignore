@@ -3,6 +3,8 @@ dist
 # Build kits (npm run installer): made from a commit, tens of megabytes, not for the repository.
 release
 coverage
+# The static pages of the interface: generated from the components, not for the repository.
+design-template/
 .env*
 *.log
 *.tsbuildinfo

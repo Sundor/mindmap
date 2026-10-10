@@ -18,7 +18,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "smoke": "node scripts/smoke-cdp.mjs",
-    "installer": "node scripts/make-installer.mjs"
+    "installer": "node scripts/make-installer.mjs",
+    "design": "node scripts/make-design-template.mjs",
+    "design:extract": "node scripts/make-design-template.mjs --extract"
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",

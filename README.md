@@ -90,7 +90,16 @@ must (see [Offline use and security](#offline-use-and-security)).
 Layout: `src/core` (pure, unit-tested logic — no React), `src/ui` (React), `src/providers`
 (data sources: the structure loader, the work-item source and its mock provider), `fixtures`
 (the dummy work items), `examples` (the shipped example; in `examples/template/` the template
-files), `scripts`.
+files), `src/design` (the design pages, below), `scripts`.
+
+**Design pages.** `npm run design` writes `design-template/kit.html` and `screens.html`
+(git-ignored): the interface as static markup, made from the real components — every control,
+panel, box and notice in its states, and the whole app in a few situations — with the app's
+stylesheet in a marked block, light with a scheme switch, or dark by `--dark`. They are for
+restyling in a design tool: change the marked block and keep its selectors and custom-property
+names, then `npm run design:extract design-template/kit.html` lists what the restyled page
+changed in `src/ui/styles.css`, and with `--write` puts the returned stylesheet in place. A test
+fails when a control is added to the viewer and not to the pages (`src/design/pages.test.ts`).
 
 ## Build and share
 

@@ -52,6 +52,8 @@ export interface SearchBoxProps {
   readonly outside?: SearchOutside | undefined;
   /** The box was left by a key (Escape, or Enter on a match): the cursor is nowhere then. */
   readonly onLeave?: (() => void) | undefined;
+  /** What the box holds when it is first shown; with one, the list of matches is open. */
+  readonly initialQuery?: string | undefined;
 }
 
 /** What the filtered map leaves out, of what can be found. */
@@ -69,9 +71,10 @@ export function SearchBox({
   inputRef,
   outside,
   onLeave,
+  initialQuery,
 }: SearchBoxProps) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(initialQuery ?? '');
+  const [open, setOpen] = useState(initialQuery !== undefined);
   const [active, setActive] = useState(0);
   const nodeMatches = useMemo(() => searchNodes(model, query), [model, query]);
   const itemMatches = useMemo(() => searchWorkItems(workItems, query), [workItems, query]);

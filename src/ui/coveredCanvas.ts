@@ -8,6 +8,8 @@
  * now: for event handlers, effects and mount initialisers, not for rendering.
  */
 export function coveredCanvasLeft(): number {
+  // Rendered to markup outside a browser, nothing covers the canvas.
+  if (typeof document === 'undefined') return 0;
   const panels = document.querySelector('.cp-panels');
   const column = document.querySelector('.app-column');
   // Not displayed (the body is collapsed): it covers nothing.
