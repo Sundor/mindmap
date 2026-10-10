@@ -33,6 +33,7 @@ import {
   type NodeLevelName,
 } from './model';
 import { COMPACT_GROUP, compactGroupBox, fitsCompact, type CompactGroupBox } from './compactGroup';
+import type { ResizeLimits } from './positions';
 import { rollupEdges, type AggregateEdge } from './rollup';
 import { allGroupCounts, visibleNodes, type GroupCounts, type LodLevel } from './visibility';
 import { estimateTextWidth, wrapBalanced } from './text';
@@ -168,7 +169,15 @@ export type ArchNodeData = {
    * hidden inside it (an open group: its own items only); absent when that is nothing.
    */
   readonly badge?: WorkItemCounts;
+  /**
+   * On an open group that can be resized by hand (`FlowView.resize`, positions unlocked): how
+   * far its edges go from where they are drawn.
+   */
+  readonly resize?: NodeResize;
 };
+
+/** On an open group that can be resized: how far its edges go, and whether its size was set by hand. */
+export type NodeResize = ResizeLimits & { readonly resized: boolean };
 
 /** Where something is written in the drawn boxes, in canvas coordinates (upper estimates). */
 interface BoxTexts {
@@ -231,12 +240,23 @@ type FlowNodeBase = {
   zIndex: number;
 };
 
+/** The part of an open group that picks it up while the positions are unlocked (a CSS selector). */
+export const GROUP_DRAG_HANDLE = '.arch-group-header';
+/** Class of the React Flow node of an open group that is moved by its title bar only. */
+export const TITLE_DRAG_CLASS = 'arch-title-drag';
+
 export type ArchFlowNode = FlowNodeBase & {
   type: ArchNodeType;
   data: ArchNodeData;
   parentId?: string;
   extent?: 'parent';
-  /** Set by `highlightFlow` (src/core/selection.ts): dimmed outside the neighbourhood. */
+  /** Set on an open group while the positions are unlocked: only this part of it drags it. */
+  dragHandle?: string;
+  /**
+   * {@link TITLE_DRAG_CLASS} on an open group while the positions are unlocked. `highlightFlow`
+   * (src/core/selection.ts) adds its own to a node dimmed outside the neighbourhood, and
+   * `focusFlow` (src/core/focus.ts) to one that is not in the focus.
+   */
   className?: string;
   /** Set by `highlightFlow` on the selected node. */
   selected?: boolean;
@@ -736,8 +756,14 @@ export interface FlowView {
    * group already has that size, and the group fills it.
    */
   readonly compactCollapsed?: boolean;
-  /** Positions unlocked: the model nodes can be dragged (see src/core/positions.ts). */
+  /**
+   * Positions unlocked: the model nodes can be dragged (see src/core/positions.ts). A group drawn
+   * open is picked up by its title bar only ({@link GROUP_DRAG_HANDLE}); a closed group and a
+   * leaf anywhere.
+   */
   readonly draggable?: boolean;
+  /** Positions unlocked: open groups get resize handles (with `draggable`; without it, ignored). */
+  readonly resize?: FlowResize;
   /**
    * The work items to show and how. The layout must have been computed with the
    * content of the same overlay and mode (`workItemContent`): lines are drawn only in the
@@ -750,6 +776,14 @@ export interface FlowView {
 export interface FlowWorkItems {
   readonly overlay: WorkItemOverlay;
   readonly mode: StoryMode;
+}
+
+/** What the resize handles of open groups need while the positions are unlocked. */
+export interface FlowResize {
+  /** `allResizeLimits` of the layout that is drawn. */
+  readonly limits: ReadonlyMap<string, ResizeLimits>;
+  /** Groups whose size was set by hand. */
+  readonly resized: ReadonlySet<string>;
 }
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
@@ -849,8 +883,13 @@ export function drawnNodeRects(
  * straight from the layout that is passed in (relative to the parent): the layout of the fully
  * expanded graph, in which a closed group keeps exactly the box it has when open and no node
  * moves whatever is collapsed, or that layout closed up around what is drawn
- * (`arrangeLayout`). Nothing is laid out here; hidden nodes are left out. Edges are the rollup
- * of the model's edges onto the visible nodes.
+ * (`arrangeLayout`), or either with what was set by hand applied (`applyHandOverrides`).
+ * Nothing is laid out here; hidden nodes are left out. Edges are the rollup of the model's
+ * edges onto the visible nodes.
+ *
+ * Positions unlocked (`view.draggable`): every model node can be dragged. A group drawn open is
+ * picked up by its title bar only (`dragHandle`, {@link TITLE_DRAG_CLASS}), and gets what its
+ * resize handles need where `view.resize` has limits for it (`data.resize`).
  *
  * Level of detail, always on top of the manual collapse, which wins:
  * - `domains`: domains only, drawn as closed groups; edges aggregated between domains;
@@ -960,6 +999,10 @@ export function buildFlow(
         );
       }
     }
+    // An open group is moved by its title bar and resized at its edges; a closed box neither.
+    const titleDrag = (view.draggable ?? false) && isGroup && !isClosed;
+    const resize = titleDrag ? view.resize : undefined;
+    const limits = resize?.limits.get(node.id);
     const placedRow = layout.placedRow.get(node.id);
     const structureCounts = counts.get(node.id) ?? {
       children: node.childIds.length,
@@ -983,6 +1026,7 @@ export function buildFlow(
       ...(listed ? { workItems: listed } : {}),
       ...(block ? { contentRect: block } : {}),
       ...(badge ? { badge } : {}),
+      ...(resize && limits ? { resize: { ...limits, resized: resize.resized.has(node.id) } } : {}),
     };
     nodes.push({
       id: node.id,
@@ -996,6 +1040,7 @@ export function buildFlow(
         ? { parentId: node.parentId, extent: 'parent' as const }
         : {}),
       draggable: view.draggable ?? false,
+      ...(titleDrag ? { dragHandle: GROUP_DRAG_HANDLE, className: TITLE_DRAG_CLASS } : {}),
       connectable: false,
       deletable: false,
       zIndex: isClosed ? Z_INDEX.leaf : Z_INDEX.group + node.level,
@@ -1013,4 +1058,29 @@ export function buildFlow(
     texts,
   );
   return { nodes, edges };
+}
+
+/**
+ * The innermost group drawn open whose box holds `point` (canvas coordinates), or undefined.
+ * Boxes are those of `nodes` (positions relative to the parent, parents first). Of nested
+ * groups the deepest wins, and of two at the same depth the later one, which is drawn on top.
+ * Row bands and closed boxes are never the answer: a point on a closed group gives the open
+ * group around it, if there is one.
+ */
+export function openGroupAt(point: Point, nodes: readonly FlowNode[]): string | undefined {
+  /** Top-left corners of the model nodes seen so far, in canvas coordinates. */
+  const corners = new Map<string, Point>();
+  let found: ArchFlowNode | undefined;
+  for (const node of nodes) {
+    if (node.type === 'band') continue;
+    const origin = node.parentId === undefined ? undefined : corners.get(node.parentId);
+    const x = (origin?.x ?? 0) + node.position.x;
+    const y = (origin?.y ?? 0) + node.position.y;
+    corners.set(node.id, { x, y });
+    if (node.type !== 'group' || node.data.collapsed) continue;
+    if (point.x < x || point.x > x + node.width) continue;
+    if (point.y < y || point.y > y + node.height) continue;
+    if (!found || node.data.level >= found.data.level) found = node;
+  }
+  return found?.id;
 }

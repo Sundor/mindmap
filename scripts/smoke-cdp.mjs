@@ -720,6 +720,187 @@ const PAGE_HELPERS = `
       const box = document.querySelector('#compact-collapsed');
       return { checked: box?.checked ?? null, disabled: box?.disabled ?? null, stored: window.__smoke.attr('data-compact-collapsed') };
     },
+    // The box of every node drawn on screen (the row bands are none): left, top, right, bottom.
+    rects: () =>
+      Object.fromEntries(
+        [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return [el.dataset.id, [r.left, r.top, r.right, r.bottom]];
+        }),
+      ),
+    // A point of the element where a press reaches the element itself: on the canvas, with the
+    // element (or something inside it, but nothing matching "avoid") on top. The element is
+    // walked along its longer side from its middle outwards, so that an edge of the map or a
+    // box that crosses it is stepped over. Null when it is covered everywhere.
+    pressPoint: (selector, avoid = '') => {
+      const el = document.querySelector(selector);
+      const canvas = document.querySelector('.react-flow')?.getBoundingClientRect();
+      if (!el || !canvas) return null;
+      const r = el.getBoundingClientRect();
+      const wide = r.width >= r.height;
+      for (const along of [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9, 0.04, 0.96]) {
+        for (const across of [0.5, 0.25, 0.75]) {
+          const x = r.left + r.width * (wide ? along : across);
+          const y = r.top + r.height * (wide ? across : along);
+          if (x <= canvas.left + 2 || x >= canvas.right - 2 || y <= canvas.top + 2 || y >= canvas.bottom - 2) continue;
+          const top = document.elementFromPoint(x, y);
+          if (top === null || !(el === top || el.contains(top))) continue;
+          if (avoid !== '' && top.closest(avoid)) continue;
+          return { x, y };
+        }
+      }
+      return null;
+    },
+    // How far the view has to be panned so that the point comes to lie on the canvas, clear of
+    // its border: (0, 0) when it does.
+    roomShift: (x, y) => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const margin = 24;
+      const shift = (v, lo, hi) => Math.round(v < lo + margin ? lo + margin - v : v > hi - margin ? hi - margin - v : 0);
+      return { dx: shift(x, c.left, c.right), dy: shift(y, c.top, c.bottom) };
+    },
+    // A point inside the box of the node where the empty pane lies: nothing of the node, of a
+    // box in it or of an edge takes a press there. Null when there is none.
+    panePointIn: (id) => {
+      const el = document.querySelector('.react-flow__node[data-id="' + id + '"]');
+      const canvas = document.querySelector('.react-flow')?.getBoundingClientRect();
+      if (!el || !canvas) return null;
+      const r = el.getBoundingClientRect();
+      const steps = [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.12, 0.88];
+      for (const fy of steps) {
+        for (const fx of steps) {
+          const x = r.left + r.width * fx;
+          const y = r.top + r.height * fy;
+          if (x <= canvas.left + 2 || x >= canvas.right - 2 || y <= canvas.top + 2 || y >= canvas.bottom - 2) continue;
+          if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x, y };
+        }
+      }
+      return null;
+    },
+    // A point of the canvas with the empty pane under it that lies in the box of no node.
+    outsidePoint: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const boxes = [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => el.getBoundingClientRect());
+      for (let fy = 0.02; fy < 1; fy += 0.04) {
+        for (let fx = 0.02; fx < 1; fx += 0.04) {
+          const x = c.left + c.width * fx;
+          const y = c.top + c.height * fy;
+          if (boxes.some((r) => x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2)) continue;
+          if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x, y };
+        }
+      }
+      return null;
+    },
+    // Every node drawn, the row bands too: what it is (an open or a closed group, a leaf, a
+    // band), its name, the resize controls in it ("line:right", "handle:top-left", …) and its grip.
+    resizeHandles: () =>
+      [...document.querySelectorAll('.react-flow__node')].map((el) => {
+        const grip = el.querySelector('.arch-resize-grip');
+        const group = el.classList.contains('react-flow__node-group');
+        return {
+          id: el.dataset.id,
+          kind: el.classList.contains('react-flow__node-band')
+            ? 'band'
+            : !group
+              ? 'leaf'
+              : el.querySelector('.arch-node')?.dataset.collapsed === 'false'
+                ? 'open'
+                : 'closed',
+          name: el.querySelector('.arch-node-name')?.textContent ?? null,
+          controls: [...el.querySelectorAll('.arch-resize')]
+            .map((control) => (control.classList.contains('line') ? 'line' : 'handle') + ':' + ['top', 'bottom', 'left', 'right'].filter((word) => control.classList.contains(word)).join('-'))
+            .sort(),
+          grip: grip ? { tag: grip.tagName, label: grip.getAttribute('aria-label') } : null,
+        };
+      }),
+    // How the pointer is treated at a node: whether its wrapper is marked as moved by the title
+    // bar alone, and the computed pointer-events and cursors of the wrapper, the header, the box.
+    pointerRules: (id) => {
+      const el = document.querySelector('.react-flow__node[data-id="' + id + '"]');
+      if (!el) return null;
+      const header = el.querySelector('.arch-group-header');
+      const box = el.querySelector('.arch-node');
+      return {
+        titleDrag: el.classList.contains('arch-title-drag'),
+        wrapper: getComputedStyle(el).pointerEvents,
+        header: header ? getComputedStyle(header).pointerEvents : null,
+        headerCursor: header ? getComputedStyle(header).cursor : null,
+        boxCursor: box ? getComputedStyle(box).cursor : null,
+      };
+    },
+    // What the browser keeps of the positions and sizes set by hand: the stored text, by key.
+    byHandStored: () =>
+      Object.fromEntries(
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith('architecture-map.sizes:') || key.startsWith('architecture-map.positions:'))
+          .sort()
+          .map((key) => [key, localStorage.getItem(key)]),
+      ),
+    // The edges drawn that end at the node: their ID, the path as drawn, and where the line
+    // starts and ends on screen.
+    edgeEndsAt: (id) =>
+      [...document.querySelectorAll('.react-flow__edge')].flatMap((el) => {
+        const line = el.querySelector('.react-flow__edge-path');
+        if (!line || !el.dataset.id.split(':')[0].split('>').includes(id)) return [];
+        const matrix = line.getScreenCTM();
+        const at = (length) => {
+          const p = line.getPointAtLength(length).matrixTransform(matrix);
+          return [p.x, p.y];
+        };
+        return [{ id: el.dataset.id, d: line.getAttribute('d'), ends: [at(0), at(line.getTotalLength())] }];
+      }),
+    // The heat strips and progress bars drawn: the figure of each, the figure of the node with
+    // everything inside it, the tooltip, and the height of a strip in the pixels of the canvas.
+    lensFigures: () => {
+      const number = (value) => (value === undefined ? null : Number(value));
+      return {
+        strips: [...document.querySelectorAll('.arch-heat-left')].map((strip) => {
+          const node = strip.closest('.react-flow__node');
+          const scale = node.getBoundingClientRect().width / node.offsetWidth;
+          return {
+            id: node.dataset.id,
+            heat: Number(strip.dataset.heat),
+            all: number(strip.dataset.heatAll),
+            height: Math.round((strip.getBoundingClientRect().height / scale) * 10) / 10,
+            title: strip.title,
+          };
+        }),
+        bars: [...document.querySelectorAll('.arch-progress')].map((bar) => ({
+          id: bar.closest('.react-flow__node').dataset.id,
+          done: Number(bar.dataset.done),
+          total: Number(bar.dataset.total),
+          doneAll: number(bar.dataset.doneAll),
+          totalAll: number(bar.dataset.totalAll),
+          title: bar.title,
+        })),
+      };
+    },
+    // The colour the grip of a group is drawn in, whether it is marked as resized, and what the
+    // accent colour of the page computes to on the canvas.
+    gripColour: (id) => {
+      const grip = document.querySelector('.react-flow__node[data-id="' + id + '"] .arch-resize-grip');
+      const canvas = document.querySelector('.map-canvas');
+      if (!grip || !canvas) return null;
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--accent)';
+      canvas.append(probe);
+      const accent = getComputedStyle(probe).color;
+      probe.remove();
+      return { colour: getComputedStyle(grip).color, accent, resized: grip.dataset.resized ?? null };
+    },
+    // The line a resize control draws on the border of its group (its ::after), as it is now.
+    controlLine: (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const s = getComputedStyle(el, '::after');
+      return {
+        hovered: el.matches(':hover'),
+        look: [s.content, s.display, s.visibility, s.opacity, s.width, s.height, s.backgroundColor, s.borderTopColor, s.borderRightColor, s.borderBottomColor, s.borderLeftColor, s.boxShadow].join(' | '),
+      };
+    },
+    // The factor by which the resize controls are enlarged against the zoom: the custom
+    // property on the canvas, or "" when it is not set.
+    unzoom: () => document.querySelector('.map-canvas')?.style.getPropertyValue('--unzoom') ?? null,
   };
   true
 `;
@@ -5772,6 +5953,1595 @@ async function run(viewerPath, browserPath) {
     }
     if ((await attr('data-panel-collapsed')) !== closeUpStart.panelCollapsed) {
       await togglePanel(closeUpStart.panelCollapsed === 'true');
+    }
+
+    // --- Boxes set by hand: open groups moved by the title bar and resized at their edges ------
+    {
+      /** @typedef {{ x: number, y: number }} HandPoint */
+      /** @typedef {Record<string, number[]>} ScreenRects left, top, right, bottom by node ID */
+      /** @typedef {{ x: number, y: number, zoom: number }} HandView */
+      /** @typedef {{ from: HandPoint, to: HandPoint, before: ScreenRects, view: HandView }} HandGesture */
+      /** @typedef {{ id: string, kind: string, name: string | null, controls: string[], grip: { tag: string, label: string | null } | null }} DrawnNode */
+      /** @typedef {{ titleDrag: boolean, wrapper: string, header: string | null, headerCursor: string | null, boxCursor: string | null }} PointerRules */
+      /** @typedef {{ id: string, heat: number, all: number | null, height: number, title: string }} HeatStrip */
+      /** @typedef {{ id: string, done: number, total: number, doneAll: number | null, totalAll: number | null, title: string }} ProgressBar */
+      /** @typedef {{ id: string, d: string, ends: number[][] }} EdgeEnds */
+
+      const handStart = {
+        tab: await attr('data-panel-tab'),
+        panelCollapsed: await attr('data-panel-collapsed'),
+        rows: await attr('data-show-rows'),
+        shrink: await attr('data-compact-collapsed'),
+        closeGaps: await attr('data-close-gaps'),
+        focusMode: await attr('data-focus-mode'),
+        lodMode: await attr('data-lod-mode'),
+        collapsed: await attr('data-collapsed-count'),
+        heat: await attr('data-heat'),
+        progress: await attr('data-progress'),
+        violations: violations.length,
+        errors: pageErrors.length,
+      };
+      const HAND_VIEW = 'Before the changes by hand';
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await saveView(HAND_VIEW);
+      await until(
+        `window.__smoke.count('#views-list li[data-view-name="${HAND_VIEW}"]') === 1`,
+        'the view to come back to',
+      );
+
+      const nodeOf = (/** @type {string} */ id) => `.react-flow__node[data-id="${id}"]`;
+      /** The ID of the group a node lies in. */
+      const parentOf = (/** @type {string} */ id) => id.slice(0, id.lastIndexOf('.'));
+      const rects = () => /** @type {Promise<ScreenRects>} */ (evaluate(`window.__smoke.rects()`));
+      const drawnNodes = () =>
+        /** @type {Promise<DrawnNode[]>} */ (evaluate(`window.__smoke.resizeHandles()`));
+      const rulesOf = (/** @type {string} */ id) =>
+        /** @type {Promise<PointerRules | null>} */ (
+          evaluate(`window.__smoke.pointerRules(${JSON.stringify(id)})`)
+        );
+      const frames = () => evaluate(`window.__smoke.frames()`);
+      /** One side of a box on screen: 0 left, 1 top, 2 right, 3 bottom. */
+      const sideOf = (
+        /** @type {ScreenRects} */ all,
+        /** @type {string} */ id,
+        /** @type {number} */ index,
+      ) => all[id]?.[index] ?? NaN;
+      /** Whether two lists of numbers are the same within `slack`. */
+      const sameNumbers = (
+        /** @type {number[] | undefined} */ a,
+        /** @type {number[] | undefined} */ b,
+        slack = 1,
+      ) =>
+        !!a &&
+        !!b &&
+        a.length === b.length &&
+        a.every((v, i) => Math.abs(v - (b[i] ?? NaN)) <= slack);
+      /** The nodes among `ids` whose box on screen is not the same in both. */
+      const shifted = (
+        /** @type {ScreenRects} */ before,
+        /** @type {ScreenRects} */ after,
+        /** @type {string[]} */ ids,
+      ) => ids.filter((id) => !sameNumbers(before[id], after[id]));
+      /** How far each edge of a box moved outwards between two states: left, top, right, bottom. */
+      const grownBy = (
+        /** @type {ScreenRects} */ before,
+        /** @type {ScreenRects} */ after,
+        /** @type {string} */ id,
+      ) => [
+        sideOf(before, id, 0) - sideOf(after, id, 0),
+        sideOf(before, id, 1) - sideOf(after, id, 1),
+        sideOf(after, id, 2) - sideOf(before, id, 2),
+        sideOf(after, id, 3) - sideOf(before, id, 3),
+      ];
+      /** Every node drawn but `id`; with `inside`, only those in it — otherwise all but those. */
+      const others = (
+        /** @type {ScreenRects} */ all,
+        /** @type {string} */ id,
+        /** @type {boolean} */ inside,
+      ) =>
+        Object.keys(all).filter((other) => other !== id && other.startsWith(`${id}.`) === inside);
+      const movedCount = () => /** @type {Promise<string | null>} */ (attr('data-moved-count'));
+      const resizedCount = () => /** @type {Promise<string | null>} */ (attr('data-resized-count'));
+      /** Whether the counts of what is set by hand come to be these. */
+      const counted = (/** @type {number} */ moved, /** @type {number} */ resized) =>
+        eventually(
+          `window.__smoke.attr('data-moved-count') === '${moved}' && window.__smoke.attr('data-resized-count') === '${resized}'`,
+          `${moved} moved and ${resized} resized`,
+        );
+      const stored = () =>
+        /** @type {Promise<string>} */ (evaluate(`JSON.stringify(window.__smoke.byHandStored())`));
+      /** Whether what the browser keeps of the changes by hand comes to differ from `from`. */
+      const storedChanges = (/** @type {string} */ from) =>
+        eventually(
+          `JSON.stringify(window.__smoke.byHandStored()) !== ${JSON.stringify(from)}`,
+          'what is kept of the changes by hand',
+        );
+      const unlock = async (/** @type {boolean} */ on) => {
+        if ((await attr('data-positions-unlocked')) !== String(on))
+          await click('#unlock-positions');
+        await until(
+          `window.__smoke.attr('data-positions-unlocked') === '${on}'`,
+          on ? 'unlocked positions' : 'locked positions',
+        );
+      };
+      /** Switches from Focus to Filter: the map is reduced to what a focus involves. */
+      const filterMode = async () => {
+        if ((await attr('data-focus-mode')) !== 'filter') await click('#focus-mode');
+        await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode');
+      };
+      /** Puts back every box moved or resized by hand in the arrangement on screen. */
+      const resetByHand = async () => {
+        if ((await movedCount()) !== '0' || (await resizedCount()) !== '0') {
+          await click('#reset-positions');
+        }
+        await until(
+          `window.__smoke.attr('data-moved-count') === '0' && window.__smoke.attr('data-resized-count') === '0'`,
+          'nothing set by hand',
+        );
+        await settled();
+      };
+      /**
+       * A point of the element to press (`pressPoint`), with room on the canvas for a drag by
+       * `by`: the view is panned first when the element lies off the canvas or under something
+       * that lies over the canvas' border (it is brought towards the middle), and when the drop
+       * would lie outside the canvas. Null when nothing of the element can be pressed.
+       * @param {string} selector @param {HandPoint} by @param {string} [avoid]
+       * @returns {Promise<HandPoint | null>}
+       */
+      const pointWithRoom = async (selector, by, avoid = '') => {
+        const find = `window.__smoke.pressPoint(${JSON.stringify(selector)}, ${JSON.stringify(avoid)})`;
+        let broughtNear = false;
+        for (let turn = 0; turn < 5; turn++) {
+          /** @type {HandPoint | null} */
+          const point = await evaluate(find);
+          /** @type {{ dx: number, dy: number } | null} */
+          let shift;
+          if (point === null) {
+            if (broughtNear) return null;
+            broughtNear = true;
+            const offset = await evaluate(
+              `window.__smoke.centreOffset(${JSON.stringify(selector)})`,
+            );
+            if (offset === null) return null;
+            shift = { dx: -offset.dx, dy: -offset.dy };
+          } else {
+            shift = await evaluate(
+              `window.__smoke.roomShift(${point.x + by.x}, ${point.y + by.y})`,
+            );
+            if (shift === null || (shift.dx === 0 && shift.dy === 0)) return point;
+          }
+          const plan = await evaluate(`window.__smoke.panPlan(${shift.dx}, ${shift.dy})`);
+          if (plan === null) break;
+          await drag(plan.from, plan.to);
+          await settled();
+        }
+        throw new Error(`no room on the canvas for a drag from ${selector}`);
+      };
+      /**
+       * Drags an element by `by` screen pixels from a point where a press reaches it, never from
+       * a chevron: where it was pressed and let go, and the boxes on screen and the view just
+       * before. Null when no point of the element can be pressed.
+       * @param {string} selector @param {HandPoint} by @param {{ hold?: boolean }} [options]
+       * @returns {Promise<HandGesture | null>}
+       */
+      const dragFrom = async (selector, by, options = {}) => {
+        const from = await pointWithRoom(selector, by, '.arch-chevron');
+        if (from === null) return null;
+        const before = await rects();
+        /** @type {HandView} */
+        const view = await viewNow();
+        const to = { x: from.x + by.x, y: from.y + by.y };
+        await drag(from, to, options);
+        return { from, to, before, view };
+      };
+      /**
+       * Drags a resize control of the group — `line.right`, `handle.top.left`, … — by `by` screen
+       * pixels (see `dragFrom`).
+       * @param {string} id @param {string} which @param {HandPoint} by @param {{ hold?: boolean }} [options]
+       */
+      const dragControl = (id, which, by, options = {}) =>
+        dragFrom(`${nodeOf(id)} .arch-resize.${which}`, by, options);
+      /** Lets go of the button held by a drag. */
+      const release = (/** @type {HandPoint} */ point) =>
+        client.send('Input.dispatchMouseEvent', {
+          x: point.x,
+          y: point.y,
+          button: 'left',
+          type: 'mouseReleased',
+          clickCount: 1,
+        });
+      /** Two clicks at the same point, as a double-click arrives. */
+      const doubleClickAt = async (/** @type {HandPoint} */ point) => {
+        const base = { x: point.x, y: point.y, button: 'left' };
+        await client.send('Input.dispatchMouseEvent', {
+          ...base,
+          type: 'mouseMoved',
+          button: 'none',
+        });
+        for (const clickCount of [1, 2]) {
+          await client.send('Input.dispatchMouseEvent', {
+            ...base,
+            type: 'mousePressed',
+            clickCount,
+          });
+          await client.send('Input.dispatchMouseEvent', {
+            ...base,
+            type: 'mouseReleased',
+            clickCount,
+          });
+        }
+      };
+      /** A drag of a box is counted from its second step on: it moves the box by a little less. */
+      const movedByDrag = (/** @type {number} */ moved, /** @type {number} */ dragged) =>
+        Math.abs(moved) > Math.abs(dragged) * 0.6 &&
+        Math.abs(moved) <= Math.abs(dragged) + 3 &&
+        Math.sign(moved) === Math.sign(dragged);
+
+      // The full map with rows, every group open, the Components level pinned: the domains are
+      // drawn open, the components in them closed. The Layout tab stays open from here, so the
+      // canvas keeps its width.
+      await showControl('#unlock-positions');
+      await closeUp(false);
+      await setSetting('compact-collapsed', false);
+      await until(`window.__smoke.attr('data-compact-collapsed') === 'false'`, 'Shrink off');
+      await showRows(true);
+      await expandAll();
+      await pinLod('components');
+      await fit();
+      await unlock(false);
+      const lockedMarks = {
+        controls: await countOf('.arch-resize'),
+        titles: await countOf('.react-flow__node.arch-title-drag'),
+        hint: await countOf('#resize-hint'),
+      };
+      await unlock(true);
+      await resetByHand();
+
+      // An open group is moved by its title bar alone; the rest of it is canvas.
+      const TITLED = 'storefront';
+      const atComponents = await drawnNodes();
+      const openIds = atComponents.filter((node) => node.kind === 'open').map((node) => node.id);
+      const closedId = atComponents.find((node) => node.kind === 'closed')?.id ?? '';
+      const leafIds = atComponents
+        .filter((node) => node.kind === 'leaf' && node.id.includes('.'))
+        .map((node) => node.id);
+      /** @type {(PointerRules | null)[]} */
+      const openRules = [];
+      for (const id of openIds) openRules.push(await rulesOf(id));
+      const closedRules = await rulesOf(closedId);
+      const leafRules = await rulesOf(leafIds[0] ?? '');
+      check(
+        'unlocked, an open group takes the pointer at its title bar only, which shows the cursor that moves; a closed group and a leaf take it anywhere',
+        openIds.includes(TITLED) &&
+          openRules.every(
+            (rules) =>
+              rules !== null &&
+              rules.titleDrag &&
+              rules.wrapper === 'none' &&
+              rules.header === 'auto' &&
+              rules.headerCursor === 'move',
+          ) &&
+          closedRules !== null &&
+          !closedRules.titleDrag &&
+          closedRules.wrapper === 'all' &&
+          closedRules.boxCursor === 'move' &&
+          leafRules !== null &&
+          !leafRules.titleDrag &&
+          leafRules.wrapper === 'all' &&
+          leafRules.boxCursor === 'move',
+        { open: openRules.slice(0, 2), closed: closedRules, leaf: leafRules },
+      );
+
+      await centreOn(TITLED);
+      const DROP = { x: 90, y: 60 };
+      /** @type {HandPoint | null} */
+      const insideAt = await evaluate(`window.__smoke.panePointIn('${TITLED}')`);
+      const viewInside = await viewNow();
+      if (insideAt !== null) {
+        await drag(insideAt, { x: insideAt.x + DROP.x, y: insideAt.y + DROP.y });
+        await settled();
+      }
+      const viewPanned = await viewNow();
+      check(
+        'unlocked, a drag from inside an open group pans the map by the drag and moves no box',
+        insideAt !== null &&
+          Math.abs(viewPanned.x - viewInside.x - DROP.x) <= 3 &&
+          Math.abs(viewPanned.y - viewInside.y - DROP.y) <= 3 &&
+          Math.abs(viewPanned.zoom - viewInside.zoom) < 0.001 &&
+          (await movedCount()) === '0',
+        { insideAt, viewInside, viewPanned, moved: await movedCount() },
+      );
+      /** @type {HandPoint | null} */
+      const wheelAt = await evaluate(`window.__smoke.panePointIn('${TITLED}')`);
+      if (wheelAt !== null) {
+        await client.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: wheelAt.x,
+          y: wheelAt.y,
+          deltaX: 0,
+          deltaY: -100,
+        });
+      }
+      const wheelZoomed =
+        wheelAt !== null &&
+        (await eventually(
+          `window.__smoke.viewport().zoom > ${viewPanned.zoom} + 0.001`,
+          'the zoom after a wheel turn inside a group',
+        ));
+      check('unlocked, the wheel inside an open group zooms the map', wheelZoomed, {
+        wheelAt,
+        before: viewPanned.zoom,
+        after: (await viewNow()).zoom,
+      });
+      await fit();
+      await centreOn(TITLED);
+
+      /** @type {HandPoint | null} */
+      const clickInside = await evaluate(`window.__smoke.panePointIn('${TITLED}')`);
+      if (clickInside !== null) await clickAt(clickInside, `the inside of ${TITLED}`);
+      const selectedInside =
+        clickInside !== null &&
+        (await eventually(
+          `window.__smoke.attr('data-selection') === 'node:${TITLED}'`,
+          'the group selected by a click inside it',
+        ));
+      await settled();
+      /** @type {HandPoint | null} */
+      const outsideAt = await evaluate(`window.__smoke.outsidePoint()`);
+      if (outsideAt !== null) await clickAt(outsideAt, 'the empty canvas');
+      const clearedOutside =
+        outsideAt !== null &&
+        (await eventually(
+          `window.__smoke.attr('data-selection') === null`,
+          'the selection cleared by a click on the empty canvas',
+        ));
+      check(
+        'unlocked, a click inside an open group selects it, and a click on the empty canvas clears the selection',
+        selectedInside && clearedOutside && (await movedCount()) === '0',
+        { clickInside, selectedInside, outsideAt, clearedOutside },
+      );
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await settled();
+
+      const byTitle = await dragFrom(`${nodeOf(TITLED)} .arch-group-header`, DROP);
+      const titleMoved = byTitle !== null && (await counted(1, 0));
+      await settled();
+      const rectsTitle = await rects();
+      const titleShift =
+        byTitle === null
+          ? [NaN, NaN]
+          : [
+              sideOf(rectsTitle, TITLED, 0) - sideOf(byTitle.before, TITLED, 0),
+              sideOf(rectsTitle, TITLED, 1) - sideOf(byTitle.before, TITLED, 1),
+            ];
+      const insideTitled = byTitle === null ? [] : others(byTitle.before, TITLED, true);
+      check(
+        'unlocked, a drag from the title bar moves an open group by the drag with everything in it; the view and the other groups stay',
+        byTitle !== null &&
+          titleMoved &&
+          movedByDrag(titleShift[0] ?? NaN, DROP.x) &&
+          movedByDrag(titleShift[1] ?? NaN, DROP.y) &&
+          insideTitled.length > 0 &&
+          insideTitled.every(
+            (id) =>
+              Math.abs(
+                sideOf(rectsTitle, id, 0) - sideOf(byTitle.before, id, 0) - (titleShift[0] ?? NaN),
+              ) <= 1 &&
+              Math.abs(
+                sideOf(rectsTitle, id, 1) - sideOf(byTitle.before, id, 1) - (titleShift[1] ?? NaN),
+              ) <= 1,
+          ) &&
+          shifted(byTitle.before, rectsTitle, others(byTitle.before, TITLED, false)).length === 0 &&
+          sameView(byTitle.view, await viewNow()),
+        { titleShift, moved: await movedCount(), view: byTitle?.view, now: await viewNow() },
+      );
+      await resetByHand();
+
+      // The chevron still closes the group, and never drags it. A closed box is picked up anywhere.
+      const boxesOpen = await canvasBoxes();
+      const collapsedOpen = Number(await attr('data-collapsed-count'));
+      await click(`${nodeOf(TITLED)} .arch-chevron`);
+      const closedByChevron = await eventually(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedOpen + 1}'`,
+        `${TITLED} closed by its chevron`,
+      );
+      await settled();
+      const boxesClosed = await canvasBoxes();
+      const rulesClosed = await rulesOf(TITLED);
+      const domainIds = Object.keys(boxesOpen).filter((id) => !id.includes('.'));
+      check(
+        'unlocked, the chevron of an open group closes it and moves nothing; the closed box takes the pointer anywhere again',
+        closedByChevron &&
+          (await movedCount()) === '0' &&
+          domainIds.length > 1 &&
+          domainIds.every((id) => sameBox(boxesClosed[id], boxesOpen[id])) &&
+          rulesClosed !== null &&
+          !rulesClosed.titleDrag &&
+          rulesClosed.wrapper === 'all',
+        { closedByChevron, moved: await movedCount(), rulesClosed },
+      );
+      const byMiddle = await dragFrom(nodeOf(TITLED), DROP);
+      const middleMoved = byMiddle !== null && (await counted(1, 0));
+      await settled();
+      const rectsMiddle = await rects();
+      const middleShift =
+        byMiddle === null
+          ? [NaN, NaN]
+          : [
+              sideOf(rectsMiddle, TITLED, 0) - sideOf(byMiddle.before, TITLED, 0),
+              sideOf(rectsMiddle, TITLED, 1) - sideOf(byMiddle.before, TITLED, 1),
+            ];
+      check(
+        'unlocked, a closed group is picked up from its middle and moves by the drag',
+        byMiddle !== null &&
+          middleMoved &&
+          movedByDrag(middleShift[0] ?? NaN, DROP.x) &&
+          movedByDrag(middleShift[1] ?? NaN, DROP.y),
+        { from: byMiddle?.from, middleShift, moved: await movedCount() },
+      );
+      await resetByHand();
+      await click(`${nodeOf(TITLED)} .arch-chevron`);
+      await until(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedOpen}'`,
+        `${TITLED} open again`,
+      );
+      await settled();
+
+      // A leaf: the one nearest to the right border of its group, dragged beyond that border.
+      const rectsLeaves = await rects();
+      const [nearLeaf] = leafIds
+        .map((id) => ({
+          id,
+          gap: sideOf(rectsLeaves, parentOf(id), 2) - sideOf(rectsLeaves, id, 2),
+        }))
+        .filter((leaf) => leaf.gap > 2)
+        .sort((a, b) => a.gap - b.gap);
+      const byLeaf =
+        nearLeaf === undefined
+          ? null
+          : await dragFrom(nodeOf(nearLeaf.id), { x: nearLeaf.gap * 1.2 + 80, y: 0 });
+      const leafMoved = byLeaf !== null && (await counted(1, 0));
+      await settled();
+      const rectsLeaf = await rects();
+      const leafBox = rectsLeaf[nearLeaf?.id ?? ''];
+      const leafGroup = rectsLeaf[parentOf(nearLeaf?.id ?? '')];
+      check(
+        'unlocked, a leaf dragged from its middle moves and stays inside its group, which stays as it is',
+        nearLeaf !== undefined &&
+          byLeaf !== null &&
+          leafMoved &&
+          leafBox !== undefined &&
+          leafGroup !== undefined &&
+          (leafBox[0] ?? NaN) > sideOf(byLeaf.before, nearLeaf.id, 0) + 2 &&
+          Math.abs((leafBox[2] ?? NaN) - (leafGroup[2] ?? NaN)) <= 1.5 &&
+          (leafBox[0] ?? NaN) >= (leafGroup[0] ?? NaN) - 0.5 &&
+          (leafBox[1] ?? NaN) >= (leafGroup[1] ?? NaN) - 0.5 &&
+          (leafBox[3] ?? NaN) <= (leafGroup[3] ?? NaN) + 0.5 &&
+          sameNumbers(leafGroup, byLeaf.before[parentOf(nearLeaf.id)]),
+        { nearLeaf, leafBox, leafGroup, moved: await movedCount() },
+      );
+      await resetByHand();
+
+      // Where no group is drawn open, and while the positions are locked, none is marked.
+      await pinLod('domains');
+      const titlesAtDomains = await countOf('.react-flow__node.arch-title-drag');
+      await pinLod('components');
+      await fit();
+      const titlesUnlocked = await countOf('.react-flow__node.arch-title-drag');
+      check(
+        'no group is moved by its title bar alone at the Domains level, where every group is closed, or while the positions are locked',
+        titlesAtDomains === 0 && titlesUnlocked === openIds.length && lockedMarks.titles === 0,
+        { titlesAtDomains, titlesUnlocked, open: openIds.length, locked: lockedMarks.titles },
+      );
+
+      // Resize controls: on open groups only, and only while the positions are unlocked.
+      const EIGHT = [
+        'handle:bottom-left',
+        'handle:bottom-right',
+        'handle:top-left',
+        'handle:top-right',
+        'line:bottom',
+        'line:left',
+        'line:right',
+        'line:top',
+      ];
+      const complete = (/** @type {DrawnNode} */ node) =>
+        same(node.controls, EIGHT) &&
+        node.grip !== null &&
+        node.grip.tag === 'BUTTON' &&
+        node.grip.label === `Resize ${node.name}`;
+      const controlsAtComponents = await drawnNodes();
+      await pinLod('subcomponents');
+      const controlsAtSubcomponents = await drawnNodes();
+      await pinLod('components');
+      const kindsWithout = controlsAtComponents.filter((node) => node.kind !== 'open');
+      check(
+        'locked, no group has a resize control; unlocked, every open group has its eight and a grip named after it, and no closed group, leaf or row band has any',
+        lockedMarks.controls === 0 &&
+          controlsAtComponents.some((node) => node.kind === 'open') &&
+          controlsAtComponents.filter((node) => node.kind === 'open').every(complete) &&
+          controlsAtSubcomponents.some((node) => node.kind === 'open' && node.id.includes('.')) &&
+          controlsAtSubcomponents.filter((node) => node.kind === 'open').every(complete) &&
+          ['closed', 'leaf', 'band'].every((kind) =>
+            kindsWithout.some((node) => node.kind === kind),
+          ) &&
+          kindsWithout.every((node) => node.controls.length === 0 && node.grip === null),
+        {
+          locked: lockedMarks.controls,
+          incomplete: [...controlsAtComponents, ...controlsAtSubcomponents]
+            .filter((node) => (node.kind === 'open') !== complete(node))
+            .slice(0, 4),
+        },
+      );
+      await showControl('#resize-hint');
+      check(
+        'the Layout tab says how groups are resized only while the positions are unlocked',
+        lockedMarks.hint === 0 &&
+          (await evaluate(
+            `(document.querySelector('#resize-hint')?.getClientRects().length ?? 0) > 0`,
+          )) === true,
+        { locked: lockedMarks.hint, hint: await text('#resize-hint') },
+      );
+
+      // Where the layout left no room, an edge does not come in: the box is back at the drop.
+      const FRESH = 'backoffice';
+      const storedFresh = await stored();
+      const inwards = await dragControl(FRESH, 'handle.top.left', { x: 150, y: 120 });
+      await frames();
+      const rectsFresh = await rects();
+      check(
+        'a corner dragged inwards where the layout left no room: after the drop the group and what is in it are where they were, nothing counts as resized or moved, and the view stays',
+        inwards !== null &&
+          shifted(inwards.before, rectsFresh, Object.keys(inwards.before)).length === 0 &&
+          (await resizedCount()) === '0' &&
+          (await movedCount()) === '0' &&
+          (await stored()) === storedFresh &&
+          sameView(inwards.view, await viewNow()),
+        {
+          pressed: inwards?.from,
+          shifted:
+            inwards === null
+              ? null
+              : shifted(inwards.before, rectsFresh, Object.keys(inwards.before)),
+          resized: await resizedCount(),
+          moved: await movedCount(),
+        },
+      );
+
+      // The right edge of the domain that ends the map on the right, dragged outwards.
+      const boxesAtRest = await canvasBoxes();
+      const [EAST = ''] = Object.keys(boxesAtRest)
+        .filter((id) => !id.includes('.'))
+        .sort(
+          (a, b) =>
+            (boxesAtRest[b]?.[0] ?? 0) +
+            (boxesAtRest[b]?.[2] ?? 0) -
+            ((boxesAtRest[a]?.[0] ?? 0) + (boxesAtRest[a]?.[2] ?? 0)),
+        );
+      const eastAtRest = boxesAtRest[EAST];
+      const miniAtRest = await evaluate(`window.__smoke.minimap(${JSON.stringify(EAST)})`);
+      const sizeAtRest = String(await attr('data-layout-size'));
+      const nameCut = () =>
+        /** @type {Promise<number>} */ (
+          evaluate(`(() => {
+            const name = document.querySelector(${JSON.stringify(`${nodeOf(EAST)} .arch-node-name`)});
+            return name.scrollWidth - name.clientWidth;
+          })()`)
+        );
+      const nameCutAtRest = await nameCut();
+      const storedAtRest = await stored();
+      const WIDER = 120;
+      const widen = await dragControl(EAST, 'line.right', { x: WIDER, y: 0 }, { hold: true });
+      await frames();
+      const rectsHeld = await rects();
+      if (widen !== null) await release(widen.to);
+      check(
+        'while its right edge is dragged, an open group follows the pointer; its other edges, every other box and the view stay',
+        widen !== null &&
+          sameNumbers(grownBy(widen.before, rectsHeld, EAST), [0, 0, WIDER, 0], 2) &&
+          shifted(widen.before, rectsHeld, others(widen.before, EAST, true)).length === 0 &&
+          shifted(widen.before, rectsHeld, others(widen.before, EAST, false)).length === 0 &&
+          sameView(widen.view, await viewNow()),
+        {
+          pressed: widen?.from,
+          grown: widen === null ? null : grownBy(widen.before, rectsHeld, EAST),
+        },
+      );
+      const widened = widen !== null && (await counted(0, 1));
+      await frames();
+      const rectsWide = await rects();
+      const zoomWide = (await viewNow()).zoom;
+      const eastWide = (await canvasBoxes())[EAST];
+      check(
+        'an open group dragged at its right edge is wider by the drag after the drop; its left edge, what is in it and every other group stay, and nothing counts as moved',
+        widen !== null &&
+          widened &&
+          sameNumbers(grownBy(widen.before, rectsWide, EAST), [0, 0, WIDER, 0], 2) &&
+          !!eastAtRest &&
+          !!eastWide &&
+          Math.abs((eastWide[2] ?? NaN) - (eastAtRest[2] ?? NaN) - WIDER / zoomWide) <= 2 &&
+          others(widen.before, EAST, true).length > 0 &&
+          shifted(widen.before, rectsWide, others(widen.before, EAST, true)).length === 0 &&
+          shifted(widen.before, rectsWide, others(widen.before, EAST, false)).length === 0 &&
+          (await selection()) === null,
+        {
+          grown: widen === null ? null : grownBy(widen.before, rectsWide, EAST),
+          eastAtRest,
+          eastWide,
+          zoomWide,
+          moved: await movedCount(),
+          resized: await resizedCount(),
+        },
+      );
+      /** @type {Record<string, string>} */
+      const keptAtRest = JSON.parse(storedAtRest);
+      /** @type {Record<string, string>} */
+      const keptWide = JSON.parse(await stored());
+      const positionsOf = (/** @type {Record<string, string>} */ kept) =>
+        Object.entries(kept).filter(([key]) => key.startsWith('architecture-map.positions:'));
+      /** @type {number[] | undefined} */
+      const sizeKept = Object.entries(keptWide)
+        .filter(([key]) => key.startsWith('architecture-map.sizes:'))
+        .map(([, value]) => JSON.parse(value)[EAST])
+        .find((entry) => Array.isArray(entry));
+      check(
+        'the Layout tab counts the resized group, and its size is kept in the browser as how far each edge was moved, beside the positions, which stay as they were',
+        (await text('#hand-count')) === '1 resized' &&
+          sizeKept !== undefined &&
+          sizeKept.length === 4 &&
+          sizeKept[0] === 0 &&
+          sizeKept[1] === 0 &&
+          Math.abs((sizeKept[2] ?? NaN) - WIDER / zoomWide) <= 2 &&
+          sizeKept[3] === 0 &&
+          same(positionsOf(keptWide), positionsOf(keptAtRest)),
+        { count: await text('#hand-count'), sizeKept, positions: positionsOf(keptWide) },
+      );
+      const miniWide = await evaluate(`window.__smoke.minimap(${JSON.stringify(EAST)})`);
+      const sizeWide = String(await attr('data-layout-size'));
+      const widthAtRest = Number(sizeAtRest.split('x')[0]);
+      const widthWide = Number(sizeWide.split('x')[0]);
+      const eastRight = (eastWide?.[0] ?? NaN) + (eastWide?.[2] ?? NaN);
+      check(
+        'the minimap draws the resized group wider, and the map grows to cover a group resized beyond it',
+        miniAtRest.node !== null &&
+          miniWide.node !== null &&
+          miniWide.node.width > miniAtRest.node.width + 1 &&
+          eastRight > widthAtRest &&
+          widthWide > widthAtRest &&
+          widthWide >= Math.round(eastRight) - 1,
+        { miniAtRest: miniAtRest.node, miniWide: miniWide.node, sizeAtRest, sizeWide, eastRight },
+      );
+      await fit();
+      check(
+        'Fit view shows the whole of a group resized beyond the map',
+        (await evaluate(`window.__smoke.onScreen(${JSON.stringify(nodeOf(EAST))})`)) === true,
+        { box: (await rects())[EAST], view: await viewNow() },
+      );
+
+      // Far inwards again: the edge stops at what is in the group.
+      const storedWide = await stored();
+      const zoomNarrow = (await viewNow()).zoom;
+      // How far the edge was moved out, in the pixels of the screen at this zoom.
+      const wider = ((eastWide?.[2] ?? NaN) - (eastAtRest?.[2] ?? NaN)) * zoomNarrow;
+      const narrow = await dragControl(EAST, 'line.right', { x: -(wider + 300), y: 0 });
+      const narrowed = narrow !== null && (await storedChanges(storedWide));
+      await frames();
+      const rectsNarrow = await rects();
+      const eastNarrow = (await canvasBoxes())[EAST];
+      // How near the right border each box in the group lies, against how near the layout had it
+      // (the padding of a group, or less where the layout left less).
+      const tooNear =
+        narrow === null
+          ? []
+          : others(narrow.before, EAST, true).filter((id) => {
+              const laidOut = sideOf(narrow.before, EAST, 2) - wider - sideOf(narrow.before, id, 2);
+              const now = sideOf(rectsNarrow, EAST, 2) - sideOf(rectsNarrow, id, 2);
+              return now < Math.min(16 * zoomNarrow, laidOut) - 1;
+            });
+      check(
+        'an edge dragged far inwards stops at what is in the group: no box in it comes nearer to the border than the layout had it, the name is cut no more, and the group is no narrower than the layout made it',
+        narrow !== null &&
+          narrowed &&
+          sideOf(rectsNarrow, EAST, 2) < sideOf(narrow.before, EAST, 2) - 2 &&
+          tooNear.length === 0 &&
+          shifted(narrow.before, rectsNarrow, others(narrow.before, EAST, true)).length === 0 &&
+          (await nameCut()) <= nameCutAtRest &&
+          !!eastAtRest &&
+          !!eastNarrow &&
+          (eastNarrow[2] ?? NaN) >= (eastAtRest[2] ?? NaN) - 0.5,
+        { tooNear, eastAtRest, eastNarrow, resized: await resizedCount() },
+      );
+
+      // The left edge outwards: that border alone moves.
+      const storedNarrow = await stored();
+      const LEFT_OUT = 80;
+      const leftOut = await dragControl(EAST, 'line.left', { x: -LEFT_OUT, y: 0 }, { hold: true });
+      await frames();
+      const rectsLeftHeld = await rects();
+      if (leftOut !== null) await release(leftOut.to);
+      check(
+        'while its left edge is dragged, what is in a group stays where it is on screen',
+        leftOut !== null &&
+          sameNumbers(grownBy(leftOut.before, rectsLeftHeld, EAST), [LEFT_OUT, 0, 0, 0], 2) &&
+          shifted(leftOut.before, rectsLeftHeld, others(leftOut.before, EAST, true)).length === 0,
+        {
+          pressed: leftOut?.from,
+          grown: leftOut === null ? null : grownBy(leftOut.before, rectsLeftHeld, EAST),
+          shifted:
+            leftOut === null
+              ? null
+              : shifted(leftOut.before, rectsLeftHeld, others(leftOut.before, EAST, true)),
+        },
+      );
+      const leftGrown = leftOut !== null && (await storedChanges(storedNarrow));
+      await frames();
+      const rectsLeft = await rects();
+      check(
+        'a left edge dragged outwards moves that border alone: the right edge, what is in the group and every other group stay, and nothing counts as moved',
+        leftOut !== null &&
+          leftGrown &&
+          sameNumbers(grownBy(leftOut.before, rectsLeft, EAST), [LEFT_OUT, 0, 0, 0], 2) &&
+          shifted(leftOut.before, rectsLeft, others(leftOut.before, EAST, true)).length === 0 &&
+          shifted(leftOut.before, rectsLeft, others(leftOut.before, EAST, false)).length === 0 &&
+          (await movedCount()) === '0' &&
+          (await resizedCount()) === '1',
+        {
+          grown: leftOut === null ? null : grownBy(leftOut.before, rectsLeft, EAST),
+          moved: await movedCount(),
+          resized: await resizedCount(),
+        },
+      );
+      await fit();
+
+      // A double-click on an edge gives the group the size of the layout back.
+      const collapsedResized = await attr('data-collapsed-count');
+      /** @type {HandPoint | null} */
+      const edgeAt = await evaluate(
+        `window.__smoke.pressPoint(${JSON.stringify(`${nodeOf(EAST)} .arch-resize.line.right`)})`,
+      );
+      if (edgeAt !== null) await doubleClickAt(edgeAt);
+      const sizeGivenBack = edgeAt !== null && (await counted(0, 0));
+      await frames();
+      const eastBack = (await canvasBoxes())[EAST];
+      check(
+        'a double-click on an edge of a resized group gives it the size of the layout back; the group is neither closed nor selected by it',
+        sizeGivenBack &&
+          sameBox(eastBack, eastAtRest) &&
+          (await attr('data-collapsed-count')) === collapsedResized &&
+          (await evaluate(
+            `document.querySelector(${JSON.stringify(`${nodeOf(EAST)} .arch-node`)})?.dataset.collapsed`,
+          )) === 'false' &&
+          (await selection()) === null,
+        {
+          edgeAt,
+          eastBack,
+          eastAtRest,
+          resized: await resizedCount(),
+          selected: await selection(),
+        },
+      );
+
+      // The grip takes the keyboard: the arrow keys move the right and the bottom edge, with
+      // Shift the left and the top edge, and Delete gives the size back.
+      const gripOf = (/** @type {string} */ id) => `${nodeOf(id)} .arch-resize-grip`;
+      const gripFocused = (/** @type {string} */ id) =>
+        `document.activeElement !== null && document.activeElement === document.querySelector(${JSON.stringify(gripOf(id))})`;
+      /** Gives the grip of the group the focus with a click on it: whether the click did. */
+      const focusGrip = async (/** @type {string} */ id) => {
+        /** @type {HandPoint | null} */
+        const point = await evaluate(`window.__smoke.pressPoint(${JSON.stringify(gripOf(id))})`);
+        if (point !== null) await clickAt(point, `the grip of ${id}`);
+        const byClick =
+          point !== null && (await eventually(gripFocused(id), 'the focus on the grip'));
+        // The keys are what is checked below: without the click, the grip is focused directly.
+        if (!byClick) {
+          await evaluate(`document.querySelector(${JSON.stringify(gripOf(id))})?.focus()`);
+        }
+        return byClick;
+      };
+      const widthIs = (/** @type {string} */ id, /** @type {number} */ width) =>
+        `(window.__smoke.canvasBoxes()[${JSON.stringify(id)}] ?? [])[2] === ${width}`;
+      const STEP = 8;
+      const restWidth = eastAtRest?.[2] ?? NaN;
+      const viewKeys = await viewNow();
+      const gripByClick = await focusGrip(EAST);
+      const selectedByGrip = await selection();
+      await press('ArrowRight', { keyCode: 39 });
+      const keyWider =
+        (await counted(0, 1)) &&
+        (await eventually(widthIs(EAST, restWidth + STEP), 'the group wider by a key'));
+      const eastKeyRight = (await canvasBoxes())[EAST];
+      const focusAfterRight = await evaluate(gripFocused(EAST));
+      await press('ArrowLeft', { keyCode: 37, modifiers: 8 });
+      const keyLeft = await eventually(
+        widthIs(EAST, restWidth + 2 * STEP),
+        'the left edge moved out by a key',
+      );
+      const eastKeyLeft = (await canvasBoxes())[EAST];
+      const focusAfterLeft = await evaluate(gripFocused(EAST));
+      await press('Delete', { keyCode: 46 });
+      const keyBack = await counted(0, 0);
+      await frames();
+      const eastKeyBack = (await canvasBoxes())[EAST];
+      check(
+        'the arrow keys on the grip of a group move its right edge by 8, with Shift its left edge, and Delete gives the size of the layout back; the grip keeps the focus, nothing is selected and neither the page nor the map moves',
+        keyWider &&
+          !!eastAtRest &&
+          sameBox(eastKeyRight, [
+            eastAtRest[0] ?? NaN,
+            eastAtRest[1] ?? NaN,
+            restWidth + STEP,
+            eastAtRest[3] ?? NaN,
+          ]) &&
+          focusAfterRight === true &&
+          keyLeft &&
+          sameBox(eastKeyLeft, [
+            (eastAtRest[0] ?? NaN) - STEP,
+            eastAtRest[1] ?? NaN,
+            restWidth + 2 * STEP,
+            eastAtRest[3] ?? NaN,
+          ]) &&
+          focusAfterLeft === true &&
+          keyBack &&
+          sameBox(eastKeyBack, eastAtRest) &&
+          (await evaluate(gripFocused(EAST))) === true &&
+          selectedByGrip === null &&
+          (await evaluate(`window.scrollX === 0 && window.scrollY === 0`)) === true &&
+          sameView(viewKeys, await viewNow()),
+        {
+          gripByClick,
+          eastAtRest,
+          eastKeyRight,
+          eastKeyLeft,
+          eastKeyBack,
+          focus: [focusAfterRight, focusAfterLeft],
+          selectedByGrip,
+        },
+      );
+      await park();
+
+      // Room gained belongs to the group: a box in it can be moved beyond the old border. Then
+      // one button puts back the box moved and the group resized.
+      const boxesBeforeBoth = await canvasBoxes();
+      const again = await dragControl(EAST, 'line.right', { x: WIDER, y: 0 });
+      const grownAgain = again !== null && (await counted(0, 1));
+      await frames();
+      const rectsGrown = await rects();
+      const oldBorder = sideOf(rectsGrown, EAST, 2) - WIDER;
+      const [nearest] = others(rectsGrown, EAST, true)
+        .filter((id) => parentOf(id) === EAST)
+        .map((id) => ({ id, gap: oldBorder - sideOf(rectsGrown, id, 2) }))
+        .sort((a, b) => a.gap - b.gap);
+      const intoRoom =
+        nearest === undefined || !grownAgain
+          ? null
+          : await dragFrom(nodeOf(nearest.id), { x: nearest.gap * 1.2 + 70, y: 0 });
+      const movedIntoRoom = intoRoom !== null && (await counted(1, 1));
+      await settled();
+      await frames();
+      const rectsRoom = await rects();
+      check(
+        'a box inside a group that was grown can be moved into the room gained, beyond the border the layout gave the group, and stays there',
+        nearest !== undefined &&
+          intoRoom !== null &&
+          movedIntoRoom &&
+          sideOf(rectsRoom, nearest.id, 2) > sideOf(rectsRoom, EAST, 2) - WIDER + 10 &&
+          sideOf(rectsRoom, nearest.id, 2) <= sideOf(rectsRoom, EAST, 2) + 0.5,
+        {
+          nearest,
+          box: rectsRoom[nearest?.id ?? ''],
+          group: rectsRoom[EAST],
+          moved: await movedCount(),
+        },
+      );
+      const resetDisabled = await evaluate(`document.querySelector('#reset-positions').disabled`);
+      await click('#reset-positions');
+      const bothBack = await counted(0, 0);
+      await settled();
+      const boxesAfterReset = await canvasBoxes();
+      check(
+        'Reset positions puts a moved box and a resized group back as the layout made them, and can then not be chosen',
+        resetDisabled === false &&
+          movedIntoRoom &&
+          bothBack &&
+          Object.keys(boxesBeforeBoth).length > 0 &&
+          Object.keys(boxesBeforeBoth).every((id) =>
+            sameBox(boxesAfterReset[id], boxesBeforeBoth[id]),
+          ) &&
+          (await evaluate(`document.querySelector('#reset-positions').disabled`)) === true &&
+          (await countOf('#hand-count')) === 0,
+        { resetDisabled, moved: await movedCount(), resized: await resizedCount() },
+      );
+
+      // An edge of the map that ends on the side of a group follows that side.
+      /** The sides of a box: which coordinate of a point lies across it, and which way is out. */
+      const SIDES = [
+        { name: 'right', index: 2, axis: 0, out: 1 },
+        { name: 'bottom', index: 3, axis: 1, out: 1 },
+        { name: 'left', index: 0, axis: 0, out: -1 },
+        { name: 'top', index: 1, axis: 1, out: -1 },
+      ];
+      const edgeEndsAt = (/** @type {string} */ id) =>
+        /** @type {Promise<EdgeEnds[]>} */ (
+          evaluate(`window.__smoke.edgeEndsAt(${JSON.stringify(id)})`)
+        );
+      const rectsEdges = await rects();
+      /** @type {{ id: string, side: typeof SIDES[number], edge: string, end: number, offset: number, d: string } | undefined} */
+      let ending;
+      for (const id of openIds) {
+        const box = rectsEdges[id];
+        if (ending !== undefined || box === undefined) continue;
+        const drawnEdges = await edgeEndsAt(id);
+        for (const side of SIDES) {
+          for (const edge of drawnEdges) {
+            for (const [end, point] of edge.ends.entries()) {
+              const offset = (point[side.axis] ?? NaN) - (box[side.index] ?? NaN);
+              const along = point[1 - side.axis] ?? NaN;
+              const within =
+                along >= (box[1 - side.axis] ?? NaN) - 8 &&
+                along <= (box[3 - side.axis] ?? NaN) + 8;
+              if (ending === undefined && Math.abs(offset) <= 8 && within) {
+                ending = { id, side, edge: edge.id, end, offset, d: edge.d };
+              }
+            }
+          }
+        }
+      }
+      const OUT = 60;
+      const pushed =
+        ending === undefined
+          ? null
+          : await dragControl(
+              ending.id,
+              `line.${ending.side.name}`,
+              ending.side.axis === 0
+                ? { x: OUT * ending.side.out, y: 0 }
+                : { x: 0, y: OUT * ending.side.out },
+            );
+      const pushedOut = pushed !== null && (await counted(0, 1));
+      const rerouted =
+        ending !== undefined &&
+        pushedOut &&
+        (await eventually(
+          `window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.edgeEndsAt(${JSON.stringify(ending.id)}).some((edge) => edge.id === ${JSON.stringify(ending.edge)} && edge.d !== ${JSON.stringify(ending.d)})`,
+          'the edge drawn anew',
+        ));
+      const rectsPushed = await rects();
+      const endNow =
+        ending === undefined
+          ? undefined
+          : (await edgeEndsAt(ending.id)).find((edge) => edge.id === ending.edge)?.ends[ending.end];
+      // The edge is routed anew and may leave the box at another side: how far its end lies from
+      // the border of the box as it is now, whichever side that is. (An edge left as it was would
+      // end inside the box, where the border was.)
+      const boxPushed = ending === undefined ? undefined : rectsPushed[ending.id];
+      const [endX = NaN, endY = NaN] = endNow ?? [];
+      const [boxLeft = NaN, boxTop = NaN, boxRight = NaN, boxBottom = NaN] = boxPushed ?? [];
+      const outside = Math.hypot(
+        Math.max(boxLeft - endX, 0, endX - boxRight),
+        Math.max(boxTop - endY, 0, endY - boxBottom),
+      );
+      const offBorder =
+        outside > 0
+          ? outside
+          : Math.min(endX - boxLeft, boxRight - endX, endY - boxTop, boxBottom - endY);
+      check(
+        'an edge that ends on the side of a group that is resized ends on the new border after the drop',
+        ending !== undefined &&
+          pushed !== null &&
+          rerouted &&
+          Math.abs(grownBy(pushed.before, rectsPushed, ending.id)[ending.side.index] ?? NaN) >=
+            OUT - 2 &&
+          offBorder <= Math.abs(ending.offset) + 1.5,
+        { ending, pushedOut, rerouted, endNow, boxPushed, offBorder },
+      );
+      await resetByHand();
+      await fit();
+
+      // The grip in both colour schemes: fainter than the text where the size is the layout's,
+      // the accent colour where it was set by hand. A hovered edge shows a line.
+      /** The grip colours of a resized and of an untouched group in the scheme that is on. */
+      const gripColours = async () => ({
+        resized: await evaluate(`window.__smoke.gripColour(${JSON.stringify(EAST)})`),
+        plain: await evaluate(`window.__smoke.gripColour(${JSON.stringify(FRESH)})`),
+      });
+      const schemeIs = async (/** @type {'light' | 'dark'} */ scheme) => {
+        await client.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-color-scheme', value: scheme }],
+        });
+        await until(
+          `window.matchMedia('(prefers-color-scheme: ${scheme})').matches`,
+          `the ${scheme} colour scheme`,
+        );
+        await frames();
+      };
+      const gripByClickAgain = await focusGrip(EAST);
+      await press('ArrowRight', { keyCode: 39 });
+      const resizedForColour = await counted(0, 1);
+      await park();
+      await schemeIs('dark');
+      const gripsDark = await gripColours();
+      await schemeIs('light');
+      const gripsLight = await gripColours();
+      const lineOf = `${nodeOf(EAST)} .arch-resize.line.right`;
+      const lineParked = await evaluate(`window.__smoke.controlLine(${JSON.stringify(lineOf)})`);
+      /** @type {HandPoint | null} */
+      const lineAt = await evaluate(`window.__smoke.pressPoint(${JSON.stringify(lineOf)})`);
+      if (lineAt !== null) {
+        await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...lineAt });
+      }
+      // The line may fade in: waited for, not read after a fixed time.
+      const lineShown =
+        lineAt !== null &&
+        gripsLight.resized !== null &&
+        (await eventually(
+          `(() => {
+            const line = window.__smoke.controlLine(${JSON.stringify(lineOf)});
+            return line !== null && line.hovered && line.look.includes(${JSON.stringify(gripsLight.resized.accent)});
+          })()`,
+          'the line of the hovered edge control',
+        ));
+      const lineHovered = await evaluate(`window.__smoke.controlLine(${JSON.stringify(lineOf)})`);
+      await park();
+      await client.send('Emulation.setEmulatedMedia', {});
+      check(
+        'the grip of a group is drawn in both colour schemes, in the accent colour once the size is set by hand, and a hovered edge control shows a line in that colour',
+        resizedForColour &&
+          [gripsDark, gripsLight].every(
+            (grips) =>
+              grips.resized !== null &&
+              grips.plain !== null &&
+              grips.resized.resized === 'true' &&
+              grips.plain.resized !== 'true' &&
+              grips.resized.colour === grips.resized.accent &&
+              grips.plain.colour !== grips.plain.accent,
+          ) &&
+          gripsDark.plain.colour !== gripsLight.plain.colour &&
+          lineShown &&
+          lineParked !== null &&
+          lineHovered !== null &&
+          lineParked.hovered === false &&
+          lineHovered.look !== lineParked.look,
+        { gripByClickAgain, gripsDark, gripsLight, lineParked, lineHovered },
+      );
+
+      // A size set by hand is kept: a reload draws it again, locked as the map starts.
+      const eastKept = (await canvasBoxes())[EAST];
+      await open();
+      const reloaded = {
+        resized: await resizedCount(),
+        unlocked: await attr('data-positions-unlocked'),
+        controls: await countOf('.arch-resize'),
+      };
+      await pinLod('components');
+      await fit();
+      const eastReloaded = (await canvasBoxes())[EAST];
+      check(
+        'a size set by hand is still there after a reload, and while the positions are locked the group keeps it and has no resize control',
+        resizedForColour &&
+          reloaded.resized === '1' &&
+          reloaded.unlocked === 'false' &&
+          reloaded.controls === 0 &&
+          !!eastAtRest &&
+          !!eastKept &&
+          (eastKept[2] ?? NaN) === (eastAtRest[2] ?? NaN) + STEP &&
+          sameBox(eastReloaded, eastKept),
+        { reloaded, eastAtRest, eastKept, eastReloaded },
+      );
+      await unlock(true);
+      await until(
+        `window.__smoke.count(${JSON.stringify(`${nodeOf(EAST)} .arch-resize`)}) === 8`,
+        'the resize controls after unlocking again',
+      );
+
+      // Closed, the group keeps the box set by hand; drawn shrunk, the small box lies in its middle.
+      await centreOn(EAST);
+      const collapsedKept = Number(await attr('data-collapsed-count'));
+      await click(`${nodeOf(EAST)} .arch-chevron`);
+      await until(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedKept + 1}'`,
+        `${EAST} closed`,
+      );
+      await settled();
+      const eastClosed = (await canvasBoxes())[EAST];
+      const closedControls = await countOf(`${nodeOf(EAST)} .arch-resize`);
+      await setSetting('compact-collapsed', true);
+      const drawnShrunk = await eventually(
+        `window.__smoke.count(${JSON.stringify(`${nodeOf(EAST)} .arch-group.arch-compact`)}) === 1`,
+        'the closed group drawn shrunk',
+      );
+      const eastShrunk = (await canvasBoxes())[EAST];
+      await setSetting('compact-collapsed', false);
+      await until(
+        `window.__smoke.attr('data-compact-collapsed') === 'false' && window.__smoke.count('.arch-group.arch-compact') === 0`,
+        'full boxes again',
+      );
+      await click(`${nodeOf(EAST)} .arch-chevron`);
+      await until(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedKept}'`,
+        `${EAST} open again`,
+      );
+      await settled();
+      const eastReopened = (await canvasBoxes())[EAST];
+      /** The middle of a box of the canvas (left, top, width, height). */
+      const middleOf = (/** @type {number[] | null | undefined} */ box) =>
+        box
+          ? [(box[0] ?? NaN) + (box[2] ?? NaN) / 2, (box[1] ?? NaN) + (box[3] ?? NaN) / 2]
+          : undefined;
+      check(
+        'a resized group that is closed keeps the size set by hand and has no resize control; drawn shrunk, the small box lies in the middle of it; opened again it is as before',
+        sameBox(eastClosed, eastKept) &&
+          closedControls === 0 &&
+          drawnShrunk &&
+          !!eastShrunk &&
+          !!eastKept &&
+          // The small box is no wider and no taller than the group, and smaller one way at least
+          // (a narrow group keeps its width).
+          (eastShrunk[2] ?? NaN) <= (eastKept[2] ?? NaN) &&
+          (eastShrunk[3] ?? NaN) <= (eastKept[3] ?? NaN) &&
+          (eastShrunk[2] ?? NaN) * (eastShrunk[3] ?? NaN) <
+            (eastKept[2] ?? NaN) * (eastKept[3] ?? NaN) - 1 &&
+          sameNumbers(middleOf(eastShrunk), middleOf(eastKept)) &&
+          sameBox(eastReopened, eastKept) &&
+          (await countOf(`${nodeOf(EAST)} .arch-resize`)) === 8 &&
+          (await resizedCount()) === '1',
+        { eastKept, eastClosed, closedControls, eastShrunk, eastReopened },
+      );
+      await resetByHand();
+
+      // Zoomed out to half the size, the controls are enlarged against the zoom.
+      await fit();
+      const wheelOver = await evaluate(`window.__smoke.canvasMiddle()`);
+      if (!wheelOver.onCanvas) throw new Error('something lies over the middle of the canvas');
+      for (let turn = 0; turn < 8; turn++) {
+        const { zoom } = await viewNow();
+        if (Math.abs(zoom - 0.5) < 0.002) break;
+        // A wheel turn of 500 halves the zoom.
+        await client.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: wheelOver.x,
+          y: wheelOver.y,
+          deltaX: 0,
+          deltaY: Math.max(-400, Math.min(400, 500 * Math.log2(zoom / 0.5))),
+        });
+        await until(
+          `Math.abs(window.__smoke.viewport().zoom - ${zoom}) > 1e-6`,
+          'the zoom after a wheel turn',
+        );
+        await settled();
+      }
+      await park();
+      const half = {
+        zoom: (await viewNow()).zoom,
+        unzoom: await evaluate(`window.__smoke.unzoom()`),
+        thick: await evaluate(
+          `document.querySelector(${JSON.stringify(`${nodeOf(FRESH)} .arch-resize.line.right`)})?.getBoundingClientRect().width ?? null`,
+        ),
+      };
+      await unlock(false);
+      const unzoomLocked = await evaluate(`window.__smoke.unzoom()`);
+      await unlock(true);
+      check(
+        'at half the size the edge controls of a group are still 7 pixels thick on screen, enlarged by the factor the canvas states, which is gone once the positions are locked',
+        Math.abs(half.zoom - 0.5) < 0.005 &&
+          Math.abs(Number(half.unzoom) - 2) < 0.03 &&
+          typeof half.thick === 'number' &&
+          half.thick >= 7 &&
+          half.thick <= 9 &&
+          unzoomLocked === '',
+        { half, unzoomLocked },
+      );
+      await fit();
+
+      // One group, three places to press: the title bar, the top edge, the inside.
+      const NUDGE = { x: 60, y: 40 };
+      const byHeader = await dragFrom(`${nodeOf(FRESH)} .arch-group-header`, NUDGE);
+      const headerMoved = byHeader !== null && (await counted(1, 0));
+      await settled();
+      const byTop = await dragControl(FRESH, 'line.top', { x: 0, y: -NUDGE.y });
+      const topGrown = byTop !== null && (await counted(1, 1));
+      await frames();
+      const rectsTop = await rects();
+      const viewAfterTop = await viewNow();
+      /** @type {HandPoint | null} */
+      const bodyAt = await evaluate(`window.__smoke.panePointIn('${FRESH}')`);
+      if (bodyAt !== null) {
+        await drag(bodyAt, { x: bodyAt.x + NUDGE.x, y: bodyAt.y + NUDGE.y });
+        await settled();
+      }
+      const viewBody = await viewNow();
+      check(
+        'unlocked, a group is moved at its title bar, resized at its top edge, and the map is panned inside it',
+        headerMoved &&
+          byTop !== null &&
+          topGrown &&
+          sameNumbers(grownBy(byTop.before, rectsTop, FRESH), [0, NUDGE.y, 0, 0], 2) &&
+          sameView(byTop.view, viewAfterTop) &&
+          bodyAt !== null &&
+          Math.abs(viewBody.x - viewAfterTop.x - NUDGE.x) <= 3 &&
+          Math.abs(viewBody.y - viewAfterTop.y - NUDGE.y) <= 3 &&
+          (await movedCount()) === '1' &&
+          (await resizedCount()) === '1',
+        {
+          headerMoved,
+          grown: byTop === null ? null : grownBy(byTop.before, rectsTop, FRESH),
+          viewAfterTop,
+          viewBody,
+          moved: await movedCount(),
+          resized: await resizedCount(),
+        },
+      );
+      await resetByHand();
+
+      // A group inside another: it grows as far as the border of the group around it, and
+      // upwards as far as that group's title bar. The one nearest to a border is taken.
+      await pinLod('subcomponents');
+      await fit();
+      const rectsNested = await rects();
+      const [inner] = (await drawnNodes())
+        .filter((node) => node.kind === 'open' && node.id.includes('.'))
+        .flatMap((node) =>
+          SIDES.filter((side) => side.name !== 'top').map((side) => ({
+            id: node.id,
+            side,
+            gap:
+              (sideOf(rectsNested, parentOf(node.id), side.index) -
+                sideOf(rectsNested, node.id, side.index)) *
+              side.out,
+          })),
+        )
+        .filter((candidate) => candidate.gap > 2)
+        .sort((a, b) => a.gap - b.gap);
+      if (inner === undefined) throw new Error('no open group inside another to resize');
+      const OUTER = parentOf(inner.id);
+      const FAR = 80;
+      const beyond = await dragControl(
+        inner.id,
+        `line.${inner.side.name}`,
+        inner.side.axis === 0
+          ? { x: (inner.gap + FAR) * inner.side.out, y: 0 }
+          : { x: 0, y: (inner.gap + FAR) * inner.side.out },
+      );
+      const grownInside = beyond !== null && (await counted(0, 1));
+      await frames();
+      const rectsBeyond = await rects();
+      const storedBeyond = await stored();
+      const headerBottom = () =>
+        /** @type {Promise<number>} */ (
+          evaluate(
+            `document.querySelector(${JSON.stringify(`${nodeOf(OUTER)} .arch-group-header`)}).getBoundingClientRect().bottom`,
+          )
+        );
+      const upwards = await dragControl(inner.id, 'line.top', {
+        x: 0,
+        y: -(sideOf(rectsBeyond, inner.id, 1) - sideOf(rectsBeyond, OUTER, 1) + FAR),
+      });
+      const grownUp = upwards !== null && (await storedChanges(storedBeyond));
+      await frames();
+      const rectsUp = await rects();
+      const titleBottom = await headerBottom();
+      check(
+        'a group inside another cannot be grown beyond it: its edge ends on the border of the group around it, upwards below the title bar of that group, and the group around it keeps its size',
+        beyond !== null &&
+          grownInside &&
+          Math.abs(
+            sideOf(rectsBeyond, inner.id, inner.side.index) -
+              sideOf(rectsBeyond, OUTER, inner.side.index),
+          ) <= 1.5 &&
+          sameNumbers(rectsBeyond[OUTER], beyond.before[OUTER]) &&
+          shifted(beyond.before, rectsBeyond, others(beyond.before, inner.id, true)).length === 0 &&
+          upwards !== null &&
+          grownUp &&
+          sideOf(rectsUp, inner.id, 1) < sideOf(upwards.before, inner.id, 1) - 1 &&
+          Math.abs(sideOf(rectsUp, inner.id, 1) - titleBottom) <= 2 &&
+          sameNumbers(rectsUp[OUTER], upwards.before[OUTER]),
+        {
+          inner: { id: inner.id, side: inner.side.name, gap: inner.gap },
+          box: rectsBeyond[inner.id],
+          around: rectsBeyond[OUTER],
+          top: sideOf(rectsUp, inner.id, 1),
+          titleBottom,
+        },
+      );
+      await resetByHand();
+
+      // Closed up, a size belongs to one arrangement, as a moved position does: another set of
+      // closed groups, the map without rows and a filtered map each have their own.
+      const OTHER = 'platform';
+      await closeUp(true);
+      await pinLod('components');
+      await fit();
+      const arrangementSet = await attr('data-arrangement');
+      /** Width and height of a box of the canvas. */
+      const sizeOf = async (/** @type {string} */ id) => ((await canvasBoxes())[id] ?? []).slice(2);
+      /** Closes or opens another group by its chevron and waits for the arrangement that follows. */
+      const otherClosed = async (/** @type {boolean} */ closed) => {
+        await centreOn(OTHER);
+        await click(`${nodeOf(OTHER)} .arch-chevron`);
+        await until(
+          `window.__smoke.attr('data-arrangement') ${closed ? '!==' : '==='} ${JSON.stringify(arrangementSet)} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+          closed ? 'the arrangement with another group closed' : 'the first arrangement again',
+        );
+        await settled();
+      };
+      await otherClosed(true);
+      const computedElsewhere = await sizeOf(FRESH);
+      await otherClosed(false);
+      const computedHere = await sizeOf(FRESH);
+      const setHere = await dragControl(FRESH, 'line.right', { x: 80, y: 0 });
+      const resizedHere = setHere !== null && (await counted(0, 1));
+      await frames();
+      const sizeHere = await sizeOf(FRESH);
+      await otherClosed(true);
+      const elsewhere = { size: await sizeOf(FRESH), resized: await resizedCount() };
+      await otherClosed(false);
+      const hereAgain = { size: await sizeOf(FRESH), resized: await resizedCount() };
+      check(
+        'closed up, a size set by hand belongs to the arrangement it was set in: with another group closed the group has the computed size, back in the first arrangement the size set',
+        arrangementSet !== 'full' &&
+          resizedHere &&
+          (sizeHere[0] ?? NaN) > (computedHere[0] ?? NaN) + 20 &&
+          sameNumbers(elsewhere.size, computedElsewhere, 0.5) &&
+          elsewhere.resized === '0' &&
+          sameNumbers(hereAgain.size, sizeHere, 0.5) &&
+          hereAgain.resized === '1',
+        { arrangementSet, computedHere, sizeHere, computedElsewhere, elsewhere, hereAgain },
+      );
+      await showRows(false);
+      const withoutRows = await resizedCount();
+      await showRows(true);
+      const withRows = { size: await sizeOf(FRESH), resized: await resizedCount() };
+      await filterMode();
+      const EPIC = 'workitem:1001';
+      await chooseOption('#focus-select', EPIC);
+      await untilFiltered(EPIC);
+      const onFiltered = await resizedCount();
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await click('#focus-clear');
+      await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+      await untilFiltered(null);
+      const onWhole = { size: await sizeOf(FRESH), resized: await resizedCount() };
+      check(
+        'a size set by hand is not on the map without rows nor on a filtered map, and is back with the rows and on the whole map',
+        resizedHere &&
+          withoutRows === '0' &&
+          withRows.resized === '1' &&
+          sameNumbers(withRows.size, sizeHere, 0.5) &&
+          onFiltered === '0' &&
+          onWhole.resized === '1' &&
+          sameNumbers(onWhole.size, sizeHere, 0.5),
+        { sizeHere, withoutRows, withRows, onFiltered, onWhole },
+      );
+      await showControl('#reset-positions');
+      await resetByHand();
+      await closeUp(false);
+      await unlock(false);
+
+      // --- Heat and progress of what is drawn: an open group counts what no box in it shows ---
+      await expandAll();
+      await setSetting('heat', true);
+      await setSetting('progress', true);
+      await until(
+        `window.__smoke.count('.arch-heat-left') > 0 && window.__smoke.count('.arch-progress') > 0`,
+        'the heat strips and the progress bars',
+      );
+      const lensFigures = () =>
+        /** @type {Promise<{ strips: HeatStrip[], bars: ProgressBar[] }>} */ (
+          evaluate(`window.__smoke.lensFigures()`)
+        );
+      const sum = (/** @type {number[]} */ values) =>
+        values.reduce((total, value) => total + value, 0);
+      /** @type {{ level: string, open: number, items: number }[]} */
+      const perLevel = [];
+      for (const level of ['domains', 'components', 'subcomponents']) {
+        await pinLod(level);
+        const figures = await lensFigures();
+        perLevel.push({
+          level,
+          open: sum(figures.strips.map((strip) => strip.heat)),
+          items: sum(figures.bars.map((bar) => bar.total)),
+        });
+      }
+      check(
+        'heat strips and progress bars count every item on one box: their sums are the same at the Domains, the Components and the Subcomponents level',
+        perLevel.length === 3 &&
+          perLevel.every(
+            (figures) =>
+              figures.open > 0 &&
+              figures.items > 0 &&
+              figures.open === perLevel[0]?.open &&
+              figures.items === perLevel[0]?.items,
+          ),
+        perLevel,
+      );
+
+      // Still at the Subcomponents level: every group is open.
+      await fit();
+      const figuresOpen = await lensFigures();
+      const marksOf = (
+        /** @type {{ strips: HeatStrip[], bars: ProgressBar[] }} */ figures,
+        /** @type {string} */ id,
+      ) =>
+        figures.strips.filter((strip) => strip.id === id).length +
+        figures.bars.filter((bar) => bar.id === id).length;
+      check(
+        'an open group with nothing of its own has no heat strip and no progress bar, while a group in it with work of its own has both',
+        marksOf(figuresOpen, 'backoffice') === 0 &&
+          (await countOf(
+            `${nodeOf('backoffice')} .arch-heat, ${nodeOf('backoffice')} .arch-progress`,
+          )) === 0 &&
+          marksOf(figuresOpen, 'backoffice.config-manager') === 2,
+        {
+          backoffice: marksOf(figuresOpen, 'backoffice'),
+          inside: marksOf(figuresOpen, 'backoffice.config-manager'),
+        },
+      );
+      const CLOSED = 'storefront.web';
+      const heatOf = (/** @type {{ strips: HeatStrip[] }} */ figures, /** @type {string} */ id) =>
+        figures.strips.find((strip) => strip.id === id)?.heat ?? 0;
+      const collapsedLenses = Number(await attr('data-collapsed-count'));
+      await centreOn(CLOSED);
+      await click(`${nodeOf(CLOSED)} .arch-chevron`);
+      await until(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedLenses + 1}'`,
+        `${CLOSED} closed`,
+      );
+      await settled();
+      const figuresClosed = await lensFigures();
+      const insideClosed = figuresOpen.strips.filter((strip) => strip.id.startsWith(`${CLOSED}.`));
+      const outsideClosed = figuresOpen.strips.filter(
+        (strip) => strip.id !== CLOSED && !strip.id.startsWith(`${CLOSED}.`),
+      );
+      const changedStrips = outsideClosed.filter((strip) => {
+        const now = figuresClosed.strips.find((other) => other.id === strip.id);
+        return !now || now.heat !== strip.heat || Math.abs(now.height - strip.height) > 0.5;
+      });
+      check(
+        'closing a group adds the open work of the boxes inside it to its heat strip; every other strip keeps its figure and its height',
+        insideClosed.length > 0 &&
+          heatOf(figuresOpen, CLOSED) > 0 &&
+          heatOf(figuresClosed, CLOSED) ===
+            heatOf(figuresOpen, CLOSED) + sum(insideClosed.map((strip) => strip.heat)) &&
+          outsideClosed.length > 0 &&
+          changedStrips.length === 0,
+        {
+          open: heatOf(figuresOpen, CLOSED),
+          inside: insideClosed.map((strip) => [strip.id, strip.heat]),
+          closed: heatOf(figuresClosed, CLOSED),
+          changedStrips,
+        },
+      );
+      await click(`${nodeOf(CLOSED)} .arch-chevron`);
+      await until(
+        `window.__smoke.attr('data-collapsed-count') === '${collapsedLenses}'`,
+        `${CLOSED} open again`,
+      );
+      await settled();
+
+      await pinLod('components');
+      await fit();
+      const figuresComponents = await lensFigures();
+      const partStrip = figuresComponents.strips.find((strip) => strip.id === 'storefront');
+      const partBar = figuresComponents.bars.find((bar) => bar.id === 'storefront');
+      check(
+        'an open group with work of its own shows that figure, less than the work in it in all, and its tooltip states both',
+        partStrip !== undefined &&
+          partStrip.all !== null &&
+          partStrip.heat > 0 &&
+          partStrip.heat < partStrip.all &&
+          partStrip.title.includes('in all') &&
+          partBar !== undefined &&
+          partBar.totalAll !== null &&
+          partBar.doneAll !== null &&
+          partBar.total < partBar.totalAll &&
+          partBar.title.includes('in all'),
+        { partStrip, partBar },
+      );
+      await click(`${nodeOf('storefront')} .arch-group-header`);
+      await untilSelection('node:storefront');
+      const panelGroup = {
+        work: await text('#detail-work'),
+        drawn: await text('#detail-work-drawn'),
+      };
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await fit();
+      await click(nodeOf('data.event-store'));
+      await untilSelection('node:data.event-store');
+      const panelLeaf = {
+        work: await countOf('#detail-work'),
+        drawn: await countOf('#detail-work-drawn'),
+      };
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      check(
+        'the node panel states the work of a group with everything inside it and, on a line of its own, what its box on the map shows; a leaf has no such line',
+        partStrip !== undefined &&
+          String(panelGroup.work).startsWith(`${partStrip.all} open item`) &&
+          String(panelGroup.drawn).startsWith('On the map:') &&
+          panelLeaf.work === 1 &&
+          panelLeaf.drawn === 0,
+        { panelGroup, panelLeaf },
+      );
+
+      // Filter leaves boxes out: what they hold is counted on the drawn group around them.
+      await pinLod('subcomponents');
+      await filterMode();
+      await chooseOption('#focus-select', EPIC);
+      await untilFiltered(EPIC);
+      await until(
+        `window.__smoke.attr('data-lod') === 'subcomponents'`,
+        'the level kept by Filter',
+      );
+      const figuresFiltered = await lensFigures();
+      const filteredStrip = figuresFiltered.strips.find((strip) => strip.id === 'backoffice');
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await click('#focus-clear');
+      await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+      await untilFiltered(null);
+      const figuresWhole = await lensFigures();
+      check(
+        'on a filtered map a group counts the work of the boxes inside it that Filter leaves out; on the whole map, at the same level, it has no strip',
+        filteredStrip !== undefined &&
+          filteredStrip.heat > 0 &&
+          (await attr('data-lod')) === 'subcomponents' &&
+          figuresWhole.strips.every((strip) => strip.id !== 'backoffice'),
+        { filteredStrip, whole: heatOf(figuresWhole, 'backoffice') },
+      );
+
+      check(
+        'nothing failed in the page and nothing broke its security policy while boxes were moved and resized by hand',
+        pageErrors.length === handStart.errors && violations.length === handStart.violations,
+        {
+          errors: pageErrors.slice(handStart.errors, handStart.errors + 5),
+          violations: violations.slice(handStart.violations, handStart.violations + 5),
+        },
+      );
+
+      // Back to the state the block started from.
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      if ((await attr('data-focus-mode')) !== handStart.focusMode) {
+        await click('#focus-mode');
+        await until(
+          `window.__smoke.attr('data-focus-mode') === '${handStart.focusMode}'`,
+          'Focus mode as before',
+        );
+      }
+      await setSetting('heat', handStart.heat === 'true');
+      await setSetting('progress', handStart.progress === 'true');
+      await setSetting('compact-collapsed', handStart.shrink === 'true');
+      await closeUp(handStart.closeGaps === 'true');
+      await showRows(handStart.rows === 'true');
+      await evaluate(
+        `document.querySelector('#views-list li[data-view-name="${HAND_VIEW}"] .views-apply').click()`,
+      );
+      await until(
+        `window.__smoke.attr('data-lod-mode') === ${JSON.stringify(handStart.lodMode)} && window.__smoke.attr('data-collapsed-count') === ${JSON.stringify(handStart.collapsed)} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        'the view the block started from',
+      );
+      await settled();
+      await evaluate(
+        `document.querySelector('#views-list li[data-view-name="${HAND_VIEW}"] .views-delete').click()`,
+      );
+      await until(
+        `window.__smoke.count('#views-list li[data-view-name="${HAND_VIEW}"]') === 0`,
+        'the view to come back to deleted',
+      );
+      if ((await attr('data-panel-tab')) !== handStart.tab) {
+        await click(`#tab-${handStart.tab}`);
+        await until(
+          `window.__smoke.attr('data-panel-tab') === '${handStart.tab}'`,
+          'the tab shown before',
+        );
+      }
+      if ((await attr('data-panel-collapsed')) !== handStart.panelCollapsed) {
+        await togglePanel(handStart.panelCollapsed === 'true');
+      }
     }
 
     // --- Edge-kind filter ---------------------------------------------------------------------

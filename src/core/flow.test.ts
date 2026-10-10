@@ -16,15 +16,18 @@ import {
   edgeCurve,
   edgeLabelText,
   facingSides,
+  GROUP_DRAG_HANDLE,
   hiddenSamples,
   LANE_GAP,
   nearestEdgeAt,
+  openGroupAt,
   routeCacheSize,
   OPPOSITE_SIDE,
   routeEdge,
   sidePoint,
   sourceHandleId,
   targetHandleId,
+  TITLE_DRAG_CLASS,
   UNASSIGNED_NODE_ID,
   Z_INDEX,
   type ArchFlowNode,
@@ -34,20 +37,32 @@ import {
   type FlowGraph,
   type FlowNode,
   type FlowView,
+  type Point,
   type Side,
 } from './flow';
 import { arrangedLayout } from './arrange';
+import { FADED_CLASS, focusFlow } from './focus';
 import {
   clearLayoutCache,
   computeLayout,
   computeLayoutUncached,
   type LayoutResult,
 } from './layout';
-import { layoutViolations, overlaps, parseOk } from './layout/test-helpers';
+import { layoutViolations, overlaps, parseOk, rectOf } from './layout/test-helpers';
 import type { Rect } from './layout/types';
 import type { ArchitectureModel } from './model';
 import { miniMapNodes } from './minimap';
-import { groupIds, visibleNodes } from './visibility';
+import {
+  allResizeLimits,
+  applyHandOverrides,
+  EDGES,
+  movedByHand,
+  NO_HAND_OVERRIDES,
+  resizedByHand,
+  type EdgeName,
+} from './positions';
+import { DIMMED_CLASS, highlightFlow } from './selection';
+import { groupIds, LOD_LEVELS, visibleNodes } from './visibility';
 import { buildWorkItemOverlay, subtreeWorkItemCounts } from './workItemOverlay';
 import { parseWorkItems } from './workitems';
 
@@ -898,5 +913,388 @@ describe('drawnNodeRects', () => {
     }
     // Closed up, a closed group that spans rows is smaller than the column the layout gives it.
     expect(inColumn).toBeGreaterThan(0);
+  });
+});
+
+describe('buildFlow with the positions unlocked', () => {
+  let model: ArchitectureModel;
+  let layout: LayoutResult;
+  beforeAll(async () => {
+    model = parseOk(exampleYaml);
+    layout = await computeLayoutUncached(model);
+  });
+
+  const classesOf = (node: FlowNode): string[] => (node.className ?? '').split(' ').filter(Boolean);
+  /** The groups drawn with a child: the open ones. */
+  const openGroups = (flow: FlowGraph): string[] => {
+    const parents = new Set(archNodes(flow).map((node) => node.parentId));
+    return archNodes(flow)
+      .filter((node) => parents.has(node.id))
+      .map((node) => node.id);
+  };
+  /** The nodes that only a part of them picks up, and the nodes whose class says so. */
+  const byTitle = (flow: FlowGraph): string[] =>
+    archNodes(flow)
+      .filter((node) => node.dragHandle !== undefined)
+      .map((node) => node.id);
+  const marked = (flow: FlowGraph): string[] =>
+    flow.nodes.filter((node) => classesOf(node).includes(TITLE_DRAG_CLASS)).map((node) => node.id);
+  const resizable = (flow: FlowGraph): string[] =>
+    archNodes(flow)
+      .filter((node) => node.data.resize !== undefined)
+      .map((node) => node.id);
+  const within = (id: string, group: string): boolean => id === group || id.startsWith(`${group}.`);
+
+  it('lets an open group be picked up by its title bar only, and every other box anywhere', () => {
+    expect(GROUP_DRAG_HANDLE).toBe('.arch-group-header');
+    expect(TITLE_DRAG_CLASS).toBe('arch-title-drag');
+    const flow = buildFlow(model, layout, { draggable: true, lodLevel: 'subcomponents' });
+    const open = openGroups(flow);
+    expect(open).toEqual(groupIds(model));
+    expect(open.length).toBeGreaterThan(10);
+    for (const node of archNodes(flow)) {
+      const isOpen = open.includes(node.id);
+      expect(node.draggable, node.id).toBe(true);
+      expect(node.dragHandle, node.id).toBe(isOpen ? GROUP_DRAG_HANDLE : undefined);
+      expect(node.className, node.id).toBe(isOpen ? TITLE_DRAG_CLASS : undefined);
+      expect(Object.keys(node).includes('dragHandle'), node.id).toBe(isOpen);
+    }
+    const bands = flow.nodes.filter(isBand);
+    expect(bands.length).toBeGreaterThan(0);
+    for (const band of bands) {
+      expect(Object.keys(band)).not.toContain('dragHandle');
+      expect(band.className).toBe('arch-band-node');
+    }
+  });
+
+  it('picks a closed group up anywhere: collapsed by hand, closed by the level, or drawn shrunk', () => {
+    const view = { draggable: true, lodLevel: 'subcomponents' } as const;
+    const all = groupIds(model);
+    const component = [...model.nodes.values()].find(
+      (node) => node.level === 1 && node.childIds.length > 0,
+    );
+    const [domain] = model.rootIds;
+    if (!component || domain === undefined) throw new Error('no domain, no component');
+    for (const id of [domain, component.id]) {
+      const closed = buildFlow(model, layout, { ...view, collapsedIds: new Set([id]) });
+      expect(byTitle(closed)).toEqual(all.filter((other) => !within(other, id)));
+      expect(marked(closed)).toEqual(byTitle(closed));
+      // Opened again, it has both again.
+      const opened = buildFlow(model, layout, { ...view, collapsedIds: new Set() });
+      expect(byTitle(opened)).toEqual(all);
+      expect(marked(opened)).toEqual(all);
+    }
+    // Closed by the level: no group at Domains, only the domains at Components.
+    const domains = buildFlow(model, layout, { draggable: true, lodLevel: 'domains' });
+    expect(byTitle(domains)).toEqual([]);
+    expect(marked(domains)).toEqual([]);
+    const components = buildFlow(model, layout, { draggable: true, lodLevel: 'components' });
+    expect(byTitle(components)).toEqual(all.filter((id) => model.rootIds.includes(id)));
+    expect(marked(components)).toEqual(byTitle(components));
+    expect(archNodes(components).some((node) => node.data.collapsed)).toBe(true);
+    // Drawn shrunk.
+    const shrunk = buildFlow(model, layout, {
+      ...view,
+      lodLevel: 'components',
+      compactCollapsed: true,
+    });
+    const small = archNodes(shrunk).filter((node) => node.data.compact);
+    expect(small.length).toBeGreaterThan(0);
+    for (const node of archNodes(shrunk).filter((other) => other.data.collapsed)) {
+      expect(node.dragHandle, node.id).toBeUndefined();
+      expect(node.className, node.id).toBeUndefined();
+      expect(node.draggable, node.id).toBe(true);
+    }
+    // Locked: no node has either, at any level.
+    for (const lodLevel of LOD_LEVELS) {
+      const locked = buildFlow(model, layout, { lodLevel });
+      expect(byTitle(locked)).toEqual([]);
+      expect(marked(locked)).toEqual([]);
+    }
+  });
+
+  it('keeps the title bar as the grip of an open group that a selection dims or a focus pales', () => {
+    const flow = buildFlow(model, layout, { draggable: true });
+    const leaf = archNodes(flow).find((node) => node.type === 'leaf' && node.data.level === 2);
+    if (!leaf || leaf.parentId === undefined) throw new Error('no subcomponent');
+    // The component selected: it stays lit with what is in it, the other groups are dimmed.
+    const dimmed = highlightFlow(flow, { type: 'node', id: leaf.parentId });
+    const paled = focusFlow(model, flow, {
+      nodes: new Set([leaf.id]),
+      edges: new Set(),
+      itemIds: new Set(),
+    });
+    const before = new Map(archNodes(flow).map((node) => [node.id, node]));
+    for (const [shown, extra] of [
+      [dimmed, DIMMED_CLASS],
+      [paled, FADED_CLASS],
+    ] as const) {
+      let both = 0;
+      let untouched = 0;
+      for (const node of archNodes(shown)) {
+        const was = before.get(node.id);
+        expect(node.dragHandle, node.id).toBe(was?.dragHandle);
+        if (was?.dragHandle === undefined) continue;
+        if (classesOf(node).includes(extra)) {
+          both += 1;
+          expect(node.className, node.id).toBe(`${TITLE_DRAG_CLASS} ${extra}`);
+        } else {
+          untouched += 1;
+          expect(node.className, node.id).toBe(TITLE_DRAG_CLASS);
+        }
+      }
+      expect(both, extra).toBeGreaterThan(0);
+      expect(untouched, extra).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives the resize limits to exactly the open groups, and only while unlocked', () => {
+    const limits = allResizeLimits(model, layout, NO_HAND_OVERRIDES);
+    const [first, second] = [...limits.keys()];
+    if (first === undefined || second === undefined) throw new Error('no two groups');
+    const resize = { limits, resized: new Set([first]) };
+    const flow = buildFlow(model, layout, { draggable: true, resize });
+    expect(resizable(flow)).toEqual(groupIds(model));
+    expect(resizable(flow)).toEqual(openGroups(flow));
+    for (const node of archNodes(flow)) {
+      const own = limits.get(node.id);
+      expect(node.data.resize, node.id).toEqual(
+        node.type === 'group' && own ? { ...own, resized: node.id === first } : undefined,
+      );
+    }
+    for (const band of flow.nodes.filter(isBand)) {
+      expect(Object.keys(band.data)).not.toContain('resize');
+    }
+    // Only with both: unlocked, and limits handed in; and only for a group that has limits.
+    expect(resizable(buildFlow(model, layout, { resize }))).toEqual([]);
+    expect(resizable(buildFlow(model, layout, { draggable: true }))).toEqual([]);
+    const one = {
+      limits: new Map([...limits].filter(([id]) => id === second)),
+      resized: new Set<string>(),
+    };
+    const single = buildFlow(model, layout, { draggable: true, resize: one });
+    expect(resizable(single)).toEqual([second]);
+    expect(archNodes(single).find((node) => node.id === second)?.data.resize?.resized).toBe(false);
+    // Never on a closed group: collapsed by hand, closed by the level, drawn shrunk.
+    const collapsed = buildFlow(model, layout, {
+      draggable: true,
+      resize,
+      collapsedIds: new Set([first]),
+    });
+    expect(resizable(collapsed)).toEqual(groupIds(model).filter((id) => !within(id, first)));
+    expect(resizable(collapsed)).toEqual(openGroups(collapsed));
+    const domains = buildFlow(model, layout, { draggable: true, resize, lodLevel: 'domains' });
+    expect(resizable(domains)).toEqual([]);
+    for (const compactCollapsed of [false, true]) {
+      const components = buildFlow(model, layout, {
+        draggable: true,
+        resize,
+        lodLevel: 'components',
+        compactCollapsed,
+      });
+      expect(resizable(components)).toEqual(openGroups(components));
+      expect(resizable(components)).toEqual(
+        groupIds(model).filter((id) => model.rootIds.includes(id)),
+      );
+      expect(archNodes(components).some((node) => node.data.compact)).toBe(compactCollapsed);
+    }
+  });
+
+  it('draws a resized group as the layout has it: open, closed in the resized box, shrunk in its middle', () => {
+    const plain = buildFlow(model, layout, { lodLevel: 'domains' });
+    const id = model.rootIds.find((root) =>
+      plain.edges.some((edge) => edge.source === root || edge.target === root),
+    );
+    const was = id === undefined ? undefined : layout.absolute.get(id);
+    if (id === undefined || !was) throw new Error('no domain with an edge');
+    const routed = routeCacheSize(layout);
+    const by = resizedByHand(NO_HAND_OVERRIDES, model, layout, id, {
+      left: 60,
+      right: 120,
+      bottom: 40,
+    });
+    const resized = applyHandOverrides(model, layout, by);
+    const box = { x: was.x - 60, y: was.y, width: was.width + 180, height: was.height + 40 };
+    expect(resized.absolute.get(id)).toEqual(box);
+
+    // Open: every node where the layout has it, at the size the layout has it.
+    for (const lodLevel of LOD_LEVELS) {
+      for (const node of archNodes(buildFlow(model, resized, { lodLevel }))) {
+        const placed = resized.rects.get(node.id);
+        expect({ ...node.position, width: node.width, height: node.height }, node.id).toEqual(
+          placed,
+        );
+        expect(node.style, node.id).toEqual({ width: node.width, height: node.height });
+      }
+    }
+
+    // Closed: the box is the resized one, and every edge ends on its border.
+    const closed = buildFlow(model, resized, { lodLevel: 'domains' });
+    const ends = closed.edges.flatMap((edge) => [
+      ...(edge.source === id ? [edge.data.curve.p0] : []),
+      ...(edge.target === id ? [edge.data.curve.p3] : []),
+    ]);
+    expect(ends.length).toBeGreaterThan(0);
+    for (const end of ends) {
+      const onSide =
+        Math.abs(end.x - box.x) < 1e-6 ||
+        Math.abs(end.x - box.x - box.width) < 1e-6 ||
+        Math.abs(end.y - box.y) < 1e-6 ||
+        Math.abs(end.y - box.y - box.height) < 1e-6;
+      expect(onSide, JSON.stringify(end)).toBe(true);
+      expect(end.x).toBeGreaterThanOrEqual(box.x - 1e-6);
+      expect(end.x).toBeLessThanOrEqual(box.x + box.width + 1e-6);
+      expect(end.y).toBeGreaterThanOrEqual(box.y - 1e-6);
+      expect(end.y).toBeLessThanOrEqual(box.y + box.height + 1e-6);
+    }
+
+    // Shrunk: the small box sits in the middle of the resized one.
+    const shrunk = buildFlow(model, resized, { lodLevel: 'domains', compactCollapsed: true });
+    const small = archNodes(shrunk).find((node) => node.id === id);
+    if (!small) throw new Error('not drawn');
+    expect(small.data.compact).toBe(true);
+    expect(small.width).toBeLessThan(box.width);
+    expect(
+      Math.abs(small.position.x + small.width / 2 - (box.x + box.width / 2)),
+    ).toBeLessThanOrEqual(0.5);
+    expect(
+      Math.abs(small.position.y + small.height / 2 - (box.y + box.height / 2)),
+    ).toBeLessThanOrEqual(0.5);
+
+    // The routes worked out for the layout before the resize are those it had.
+    expect(routeCacheSize(layout)).toBe(routed);
+    expect(routeCacheSize(resized)).toBeGreaterThan(0);
+  });
+});
+
+describe('openGroupAt', () => {
+  let model: ArchitectureModel;
+  let layout: LayoutResult;
+  beforeAll(async () => {
+    model = parseOk(exampleYaml);
+    layout = await computeLayoutUncached(model);
+  });
+
+  const centre = (box: Rect): Point => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  /** A point in the padding of a group: beside every child. */
+  const inPadding = (box: Rect): Point => ({ x: box.x + 4, y: box.y + box.height - 4 });
+
+  it('finds the innermost group drawn open that holds the point', () => {
+    const flow = buildFlow(model, layout);
+    const leaf = [...model.nodes.values()].find((node) => node.level === 2);
+    const component = [...model.nodes.values()].find(
+      (node) => node.level === 1 && node.childIds.length > 0,
+    );
+    const [domain] = model.rootIds;
+    if (!leaf || !component || domain === undefined) throw new Error('no nested nodes');
+    // In a leaf of a component: the component, not the domain around it.
+    expect(openGroupAt(centre(rectOf(layout, leaf.id)), flow.nodes)).toBe(leaf.parentId);
+    // In the padding of a group: that group. Its border belongs to it.
+    for (const id of groupIds(model)) {
+      const box = rectOf(layout, id);
+      expect(openGroupAt(inPadding(box), flow.nodes), id).toBe(id);
+    }
+    const box = rectOf(layout, domain);
+    const corner = { x: box.x + box.width, y: box.y + box.height };
+    expect(openGroupAt(corner, flow.nodes)).toBe(domain);
+    expect(openGroupAt({ x: corner.x + 1, y: corner.y }, flow.nodes)).toBeUndefined();
+    expect(openGroupAt({ x: corner.x, y: corner.y + 1 }, flow.nodes)).toBeUndefined();
+    // Outside every group, and in the label gutter of a row band.
+    expect(openGroupAt({ x: -50, y: -50 }, flow.nodes)).toBeUndefined();
+    const beyond = { x: layout.bounds.width + 50, y: layout.bounds.height + 50 };
+    expect(openGroupAt(beyond, flow.nodes)).toBeUndefined();
+    const [band] = layout.rows;
+    if (!band) throw new Error('no rows');
+    expect(layout.gutterWidth).toBeGreaterThan(8);
+    const inBand = { x: band.x + 4, y: band.y + band.height / 2 };
+    expect(openGroupAt(inBand, flow.nodes)).toBeUndefined();
+    expect(openGroupAt(inBand, [])).toBeUndefined();
+  });
+
+  it('never gives a closed group: the open group around it, or none', () => {
+    const [domain] = model.rootIds;
+    const component = [...model.nodes.values()].find(
+      (node) => node.level === 1 && node.childIds.length > 0,
+    );
+    if (domain === undefined || !component) throw new Error('no domain, no component');
+    const closedDomain = buildFlow(model, layout, { collapsedIds: new Set([domain]) });
+    expect(openGroupAt(centre(rectOf(layout, domain)), closedDomain.nodes)).toBeUndefined();
+    const closedComponent = buildFlow(model, layout, { collapsedIds: new Set([component.id]) });
+    const inComponent = inPadding(rectOf(layout, component.id));
+    expect(openGroupAt(inComponent, buildFlow(model, layout).nodes)).toBe(component.id);
+    expect(openGroupAt(inComponent, closedComponent.nodes)).toBe(component.parentId);
+    for (const compactCollapsed of [false, true]) {
+      const domains = buildFlow(model, layout, { lodLevel: 'domains', compactCollapsed });
+      for (const id of groupIds(model)) {
+        expect(openGroupAt(centre(rectOf(layout, id)), domains.nodes), id).toBeUndefined();
+      }
+    }
+  });
+
+  it('of two open groups at the same depth takes the later one, which is drawn on top', () => {
+    const [first, second] = model.rootIds;
+    if (first === undefined || second === undefined) throw new Error('no two domains');
+    // Each domain in turn moved onto the corner of the other: the title bars lie on each other.
+    for (const [movedId, ontoId] of [
+      [first, second],
+      [second, first],
+    ] as const) {
+      const from = rectOf(layout, movedId);
+      const onto = rectOf(layout, ontoId);
+      const by = movedByHand(NO_HAND_OVERRIDES, model, layout, movedId, {
+        x: onto.x - from.x,
+        y: onto.y - from.y,
+      });
+      const stacked = applyHandOverrides(model, layout, by);
+      expect(rectOf(stacked, movedId)).toMatchObject({ x: onto.x, y: onto.y });
+      const inBoth = { x: onto.x + 4, y: onto.y + 4 };
+      expect(openGroupAt(inBoth, buildFlow(model, stacked).nodes)).toBe(second);
+    }
+  });
+
+  it('follows a group moved by hand and a group resized by hand', () => {
+    const [domain] = model.rootIds;
+    if (domain === undefined) throw new Error('no domain');
+    const was = rectOf(layout, domain);
+    const moved = applyHandOverrides(
+      model,
+      layout,
+      movedByHand(NO_HAND_OVERRIDES, model, layout, domain, {
+        x: layout.bounds.width + 500 - was.x,
+        y: 0,
+      }),
+    );
+    const now = rectOf(moved, domain);
+    expect(now.x).toBe(layout.bounds.width + 500);
+    const movedFlow = buildFlow(model, moved);
+    expect(openGroupAt(inPadding(was), buildFlow(model, layout).nodes)).toBe(domain);
+    expect(openGroupAt(inPadding(was), movedFlow.nodes)).toBeUndefined();
+    expect(openGroupAt(inPadding(now), movedFlow.nodes)).toBe(domain);
+
+    // A group grown into free room of its parent: the middle of the strip it gained.
+    const gained = (box: Rect, edge: EdgeName, room: number): Point => {
+      const middle = centre(box);
+      if (edge === 'left') return { x: box.x - room / 2, y: middle.y };
+      if (edge === 'right') return { x: box.x + box.width + room / 2, y: middle.y };
+      if (edge === 'top') return { x: middle.x, y: box.y - room / 2 };
+      return { x: middle.x, y: box.y + box.height + room / 2 };
+    };
+    const before = buildFlow(model, layout).nodes;
+    let followed = 0;
+    for (const [id, limits] of allResizeLimits(model, layout, NO_HAND_OVERRIDES)) {
+      const parentId = model.nodes.get(id)?.parentId;
+      if (parentId === undefined) continue;
+      for (const edge of EDGES) {
+        const room = limits.outward[edge];
+        const point = gained(rectOf(layout, id), edge, room);
+        // Room that no other group lies in.
+        if (room < 8 || openGroupAt(point, before) !== parentId) continue;
+        const by = resizedByHand(NO_HAND_OVERRIDES, model, layout, id, { [edge]: room });
+        const resized = applyHandOverrides(model, layout, by);
+        expect(openGroupAt(point, buildFlow(model, resized).nodes), `${id} ${edge}`).toBe(id);
+        followed += 1;
+      }
+    }
+    expect(followed).toBeGreaterThan(5);
   });
 });

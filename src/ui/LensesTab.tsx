@@ -57,7 +57,11 @@ export function LensesTab({
           />
           <span>
             Heat by work
-            <small> (the sides of a box glow with the open work left in it)</small>
+            <small>
+              {' '}
+              (the sides of a box glow with the open work left in it; an open group counts only what
+              no box inside it shows)
+            </small>
           </span>
         </label>
       )}
@@ -71,7 +75,11 @@ export function LensesTab({
           />
           <span>
             Progress bars
-            <small> (bottom edge: completed items over all, in the chosen iteration)</small>
+            <small>
+              {' '}
+              (bottom edge: completed items over all, in the chosen iteration; an open group counts
+              only what no box inside it shows)
+            </small>
           </span>
         </label>
       )}

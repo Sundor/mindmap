@@ -29,9 +29,11 @@ import {
 import {
   collapseAction,
   nearestEdgeAt,
+  openGroupAt,
   selectionOfRenderedEdge,
   viewportShowsMap,
   ZOOM_RANGE,
+  type EdgeGrowth,
   type FlowGraph,
   type Selection,
   type Size,
@@ -47,6 +49,7 @@ import type { AppEdge, AppNode } from './flowTypes';
 import { BandNode, GroupNode, LeafNode } from './nodes';
 import { GroupWorkItemLists } from './WorkItemBlock';
 import { NO_LENSES, NodeLensContext, type NodeLenses } from './nodeLensContext';
+import { ResizeContext, type ResizeActions } from './resizeContext';
 import { WorkItemCanvasContext, type WorkItemCanvas } from './workItemContext';
 
 const nodeTypes: NodeTypes = { group: GroupNode, leaf: LeafNode, band: BandNode };
@@ -65,6 +68,15 @@ function FitViewIcon() {
 
 /** How long the viewport must rest before it is reported (and stored), in milliseconds. */
 const VIEWPORT_SETTLE_MS = 250;
+
+/**
+ * By how much the resize handles of the groups are enlarged at `zoom`, so that they keep their
+ * size on the screen while the map gets smaller — up to three times: beyond that the handles of
+ * two neighbours would cover each other's boxes, and they shrink with the map.
+ */
+function unzoom(zoom: number): number {
+  return Math.min(3, Math.max(1, 1 / zoom));
+}
 
 /**
  * New nodes for the same layout, counted as measured at the size they are given for those still
@@ -101,10 +113,17 @@ export interface MapCanvasProps {
   readonly contentBounds: Size;
   /** The viewport came to rest somewhere else (pan, zoom, fit, programmatic move). */
   readonly onViewportSettled?: ((viewport: Viewport) => void) | undefined;
-  /** Positions unlocked: groups and nodes can be dragged; nothing else moves with them. */
+  /**
+   * Positions unlocked: groups and nodes can be dragged — an open group by its title bar, the
+   * rest of it is canvas — and open groups resized; nothing else moves with them.
+   */
   readonly positionsUnlocked?: boolean;
   /** A node was dropped `delta` (canvas pixels) away from where the flow draws it. */
   readonly onNodeMoved?: ((id: string, delta: Position) => void) | undefined;
+  /** The edges of a group were moved outward by `delta` (canvas pixels) by a handle or a key. */
+  readonly onNodeResized?: ((id: string, delta: Partial<EdgeGrowth>) => void) | undefined;
+  /** A group is to get the size of the layout back. */
+  readonly onNodeSizeReset?: ((id: string) => void) | undefined;
   /** What the nodes draw besides themselves: heat, progress, tint. */
   readonly lenses?: NodeLenses | undefined;
   /**
@@ -164,6 +183,8 @@ export function MapCanvas({
   onViewportSettled,
   positionsUnlocked = false,
   onNodeMoved,
+  onNodeResized,
+  onNodeSizeReset,
   lenses = NO_LENSES,
   onHoverNode,
   onStarted,
@@ -251,12 +272,60 @@ export function MapCanvas({
   // Flow keeps what it holds of a node for as long as it is given the very same object, and
   // `carryNodes` makes a new one of every node that has been measured. A flow that differs in
   // its edges alone (the edges of the box under the pointer shown) so leaves every node as it is.
+  // After a resize was reported (`resizeEnds` counts them) the nodes are put back from the flow
+  // whether or not it changed: while a handle is dragged React Flow sizes the group and moves
+  // what is in it in its own state, and of that nothing stays but what the flow says — the new
+  // flow when the report changed something, the one drawn before when it did not.
   const [shownFlow, setShownFlow] = useState(flow);
-  if (shownFlow !== flow) {
+  const [resizeEnds, setResizeEnds] = useState(0);
+  const [shownResizeEnds, setShownResizeEnds] = useState(0);
+  if (shownFlow !== flow || shownResizeEnds !== resizeEnds) {
     setShownFlow(flow);
-    if (flow.nodes !== shownFlow.nodes) setNodes((previous) => carryNodes(flow.nodes, previous));
+    setShownResizeEnds(resizeEnds);
+    if (flow.nodes !== shownFlow.nodes || shownResizeEnds !== resizeEnds) {
+      setNodes((previous) => carryNodes(flow.nodes, previous));
+    }
     if (flow.edges !== shownFlow.edges) setEdges(flow.edges);
   }
+
+  // What the resize handles of the groups report (ResizeContext). One object for as long as the
+  // canvas is mounted — a handle binds its drag anew whenever what it calls changes, and every
+  // change by hand gives the canvas other callbacks —, so the callbacks are read when a report
+  // comes.
+  const resizeReports = useRef({ onNodeResized, onNodeSizeReset });
+  useEffect(() => {
+    resizeReports.current = { onNodeResized, onNodeSizeReset };
+  }, [onNodeResized, onNodeSizeReset]);
+  const resizeActions = useMemo(
+    (): ResizeActions => ({
+      resize: (id, delta) => {
+        setResizeEnds((count) => count + 1);
+        resizeReports.current.onNodeResized?.(id, delta);
+      },
+      reset: (id) => {
+        setResizeEnds((count) => count + 1);
+        resizeReports.current.onNodeSizeReset?.(id);
+      },
+    }),
+    [],
+  );
+
+  // The handles keep their size on the screen while the map is zoomed out: the canvas says by
+  // how much they are enlarged, in a property the style sheet reads. Set on the element itself
+  // with every change of the zoom, so that zooming renders nothing.
+  useEffect(() => {
+    const element = container.current;
+    if (!positionsUnlocked || !element) return;
+    const set = (zoom: number) => element.style.setProperty('--unzoom', String(unzoom(zoom)));
+    set(store.getState().transform[2]);
+    const unsubscribe = store.subscribe((state, previous) => {
+      if (state.transform[2] !== previous.transform[2]) set(state.transform[2]);
+    });
+    return () => {
+      unsubscribe();
+      element.style.removeProperty('--unzoom');
+    };
+  }, [store, positionsUnlocked]);
 
   const onNodeClick = useCallback<NodeMouseHandler<AppNode>>(
     (_event, node) => {
@@ -281,7 +350,25 @@ export function MapCanvas({
     },
     [onSelect, screenToFlowPosition],
   );
-  const onPaneClick = useCallback(() => onSelect(undefined), [onSelect]);
+  // The nodes drawn, for a click on the canvas. Read when the click comes, like the edges above.
+  const drawnNodes = useRef(flow.nodes);
+  useEffect(() => {
+    drawnNodes.current = flow.nodes;
+  }, [flow.nodes]);
+  // While the positions are unlocked, an open group takes the pointer at its title bar only: a
+  // click anywhere else inside it arrives here, and selects the group it is in.
+  const onPaneClick = useCallback(
+    (event: ReactMouseEvent) => {
+      const group = positionsUnlocked
+        ? openGroupAt(
+            screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+            drawnNodes.current,
+          )
+        : undefined;
+      onSelect(group === undefined ? undefined : { type: 'node', id: group });
+    },
+    [onSelect, positionsUnlocked, screenToFlowPosition],
+  );
   const onSelectNode = useCallback((id: string) => onSelect({ type: 'node', id }), [onSelect]);
 
   // A drag moves the node inside React Flow's own state; the drop is reported as an offset
@@ -345,7 +432,11 @@ export function MapCanvas({
   );
 
   const onNodeDoubleClick = useCallback<NodeMouseHandler<AppNode>>(
-    (_event, node) => {
+    (event, node) => {
+      // A double-click on a resize handle gives the group its size back; it does not close it.
+      if (event.target instanceof Element && event.target.closest('.react-flow__resize-control')) {
+        return;
+      }
       // No toggle on a group closed only by the level of detail (see `collapseAction`).
       if (node.type === 'group' && collapseAction(node.data) !== undefined) {
         onToggleCollapse(node.id);
@@ -360,72 +451,74 @@ export function MapCanvas({
       <CollapseContext.Provider value={onToggleCollapse}>
         <WorkItemCanvasContext.Provider value={workItemCanvas}>
           <NodeLensContext.Provider value={lenses}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              // Explicit stacking (Z_INDEX in src/core/flow.ts): bands < open groups < edges <
-              // leaves and closed groups.
-              zIndexMode="manual"
-              elevateNodesOnSelect={false}
-              elevateEdgesOnSelect={false}
-              // The app owns the selection (see above); React Flow only reports the clicks.
-              elementsSelectable={false}
-              nodesFocusable={false}
-              edgesFocusable={false}
-              onNodeClick={onNodeClick}
-              onEdgeClick={onEdgeClick}
-              onPaneClick={onPaneClick}
-              onInit={onInit}
-              nodesDraggable={positionsUnlocked}
-              onNodeDragStop={onNodeDragStop}
-              nodesConnectable={false}
-              edgesReconnectable={false}
-              deleteKeyCode={null}
-              // Double-click toggles a group; it must not zoom as well.
-              zoomOnDoubleClick={false}
-              onNodeDoubleClick={onNodeDoubleClick}
-              {...(onHoverNode
-                ? {
-                    onNodeMouseEnter: onNodeMouseOver,
-                    onNodeMouseMove: onNodeMouseOver,
-                    onNodeMouseLeave,
-                    onEdgeMouseEnter,
-                    onEdgeMouseLeave,
-                    onPaneMouseMove,
-                  }
-                : {})}
-              // Restore the stored viewport when there is one, otherwise fit.
-              fitView={startViewport === undefined}
-              fitViewOptions={fitViewOptions}
-              {...(startViewport ? { defaultViewport: startViewport } : {})}
-              minZoom={ZOOM_RANGE.min}
-              maxZoom={ZOOM_RANGE.max}
-              colorMode="system"
-              proOptions={PRO_OPTIONS}
-            >
-              {/* The lists of open groups, above the edges (see GroupWorkItemLists). */}
-              <ViewportPortal>
-                <GroupWorkItemLists nodes={flow.nodes} onSelectNode={onSelectNode} />
-              </ViewportPortal>
-              <Background />
-              {/* The fit of the app: React Flow's own knows neither the map closed up for
-                  another level nor what covers the canvas. */}
-              <Controls showInteractive={false} showFitView={false}>
-                <ControlButton
-                  className="react-flow__controls-fitview"
-                  title="Fit view"
-                  aria-label="Fit view"
-                  onClick={onFit}
-                >
-                  <FitViewIcon />
-                </ControlButton>
-              </Controls>
-              <MiniMapFixed nodes={flow.nodes} bounds={contentBounds} />
-            </ReactFlow>
+            <ResizeContext.Provider value={resizeActions}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                // Explicit stacking (Z_INDEX in src/core/flow.ts): bands < open groups < edges <
+                // leaves and closed groups.
+                zIndexMode="manual"
+                elevateNodesOnSelect={false}
+                elevateEdgesOnSelect={false}
+                // The app owns the selection (see above); React Flow only reports the clicks.
+                elementsSelectable={false}
+                nodesFocusable={false}
+                edgesFocusable={false}
+                onNodeClick={onNodeClick}
+                onEdgeClick={onEdgeClick}
+                onPaneClick={onPaneClick}
+                onInit={onInit}
+                nodesDraggable={positionsUnlocked}
+                onNodeDragStop={onNodeDragStop}
+                nodesConnectable={false}
+                edgesReconnectable={false}
+                deleteKeyCode={null}
+                // Double-click toggles a group; it must not zoom as well.
+                zoomOnDoubleClick={false}
+                onNodeDoubleClick={onNodeDoubleClick}
+                {...(onHoverNode
+                  ? {
+                      onNodeMouseEnter: onNodeMouseOver,
+                      onNodeMouseMove: onNodeMouseOver,
+                      onNodeMouseLeave,
+                      onEdgeMouseEnter,
+                      onEdgeMouseLeave,
+                      onPaneMouseMove,
+                    }
+                  : {})}
+                // Restore the stored viewport when there is one, otherwise fit.
+                fitView={startViewport === undefined}
+                fitViewOptions={fitViewOptions}
+                {...(startViewport ? { defaultViewport: startViewport } : {})}
+                minZoom={ZOOM_RANGE.min}
+                maxZoom={ZOOM_RANGE.max}
+                colorMode="system"
+                proOptions={PRO_OPTIONS}
+              >
+                {/* The lists of open groups, above the edges (see GroupWorkItemLists). */}
+                <ViewportPortal>
+                  <GroupWorkItemLists nodes={flow.nodes} onSelectNode={onSelectNode} />
+                </ViewportPortal>
+                <Background />
+                {/* The fit of the app: React Flow's own knows neither the map closed up for
+                    another level nor what covers the canvas. */}
+                <Controls showInteractive={false} showFitView={false}>
+                  <ControlButton
+                    className="react-flow__controls-fitview"
+                    title="Fit view"
+                    aria-label="Fit view"
+                    onClick={onFit}
+                  >
+                    <FitViewIcon />
+                  </ControlButton>
+                </Controls>
+                <MiniMapFixed nodes={flow.nodes} bounds={contentBounds} />
+              </ReactFlow>
+            </ResizeContext.Provider>
           </NodeLensContext.Provider>
         </WorkItemCanvasContext.Provider>
       </CollapseContext.Provider>

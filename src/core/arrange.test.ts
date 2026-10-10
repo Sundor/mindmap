@@ -32,7 +32,7 @@ import { rowPlacement } from './layout/tiered';
 import type { Rect, Size } from './layout/types';
 import { miniMapNodes } from './minimap';
 import type { ArchitectureModel, ArchNode } from './model';
-import { applyPositionOverrides, withNodeMoved, withoutRows } from './positions';
+import { applyPositionOverrides, movedByHand, NO_HAND_OVERRIDES, withoutRows } from './positions';
 import { groupIds, LOD_LEVELS, visibleNodes, type LodLevel } from './visibility';
 import { workItemContent } from './workItemContent';
 import { buildWorkItemOverlay } from './workItemOverlay';
@@ -1014,7 +1014,7 @@ describe('an arrangement as a layout', () => {
         viewOf(model, visibleNodes(model, new Set(), 'components')),
       );
       const id = model.rootIds[0] ?? '';
-      const moved = withNodeMoved(new Map(), layout, id, { x: 40, y: 30 });
+      const moved = movedByHand(NO_HAND_OVERRIDES, model, layout, id, { x: 40, y: 30 }).positions;
       const was = rectIn(layout.rects, id);
       expect(moved.get(id)).toEqual({ x: was.x + 40, y: was.y + 30 });
       const applied = applyPositionOverrides(model, layout, moved);

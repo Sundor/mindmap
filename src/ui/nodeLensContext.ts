@@ -1,14 +1,15 @@
-// Lets the nodes rendered by React Flow reach the lenses the app computed over the whole map:
-// heat by work, progress, and the colour each node has under "Colour by".
+// Lets the nodes rendered by React Flow reach the lenses the app computed: the heat and the
+// progress of what each drawn box stands for — its own work and that of everything below it that
+// no box drawn inside it shows — and the colour each node has under "Colour by".
 
 import { createContext } from 'react';
-import type { NodeHeat, NodeProgress, SchemeColor } from '../core';
+import type { DrawnHeat, DrawnProgress, SchemeColor } from '../core';
 
 export interface NodeLenses {
-  /** Per node, while the heat lens is on (src/core/workload.ts). */
-  readonly heat?: ReadonlyMap<string, NodeHeat> | undefined;
-  /** Per node, while the progress lens is on. */
-  readonly progress?: ReadonlyMap<string, NodeProgress> | undefined;
+  /** Per drawn box, while the heat lens is on (`heatOfDrawn` in src/core/workload.ts). */
+  readonly heat?: ReadonlyMap<string, DrawnHeat> | undefined;
+  /** Per drawn box, while the progress lens is on (`progressOfDrawn`). */
+  readonly progress?: ReadonlyMap<string, DrawnProgress> | undefined;
   /** Per node, while something is coloured by (src/core/colorBy.ts). */
   readonly colors?: ReadonlyMap<string, SchemeColor> | undefined;
 }

@@ -395,7 +395,9 @@ subcomponent. The prefix may be in any letter case and the ID is lower-cased by 
 those nodes. All other tags are shown as plain tags in the panel.
 
 - Tag at the most specific node that is true. An item tagged to `orders.api` is also counted on
-  `orders` when that group is collapsed.
+  `orders` — in its badge, its heat and its progress — when that group is collapsed, and not
+  there while `orders.api` is drawn. An item tagged to several nodes counts on each box it
+  lands on.
 - **Tasks follow their parent**: a task is listed under its parent wherever the parent is
   shown, and its own `comp:` tags are then not used. Tag stories, bugs and features; leave tasks
   to inherit. (A task without a parent in the file is placed by its own tags.)
@@ -601,7 +603,7 @@ on the tab _Lenses_.
 | **Detail**     | The level of detail; Collapse all, Expand all, Shrink collapsed groups (on while Close up the gaps is); Work items on the map; the zoom thresholds of Auto |
 | **Visibility** | Focus, with the Focus / Filter switch; the four edge-kind buttons, Edges on demand; Work items shown (states, iteration)                                   |
 | **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                     |
-| **Layout**     | Arrange in rows; Close up the gaps; Unlock / Lock positions, Reset positions                                                                               |
+| **Layout**     | Arrange in rows; Close up the gaps; Unlock / Lock positions (to move boxes and resize open groups), Reset positions                                        |
 | **Views**      | The saved views and Copy link                                                                                                                              |
 | **Files**      | What the two data files hold, Open YAML…, Open work items…, Recent maps                                                                                    |
 
@@ -646,7 +648,7 @@ The version of the viewer stands beside its name at the top of the control panel
 | Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                             |
 | Lay out without the row bands         | **Layout → Arrange in rows**                                                                           |
 | Close up the room of closed groups    | **Layout → Close up the gaps**                                                                         |
-| Move boxes by hand                    | **Layout → Unlock positions**, drag, **Lock positions**; **Reset positions** undoes it                 |
+| Move and resize boxes by hand         | **Layout → Unlock positions**, drag a box or the edge of an open group; **Reset positions** undoes it  |
 | Load other data                       | **Files → Open YAML…**, **Open work items…**, or drop a file on the page                               |
 | Open a map again                      | **Files → Recent maps**, **Open again** on the start page (Edge, Chrome)                               |
 | See an edit of the data files         | **Reload** on the rail (maps opened from disk in Edge, Chrome); else open the file again               |
@@ -708,11 +710,73 @@ The version of the viewer stands beside its name at the top of the control panel
   - _Limits:_ without rows, keeping the boxes on their sides of each other costs room — a gap
     stays open where a box further along still needs it — so the map closes up less than it
     could; with rows this costs less, but a box also stays right of the boxes of other rows
-    that it was right of, so a gap can stay open in a row. Hand-moved positions belong to one
-    arrangement: each set of closed groups has its own, so a box dragged while some groups are
-    closed is back in its place when others are, and where it was dropped when the same ones
-    are closed again; positions moved on the full map show only with the option off, or while
-    the map drawn is the full one (every group open at Subcomponents or Everything).
+    that it was right of, so a gap can stay open in a row. Positions and sizes set by hand belong to one
+    arrangement: each set of closed groups has its own, so a box dragged or a group resized
+    while some groups are closed is back as the layout made it when others are, and as it was
+    left when the same ones are closed again; what was moved or resized on the full map shows
+    only with the option off or every group open. In Auto every level that closes other groups
+    is such a set.
+- **Moving and resizing by hand** (**Layout → Unlock positions**; **Lock positions** ends it).
+  Nothing else on the map moves for a box that is moved or resized, edges are redrawn on the
+  drop, and **Reset positions** puts back every move and every size of the arrangement on
+  screen.
+  - _Picking a box up:_ a leaf or a closed group anywhere on it; an open group — one drawn with
+    its children — by its title bar only, which shows six dots at its right end and the move
+    cursor, and whose tooltip begins "Drag the title bar to move _name_". A node stays inside
+    its group; a group takes its contents along.
+  - _Inside an open group,_ while the positions are unlocked, the rest of the box is canvas: a
+    drag pans the map, the wheel and a pinch zoom it (a finger on a touch screen too), a drag
+    from a box inside moves that box, and a click selects the group. The chevron stays a
+    button. A double-click collapses an open group at its title bar (also on its heat strip,
+    its progress bar and its badge), not inside it; the tooltip with its description shows at
+    the title bar; **Edges on demand** shows the edges of the group while the pointer is on its
+    title bar, a heat strip, the progress bar, the badge or a resize handle. Closed groups and
+    leaves take all of that anywhere on them, and with the positions locked so does an open
+    group.
+  - _Resizing:_ while the positions are unlocked, every open group, at any level, has a handle
+    on each edge and each corner, on its border and just outside it, and a grip mark in its
+    bottom-right corner. The edge that is dragged follows the pointer in whole pixels and the
+    other edges stay. Everything inside stays where it is on the canvas — never laid out again,
+    never scaled — and the group's own work-item list stays under its title bar. Neighbours,
+    row bands and the Unassigned area do not move; the group may overlap them or leave its
+    band. While an edge is dragged only the box follows: edges, the minimap and the group's
+    work-item list are redrawn on the drop. A box inside can then be moved anywhere in the
+    resized group.
+  - _How far:_ a nested group grows to the border of its parent, upward to the parent's title
+    bar and the parent's own work items; the parent does not grow along (grow the outer group
+    first). A top-level group grows at each edge by at most the size of the map as laid out:
+    its width to the left and the right, its height upward and downward. An edge moved inward
+    stops 16 px from the nearest box inside (at the top: under the title bar, the group's own
+    work items and 8 px), or at the smaller distance the layout left there; a box moved nearer
+    to an edge holds it and is not pushed; a group is never narrower than its title needs. The
+    layout is tight: shrinking mostly takes back what was grown.
+  - _Not resized:_ leaves, closed groups, row bands and the Unassigned area. A closed group is
+    drawn in the box of the open one, resized if that was; drawn shrunk, the small box sits in
+    the middle of it (with **Close up the gaps** on, closing a group gives another arrangement,
+    which has sizes of its own). With the positions locked a group keeps the size set by hand
+    and has no handles.
+  - _Undoing one group:_ double-click any of its handles, or press **Delete** or **Backspace**
+    on its grip: the group gets back the size the layout made, as far as what is inside and
+    around it allows — an edge moved outward stops at a box that was moved into the room
+    gained, an edge moved inward at the parent's border when the group was moved there since.
+  - _Keyboard:_ the grip is a button ("Resize _name_"; **Tab** reaches it). The arrow keys move
+    the right and the bottom edge by 8 px the way the arrow points, with **Shift** the left and
+    the top edge; **Delete** or **Backspace** undoes the size. No box is moved with the
+    keyboard.
+  - _Where it is kept:_ in this browser, per arrangement — rows on or off, each story mode,
+    each filtered map and each closed-up arrangement have positions and sizes of their own —
+    and counted on the **Layout** tab ("2 moved · 1 resized"). Saved views and links carry
+    neither positions nor sizes. A changed structure file starts from the arrangement the
+    layout computes.
+  - _Limits:_ the title bar is 40 px of the map high (16 px on the screen at 40%, 8 px at 20%),
+    and the handles are about 8 px thick on the screen at 100%, stay near that down to a zoom of
+    about a third and then shrink with the map. In Auto, with the default thresholds, every
+    group is closed below 40% and picked up anywhere; at a pinned level and a zoom below about
+    25% the title bar and the handles of an open group are too small to use — zoom in, or close
+    the group to move it. A group grown, or a box moved, left of or above the top-left corner
+    of the map is not on the minimap there (**Fit view** shows it); grown to the right or
+    downward, the map and the minimap grow along. A box or an edge that is drawn over a handle
+    takes the press there.
 - **Edge legend** (top left of the map): a sample of the line of each edge kind with its name,
   there whichever tab is shown; a kind that is hidden is struck through. It is a key only — the
   kinds are switched under **Visibility → Edges**.
@@ -751,19 +815,49 @@ The version of the viewer stands beside its name at the top of the control panel
     Auto the level is the one the zoom of the fitted map selects), and the collapsed groups are
     the same ones in both; hidden edge kinds stay hidden; **Edges on demand** holds nothing
     back, because every edge of a filtered map belongs to the focus; **Arrange in rows** applies
-    as on the whole map; a filtered map has hand-moved positions of its own; the boxes list and
-    count the same work items, and show the same heat, progress and colours, as on the whole
-    map. With a work item as the focus, **Work items shown** also decides what the focus
-    involves.
+    as on the whole map; a filtered map has positions and sizes set by hand of its own; the
+    boxes list the same work items and show the same colours as on the whole map. Heat and
+    progress count what no box drawn inside shows: an open group also counts the work of the
+    nodes inside it that Filter leaves out, a group whose children are all left out is drawn as
+    a box without children (it counts everything inside it, is picked up anywhere and has no
+    resize handles), and the work of a domain that is left out entirely is counted nowhere. The
+    badge of an open group still counts its own items only. Heat is measured against the
+    hottest box of its level on the whole map, as without Filter. With a work item as the
+    focus, **Work items shown** also decides what the focus involves.
   - _After a reload_ — of the page, or with **Reload** — the whole map is shown: the focus is
     not remembered, the switch is.
-- **Heat by work** draws a strip up both sides of every box, as tall as the open work left in it
-  compared with the hottest box of its level (domains against domains, components against
-  components), coloured from the bottom up like a bar of iron being heated: a little work
-  smoulders dark red, more glows red, then yellow, and the hottest box is white at the top.
+- **Heat by work** draws a strip up both sides of a box, coloured from the bottom up like a bar
+  of iron being heated: a little work smoulders dark red, more glows red, then yellow, and the
+  hottest box is white at the top.
+  - _What a box counts:_ the open work that no box drawn inside it shows — a leaf its own
+    items, a closed group everything inside it, an open group only the items tagged to the
+    group itself. An item counts on the nearest drawn box of every node it is tagged to: the
+    node itself, or the closest group around it that is drawn. A box left without open work has
+    no strip.
+  - _How tall:_ the count of the box against the hottest box of its level counted with
+    everything inside it, drawn or not, on the whole map (domains against domains, components
+    against components). The scale does not depend on what is open: opening or closing a group
+    changes its own strip and those of the boxes that appear or disappear, never another. The
+    strip of an open group is short or absent for that reason — its work is on the boxes inside
+    it; close the group, or read the total in the detail panel.
+  - _Adding up:_ the open items over all strips are the same at every level, except for an item
+    tagged to two nodes of one group: it counts on each of them while both are drawn and once
+    on the closed group around them. An item tagged to several nodes counts once on every box
+    it lands on.
+  - _Tooltip:_ "3 open work items in here", or, on a box that holds more than it shows, "2 open
+    work items here that no box inside shows (14 in here in all)".
 - **Progress bars** turn the bottom edge of a box into a bar of the completed items over all
-  items in it — for the iteration chosen under **Work items shown**, else in total. The state
-  filter does not affect them (hiding Closed items must not make a box look untouched).
+  items — for the iteration chosen under **Work items shown**, else in total. The state filter
+  does not affect them (hiding Closed items must not make a box look untouched). A box counts
+  as for the heat: the items that no box drawn inside it shows; a box left without items has no
+  bar. The tooltip reads "3 of 8 done (38%)", or "1 of 3 done (33%) of what no box inside shows
+  (5 of 12 in here in all)".
+- **Work in the detail panel.** With either of the two lenses on, the panel of a node states
+  the totals of the node and everything inside it, drawn or not, under **Work** (for a group:
+  **Work, with everything inside**). When the box on the map shows less, a second line says
+  what it shows: "On the map: 2 open items · 1 of 3 done on this box; the rest is on the boxes
+  drawn inside it" (only the lenses that are on), or "On the map: all of it is on the boxes
+  drawn inside it" when the box has neither a strip nor a bar.
 - **Colour by** tints every box by an attribute or a metric and shows a legend, below the edge
   legend. Attribute colours are given in the order the values first appear; from the ninth
   value on everything is "Other". A metric is drawn light (its smallest value) to dark (its
@@ -775,6 +869,8 @@ The version of the viewer stands beside its name at the top of the control panel
   from the search or a link in a panel, without the pointer — and a selected work item shows
   the edges of the boxes that list it. Moving the pointer from a box onto one of its edges
   keeps them shown, so the edge can be followed and clicked; a hidden edge cannot be clicked.
+  While the positions are unlocked, the inside of an open group is canvas and not part of its
+  frame: point at its title bar, a heat strip, the progress bar, the badge or a resize handle.
 - **Views** (the **Views** tab) keep an arrangement under a name: collapsed groups, hidden edge
   kinds, level of detail, focus, colouring, story mode, whether the map is closed up (**Close
   up the gaps**) and where the view is (the point in the middle, so it fits any window). Saved
@@ -868,7 +964,9 @@ The viewer works on a computer or a network without internet access. What that r
 | The controls are gone, only a strip of icons is left       | The body of the control panel is hidden: **Show** at the foot of that strip, or click one of its tabs                                                   |
 | The left of the map is under the controls                  | In a window narrower than 1400 px the open control panel lies over the left of the map: **Hide**, or click the tab that is shown                        |
 | The page hangs after loading                               | The map is too large (hundreds of nodes). Reduce subcomponents; see the target size above                                                               |
-| Odd view or collapsed state after changing files           | Remembered state from before: **Fit view**, **Expand all**, **Reset positions**                                                                         |
+| Odd view or collapsed state after changing files           | Remembered state from before: **Fit view**, **Expand all**, **Reset positions** (moves and sizes set by hand)                                           |
+| An open group does not move when it is dragged             | With the positions unlocked it is picked up by its title bar; a drag inside it pans. Zoomed far out the bar is small: zoom in, or close the group       |
+| The heat strip or progress bar of an open group is gone    | An open group counts only what no box inside it shows. Close it, or select it: the detail panel states the total                                        |
 | Work items missing when served over HTTP                   | `workitems.json` took longer than 4 seconds: reload, or open it with **Open work items…**                                                               |
 | "…reads data files only from the place it was opened from" | `?data=` / `?workitems=` names a file on another server. Save it and open it, or put it next to the viewer                                              |
 | An empty page after `viewer.html` was edited               | The browser only runs the code the viewer was built with. Take the original file again                                                                  |

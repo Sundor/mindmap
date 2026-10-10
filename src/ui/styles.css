@@ -1141,9 +1141,11 @@ input:focus-visible {
   color: var(--muted);
 }
 
+/* The labels take what they need, up to two fifths of the panel: a longer one wraps, so that it
+   leaves the values their room. */
 .detail-fields {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: fit-content(40%) 1fr;
   gap: 0.2rem 0.75rem;
   margin: 0 0 0.6rem;
 }
@@ -1334,13 +1336,272 @@ input:focus-visible {
   cursor: default;
 }
 
-/* Positions unlocked: the boxes can be dragged. */
-.app[data-positions-unlocked='true'] .arch-node {
-  cursor: grab;
+/* Positions unlocked: the boxes can be dragged. What picks a box up says so; the hand stays the
+   sign of panning. (React Flow gives a draggable node the hand, `.react-flow__node.draggable`:
+   it would show beside the box, in the block of its work items.) */
+.app[data-positions-unlocked='true'] .react-flow__node.draggable:not(.arch-title-drag),
+.app[data-positions-unlocked='true'] .react-flow__node:not(.arch-title-drag) .arch-node {
+  cursor: move;
 }
 
-.app[data-positions-unlocked='true'] .react-flow__node.dragging .arch-node {
+.app[data-positions-unlocked='true'] .react-flow__node.draggable.dragging:not(.arch-title-drag),
+.app[data-positions-unlocked='true'] .react-flow__node.dragging:not(.arch-title-drag) .arch-node {
   cursor: grabbing;
+}
+
+/* An open group is moved by its title bar only; the rest of it is canvas, and a press there
+   reaches the pane. React Flow sets `pointer-events` inline: the bands use the same override. */
+.react-flow__node.arch-title-drag {
+  pointer-events: none !important;
+}
+
+/* What is left of the box cannot be grabbed: no hand on its strips, its bar and its badge. */
+.react-flow__node.arch-title-drag.draggable {
+  cursor: default;
+}
+
+.react-flow__node.arch-title-drag .arch-group-header {
+  pointer-events: auto;
+  cursor: move;
+}
+
+.react-flow__node.arch-title-drag.dragging .arch-group-header {
+  cursor: grabbing;
+}
+
+/* The badge in the work-item block of an open group keeps its tooltip. */
+.react-flow__node.arch-title-drag .arch-workitems-badge .arch-badge {
+  pointer-events: auto;
+}
+
+/* The mark of the grip: six dots at the right end of the title bar, in the colour of its text. */
+.react-flow__node.arch-title-drag .arch-group-header::after {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 14px;
+  margin-left: 4px;
+  background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.5px);
+  background-size: 4px 5px;
+  opacity: 0.55;
+}
+
+/* Positions unlocked: an open group has a resize control along each edge and at each corner
+   (src/ui/ResizeHandles.tsx). They lie on the border and outside it — the inside belongs to the
+   title bar and the chevron — and reach `--resize-out` beyond it. The canvas sets `--unzoom`, 1
+   at 100% and above and larger when the map is smaller, so that the controls stay wide enough on
+   the screen to be hit. */
+.map-canvas {
+  --resize-out: calc(7px * var(--unzoom, 1));
+  --resize-out-top: var(--resize-out);
+}
+
+@media (pointer: coarse) {
+  .map-canvas {
+    --resize-out: calc(18px * var(--unzoom, 1));
+  }
+}
+
+/* Upwards, the controls of a group inside another reach no further than the gap below the title
+   bar of the group around it: that title bar is what moves that group. */
+.arch-node:not(.arch-level-domain) ~ .react-flow__resize-control.arch-resize {
+  --resize-out-top: min(var(--resize-out), 6px);
+}
+
+/* The node around them takes no pointer events. */
+.react-flow__resize-control.arch-resize {
+  pointer-events: all;
+  touch-action: none;
+}
+
+/* Not React Flow's line and square: nothing is drawn until the pointer is on a control. */
+.map-canvas .react-flow__resize-control.arch-resize.line,
+.map-canvas .react-flow__resize-control.arch-resize.handle {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  translate: none;
+}
+
+/* Edges: 1px on the border, the rest outside it. */
+.react-flow__resize-control.arch-resize.line.left {
+  top: 0;
+  left: 0;
+  width: calc(1px + var(--resize-out));
+  height: 100%;
+  transform: translate(calc(-1 * var(--resize-out)), 0);
+}
+
+.react-flow__resize-control.arch-resize.line.right {
+  top: 0;
+  left: 100%;
+  width: calc(1px + var(--resize-out));
+  height: 100%;
+  transform: translate(-1px, 0);
+}
+
+.react-flow__resize-control.arch-resize.line.top {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(1px + var(--resize-out-top));
+  transform: translate(0, calc(-1 * var(--resize-out-top)));
+}
+
+.react-flow__resize-control.arch-resize.line.bottom {
+  top: 100%;
+  left: 0;
+  width: 100%;
+  height: calc(1px + var(--resize-out));
+  transform: translate(0, -1px);
+}
+
+/* Corners: 9px inside (clear of the chevron and of the grip of the title bar), the rest outside. */
+.react-flow__resize-control.arch-resize.handle {
+  width: calc(9px + var(--resize-out));
+  height: calc(9px + var(--resize-out));
+}
+
+.react-flow__resize-control.arch-resize.handle.top {
+  height: calc(9px + var(--resize-out-top));
+}
+
+.react-flow__resize-control.arch-resize.handle.top.left {
+  top: 0;
+  left: 0;
+  transform: translate(calc(-1 * var(--resize-out)), calc(-1 * var(--resize-out-top)));
+}
+
+.react-flow__resize-control.arch-resize.handle.top.right {
+  top: 0;
+  left: 100%;
+  transform: translate(-9px, calc(-1 * var(--resize-out-top)));
+}
+
+.react-flow__resize-control.arch-resize.handle.bottom.left {
+  top: 100%;
+  left: 0;
+  transform: translate(calc(-1 * var(--resize-out)), -9px);
+}
+
+/* The corner with the grip reaches 16px in. */
+.react-flow__resize-control.arch-resize.handle.bottom.right {
+  top: 100%;
+  left: 100%;
+  width: calc(16px + var(--resize-out));
+  height: calc(16px + var(--resize-out));
+  transform: translate(-16px, -16px);
+}
+
+/* What fills a control and takes its clicks; in the bottom right corner the grip, a button. */
+.arch-resize-hit,
+.arch-resize-grip {
+  position: absolute;
+  inset: 0;
+}
+
+/* A button is as wide as what is in it unless it is told its width. */
+.arch-resize-grip {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 45%, transparent);
+  cursor: inherit;
+}
+
+/* A size set by hand. */
+.arch-resize-grip[data-resized='true'] {
+  color: var(--accent);
+}
+
+/* Inside the box, in its corner; like the controls it keeps its size on the screen. */
+.arch-resize-grip svg {
+  position: absolute;
+  right: calc(var(--resize-out) + 3px);
+  bottom: calc(var(--resize-out) + 3px);
+  width: calc(10px * var(--unzoom, 1));
+  height: calc(10px * var(--unzoom, 1));
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Under the pointer and while dragged, a control shows what it moves: an edge its line along the
+   border, a corner both of its lines. The mark takes no press: that goes to what fills the
+   control. */
+.react-flow__resize-control.arch-resize:hover::after,
+.react-flow__resize-control.arch-resize:active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 0 solid var(--accent);
+  pointer-events: none;
+}
+
+.react-flow__resize-control.arch-resize.line.left::after {
+  left: auto;
+  width: calc(2px * var(--unzoom, 1));
+  border-left-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.line.right::after {
+  right: auto;
+  width: calc(2px * var(--unzoom, 1));
+  border-left-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.line.top::after {
+  top: auto;
+  height: calc(2px * var(--unzoom, 1));
+  border-top-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.line.bottom::after {
+  bottom: auto;
+  height: calc(2px * var(--unzoom, 1));
+  border-top-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.handle.top::after {
+  top: var(--resize-out-top);
+  border-top-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.handle.bottom::after {
+  bottom: var(--resize-out);
+  border-bottom-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.handle.left::after {
+  left: var(--resize-out);
+  border-left-width: calc(2px * var(--unzoom, 1));
+}
+
+.react-flow__resize-control.arch-resize.handle.right::after {
+  right: var(--resize-out);
+  border-right-width: calc(2px * var(--unzoom, 1));
+}
+
+/* The corners of a box are round (`.arch-node`). */
+.react-flow__resize-control.arch-resize.handle.top.left::after {
+  border-top-left-radius: 8px;
+}
+
+.react-flow__resize-control.arch-resize.handle.top.right::after {
+  border-top-right-radius: 8px;
+}
+
+.react-flow__resize-control.arch-resize.handle.bottom.left::after {
+  border-bottom-left-radius: 8px;
+}
+
+.react-flow__resize-control.arch-resize.handle.bottom.right::after {
+  border-bottom-right-radius: 8px;
 }
 
 #unlock-positions[aria-pressed='true'] {

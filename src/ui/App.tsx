@@ -4,7 +4,9 @@ import { flushSync } from 'react-dom';
 import {
   availableIterations,
   availableStates,
-  applyPositionOverrides,
+  allResizeLimits,
+  appliedGrowth,
+  applyHandOverrides,
   arrangedLayout,
   arrangedSourceNodes,
   buildFlow,
@@ -15,18 +17,21 @@ import {
   CONTROL_PANEL_DOCK_WIDTH,
   CONTROL_TABS,
   controlPanelCollapsed,
-  NO_POSITION_OVERRIDES,
+  movedByHand,
+  NO_HAND_OVERRIDES,
   readControlPanel,
-  readPositions,
+  readHandOverrides,
+  resizedByHand,
   shownControlTab,
-  withNodeMoved,
+  sizeResetByHand,
   withoutRows,
   writeControlPanel,
-  writePositions,
+  writeHandOverrides,
   type ControlPanelState,
   type ControlTab,
+  type EdgeGrowth,
+  type HandOverrides,
   type Position,
-  type PositionOverrides,
   EDGE_KINDS,
   effectiveLod,
   expandToOpen,
@@ -81,6 +86,7 @@ import {
   type DisplaySettings,
   type EdgeKind,
   type FlowGraph,
+  type FlowResize,
   type FlowWorkItems,
   type LayoutResult,
   type LodLevel,
@@ -102,10 +108,12 @@ import {
   focusSet,
   goToTiming,
   heatByWork,
+  heatOfDrawn,
   heldRects,
   modelShows,
   nodeColoring,
   progressByNode,
+  progressOfDrawn,
   boxesAsked,
   onDemandIndex,
   quietEdges,
@@ -286,6 +294,7 @@ interface PendingMove {
 }
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
+const NO_IDS: ReadonlySet<string> = new Set();
 const NO_KINDS_HIDDEN: ReadonlySet<EdgeKind> = new Set();
 const NO_WORK_ITEMS: readonly WorkItemSummary[] = [];
 const NO_PLACED_ROWS: ReadonlyMap<string, string> = new Map();
@@ -1041,7 +1050,7 @@ function Viewer() {
   // is fitted instead, and leaving it brings back the view the whole map had before.
   const shownLayout = useRef<{
     model: ArchitectureModel;
-    /** As drawn: the reference, or that closed up, with the positions moved by hand. */
+    /** As drawn: the reference, or that closed up, with the positions and sizes set by hand. */
     layout: LayoutResult;
     filteredTo: Focus | undefined;
     /** Key of the layout computed for the drawn model (`computeLayout`). */
@@ -1254,14 +1263,14 @@ function Viewer() {
       ? collapsedEdit.ids
       : storedCollapsed;
 
-  // Positions set by hand: while unlocked, groups and nodes can be dragged. The
-  // moved positions are overrides on top of the layout drawn, kept in the browser per layout
-  // (rows shown or hidden, each story mode, each map reduced to a focus and each arrangement of
-  // a map closed up have their own); nothing else moves.
+  // Positions and sizes set by hand: while unlocked, groups and nodes can be dragged and open
+  // groups resized. The moved positions and the sizes are overrides on top of the layout drawn,
+  // kept in the browser per layout (rows shown or hidden, each story mode, each map reduced to a
+  // focus and each arrangement of a map closed up have their own); nothing else moves.
   const [positionsUnlocked, setPositionsUnlocked] = useState(false);
-  const [positionEdit, setPositionEdit] = useState<{
+  const [handEdit, setHandEdit] = useState<{
     readonly key: string;
-    readonly positions: PositionOverrides;
+    readonly by: HandOverrides;
   }>();
   // A reduced model carries the rows its nodes have on the whole map, so its own layout places
   // none by their connections: the marks of those the whole map places so are put back. This is
@@ -1331,38 +1340,70 @@ function Viewer() {
       : reference;
   }, [settings.closeGaps, drawnModel, reference, visible, arrangeViewFor]);
   const positionsKey = arranged?.key;
-  const storedPositions = useMemo(
+  const storedByHand = useMemo(
     () =>
       positionsKey === undefined
-        ? NO_POSITION_OVERRIDES
-        : readPositions(browserStorage(), positionsKey),
+        ? NO_HAND_OVERRIDES
+        : readHandOverrides(browserStorage(), positionsKey),
     [positionsKey],
   );
-  const positions =
-    positionEdit !== undefined && positionEdit.key === positionsKey
-      ? positionEdit.positions
-      : storedPositions;
+  const byHand =
+    handEdit !== undefined && handEdit.key === positionsKey ? handEdit.by : storedByHand;
   const layout = useMemo(
-    () => (drawn && arranged ? applyPositionOverrides(drawn.model, arranged, positions) : arranged),
-    [drawn, arranged, positions],
+    () => (drawn && arranged ? applyHandOverrides(drawn.model, arranged, byHand) : arranged),
+    [drawn, arranged, byHand],
   );
-  const changePositions = useCallback(
-    (next: PositionOverrides) => {
+  const changeByHand = useCallback(
+    (next: HandOverrides) => {
       if (positionsKey === undefined) return;
-      setPositionEdit({ key: positionsKey, positions: next });
-      writePositions(browserStorage(), positionsKey, next);
+      setHandEdit({ key: positionsKey, by: next });
+      writeHandOverrides(browserStorage(), positionsKey, next, byHand);
     },
-    [positionsKey],
+    [positionsKey, byHand],
   );
+  // What a change by hand starts from is the arrangement itself, not the layout as drawn: the
+  // overrides say where a box is and how far its edges were moved, whatever else was changed.
   const moveNode = useCallback(
     (id: string, delta: Position) => {
-      if (!layout) return;
-      const next = withNodeMoved(positions, layout, id, delta);
-      if (next !== positions) changePositions(next);
+      if (!drawn || !arranged) return;
+      const next = movedByHand(byHand, drawn.model, arranged, id, delta);
+      if (next !== byHand) changeByHand(next);
     },
-    [layout, positions, changePositions],
+    [drawn, arranged, byHand, changeByHand],
   );
-  const resetPositions = () => changePositions(NO_POSITION_OVERRIDES);
+  // The work-item blocks the layout was computed with: a group is never made narrower than its own.
+  const blocks = shownWorkItems?.content;
+  const resizeNode = useCallback(
+    (id: string, delta: Partial<EdgeGrowth>) => {
+      if (!drawn || !arranged) return;
+      const next = resizedByHand(byHand, drawn.model, arranged, id, delta, blocks);
+      if (next !== byHand) changeByHand(next);
+    },
+    [drawn, arranged, byHand, changeByHand, blocks],
+  );
+  const resetNodeSize = useCallback(
+    (id: string) => {
+      if (!drawn || !arranged) return;
+      const next = sizeResetByHand(byHand, drawn.model, arranged, id, blocks);
+      if (next !== byHand) changeByHand(next);
+    },
+    [drawn, arranged, byHand, changeByHand, blocks],
+  );
+  // The groups drawn at another size than the arrangement's.
+  const resizedIds = useMemo(
+    () =>
+      drawn && arranged ? new Set(appliedGrowth(drawn.model, arranged, byHand).keys()) : NO_IDS,
+    [drawn, arranged, byHand],
+  );
+  // While unlocked, the open groups get their handles: how far each edge of a group can go.
+  const flowResize = useMemo(
+    (): FlowResize | undefined =>
+      positionsUnlocked && drawn && arranged
+        ? { limits: allResizeLimits(drawn.model, arranged, byHand, blocks), resized: resizedIds }
+        : undefined,
+    [positionsUnlocked, drawn, arranged, byHand, blocks, resizedIds],
+  );
+  const resetPositions = () => changeByHand(NO_HAND_OVERRIDES);
   // Another story mode, filter or work-items file, or the map reduced to another focus (or whole
   // again): its layout is being computed.
   const layoutPending =
@@ -1372,9 +1413,13 @@ function Viewer() {
     (current.workItems !== workItemView || current.drawn !== wantedDrawn);
   const overlay = shownWorkItems?.overlay;
 
-  // The lenses, all of the whole model: a box says the same whether or not the rest is drawn.
+  // The lenses. Focus and colour are of the whole model: a box says the same whether or not the
+  // rest is drawn. Heat and progress are counted twice: per node with everything inside it (what
+  // the detail panel states, and the scale of the heat), and per box on the map for what that box
+  // stands for — its own work and that of the nodes inside it that are not drawn —, so that no
+  // item shows on a group and again on a box drawn inside it.
   // Focus: what a flow or a work item involves, from the overlay the canvas shows. Heat: the open
-  // work in each box, from the same overlay (so the work-item filter counts).
+  // work, from the same overlay (so the work-item filter counts).
   // Progress: done over all, from an overlay with the iteration alone — a state filter must
   // not make a box look untouched. Colour: by an attribute or a metric of the structure.
   const focused = useMemo(
@@ -1384,6 +1429,13 @@ function Viewer() {
   const heat = useMemo(
     () => (settings.heat && model && overlay ? heatByWork(model, overlay) : undefined),
     [settings.heat, model, overlay],
+  );
+  const drawnHeat = useMemo(
+    () =>
+      settings.heat && model && overlay && visible
+        ? heatOfDrawn(model, overlay, visible)
+        : undefined,
+    [settings.heat, model, overlay, visible],
   );
   const progressIteration = workFilter.iteration;
   const progressOverlay = useMemo(
@@ -1401,6 +1453,13 @@ function Viewer() {
     () => (model && progressOverlay ? progressByNode(model, progressOverlay) : undefined),
     [model, progressOverlay],
   );
+  const drawnProgress = useMemo(
+    () =>
+      model && progressOverlay && visible
+        ? progressOfDrawn(model, progressOverlay, visible)
+        : undefined,
+    [model, progressOverlay, visible],
+  );
   const colorBy = model ? usableColorBy(model, settings.colorBy) : 'none';
   const coloring = useMemo(
     () => (model ? nodeColoring(model, colorBy) : undefined),
@@ -1409,11 +1468,11 @@ function Viewer() {
   const colorChoices = useMemo(() => (model ? colorByOptions(model) : []), [model]);
   const lenses = useMemo(
     (): NodeLenses => ({
-      heat,
-      progress,
+      heat: drawnHeat,
+      progress: drawnProgress,
       colors: coloring && coloring.byNode.size > 0 ? coloring.byNode : undefined,
     }),
-    [heat, progress, coloring],
+    [drawnHeat, drawnProgress, coloring],
   );
   const hints = useMemo(() => (model ? authoringHints(model, overlay) : []), [model, overlay]);
   // A valid file may declare no domains at all: say so instead of showing a blank canvas.
@@ -1502,6 +1561,7 @@ function Viewer() {
           lodLevel: drawnLevel,
           compactCollapsed: shrinkClosed,
           draggable: positionsUnlocked,
+          ...(flowResize ? { resize: flowResize } : {}),
           ...(shownWorkItems
             ? { workItems: { overlay: shownWorkItems.overlay, mode: shownWorkItems.mode } }
             : {}),
@@ -1510,7 +1570,16 @@ function Viewer() {
     } catch (err: unknown) {
       return { error: errorMessage(err) };
     }
-  }, [shownModel, layout, collapsed, drawnLevel, shrinkClosed, positionsUnlocked, shownWorkItems]);
+  }, [
+    shownModel,
+    layout,
+    collapsed,
+    drawnLevel,
+    shrinkClosed,
+    positionsUnlocked,
+    flowResize,
+    shownWorkItems,
+  ]);
   const flow = flowState?.flow;
   const renderError = current?.error ?? flowState?.error;
 
@@ -1835,12 +1904,12 @@ function Viewer() {
             reference,
             arrangeView(drawnModel, shownWorkItems, shown),
           );
-          // As it is drawn there: with the positions moved by hand in that arrangement.
-          const moved =
-            at.key === positionsKey ? positions : readPositions(browserStorage(), at.key);
+          // As it is drawn there: with the positions and sizes set by hand in that arrangement.
+          const there =
+            at.key === positionsKey ? byHand : readHandOverrides(browserStorage(), at.key);
           return fittedViewport(
             { ...plain, maxZoom: Math.min(plain.maxZoom, maxZoom) },
-            arrangedSourceNodes(drawnModel, applyPositionOverrides(drawnModel, at, moved), shown),
+            arrangedSourceNodes(drawnModel, applyHandOverrides(drawnModel, at, there), shown),
             size,
           );
         },
@@ -1856,7 +1925,7 @@ function Viewer() {
       collapsed,
       shownWorkItems,
       positionsKey,
-      positions,
+      byHand,
       lodConfig,
     ],
   );
@@ -2552,7 +2621,8 @@ function Viewer() {
       }
       data-show-rows={settings.showRows}
       data-positions-unlocked={positionsUnlocked}
-      data-moved-count={positions.size}
+      data-moved-count={byHand.positions.size}
+      data-resized-count={resizedIds.size}
       data-selection={selection ? `${selection.type}:${selection.id}` : undefined}
       data-hidden-kinds={EDGE_KINDS.filter((kind) => hiddenKinds.has(kind)).join(' ')}
       data-focus={focus ? `${focus.type}:${focus.id}` : undefined}
@@ -2719,7 +2789,8 @@ function Viewer() {
               onChange={changeSettings}
               positionsUnlocked={positionsUnlocked}
               onToggleUnlocked={() => setPositionsUnlocked((unlocked) => !unlocked)}
-              movedCount={positions.size}
+              movedCount={byHand.positions.size}
+              resizedCount={resizedIds.size}
               onResetPositions={resetPositions}
             />
           ),
@@ -2849,6 +2920,8 @@ function Viewer() {
                 onViewportSettled={filteredTo ? noteFilteredView : storeViewport}
                 positionsUnlocked={positionsUnlocked}
                 onNodeMoved={moveNode}
+                onNodeResized={resizeNode}
+                onNodeSizeReset={resetNodeSize}
                 lenses={lenses}
                 onHoverNode={edgesHeldBack ? setHoveredNode : undefined}
                 onStarted={canvasStarted}
@@ -2878,6 +2951,9 @@ function Viewer() {
                     onFocus={setFocus}
                     heat={heat}
                     progress={progress}
+                    drawnHeat={drawnHeat}
+                    drawnProgress={drawnProgress}
+                    drawnIds={visible}
                     outside={selectionOutside}
                     onShowOnMap={showSelectionOnMap}
                     onClose={clearSelection}

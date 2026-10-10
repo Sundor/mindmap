@@ -15,6 +15,7 @@ import {
   nodeEdges,
   nodePath,
   nodeRowInfo,
+  onMapText,
   orderSections,
   plural,
   progressText,
@@ -27,6 +28,8 @@ import {
   type ArchEdge,
   type ArchFlow,
   type ArchitectureModel,
+  type DrawnHeat,
+  type DrawnProgress,
   type EdgeKind,
   type FlowEdge,
   type Focus,
@@ -71,9 +74,19 @@ export interface DetailPanelProps {
   /** The map's focus, and how to change it (src/core/focus.ts). */
   readonly focus: Focus | undefined;
   readonly onFocus: (focus: Focus | undefined) => void;
-  /** Per node, when the heat / progress lenses are on: what the panel states in words. */
+  /**
+   * Per node, when the heat / progress lenses are on: what the panel states in words. The counts
+   * are those of the node with everything inside it, drawn or not.
+   */
   readonly heat?: ReadonlyMap<string, NodeHeat> | undefined;
   readonly progress?: ReadonlyMap<string, NodeProgress> | undefined;
+  /**
+   * What the boxes on the map show of that, per drawn node (`drawnIds`): an open group counts
+   * only what no box inside it shows, and the panel says so where the two differ.
+   */
+  readonly drawnHeat?: ReadonlyMap<string, DrawnHeat> | undefined;
+  readonly drawnProgress?: ReadonlyMap<string, DrawnProgress> | undefined;
+  readonly drawnIds?: ReadonlySet<string> | undefined;
   /**
    * What is selected is not drawn: the filtered map leaves it out. The panel says so and offers
    * `onShowOnMap`, which goes to it on the whole map.
@@ -286,10 +299,20 @@ function NodeDetail({
   onGoToFlow,
   heat,
   progress,
+  drawnHeat,
+  drawnProgress,
+  drawnIds,
 }: DetailProps) {
   const [panelLayout, setPanelLayout] = useState(() => readPanelLayout(browserStorage()));
   const node = model.nodes.get(id);
   if (!node) return null;
+  // What the box of the node shows of its work, when that is less than the node holds.
+  const onMap = drawnIds?.has(id)
+    ? onMapText(
+        { heat: heat?.get(id), progress: progress?.get(id) },
+        { heat: drawnHeat?.get(id), progress: drawnProgress?.get(id) },
+      )
+    : undefined;
   const path = nodePath(model, id);
   const row = nodeRowInfo(model, rows, id);
   const edges = nodeEdges(model, id);
@@ -440,7 +463,7 @@ function NodeDetail({
             </Field>
           ))}
         {(heat?.has(id) || progress?.has(id)) && (
-          <Field label="Work">
+          <Field label={node.childIds.length > 0 ? 'Work, with everything inside' : 'Work'}>
             <span id="detail-work">
               {[
                 heat?.has(id) ? plural(heat.get(id)?.open ?? 0, 'open item') : undefined,
@@ -451,6 +474,12 @@ function NodeDetail({
                 .filter((part) => part !== undefined)
                 .join(' · ')}
             </span>
+            {onMap !== undefined && (
+              <>
+                <br />
+                <span id="detail-work-drawn">{onMap}</span>
+              </>
+            )}
           </Field>
         )}
       </dl>

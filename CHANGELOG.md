@@ -44,6 +44,37 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 - **The fit button among the zoom controls** at the bottom left of the canvas now fits the map
   as **Fit view** on the rail does — clear of the open body of the control panel and of the
   minimap, and not beyond 125% — instead of into the whole canvas.
+- **Open groups can be resized by hand.** With **Layout → Unlock positions**, every group that
+  is drawn open has a handle on each edge and each corner, and a grip in its bottom-right
+  corner. Dragging a handle moves that edge and nothing else: the boxes inside stay where they
+  are on the canvas, and the neighbours and the row bands do not move. A nested group grows up
+  to the border of its parent and stays below the parent's title bar; an edge moved inward
+  stops 16 px from the boxes inside. The grip is a button: the arrow keys move the right and
+  the bottom edge by 8 px, with **Shift** the left and the top edge. Double-click a handle, or
+  press **Delete** on the grip, to give one group back the size the layout made; **Reset
+  positions** now puts back every box moved and every group resized in the arrangement on
+  screen. Sizes are remembered in the browser per arrangement, as moved positions are, and like
+  them are not part of saved views or links. Leaves, closed groups and row bands are not
+  resized; a closed group keeps the box of the open one.
+- **Changed behaviour — an open group is moved by its title bar.** While the positions are
+  unlocked, a group drawn open is picked up by its title bar only — six dots at its right end
+  mark it — and a drag anywhere else inside it pans the map, where it used to move the group.
+  The inside of an open group is canvas in the other ways too: a double-click collapses the
+  group at its title bar, not inside it, and **Edges on demand** shows the edges of the group
+  while the pointer is on its title bar, not inside it. A click inside still selects the group.
+  Closed groups and leaves are picked up anywhere, as before, and with the positions locked
+  nothing has changed. What picks a box up shows the move cursor instead of the hand, which is
+  left to panning.
+- **Changed behaviour — heat and progress count only what is not drawn.** The heat strip and
+  the progress bar of a box count the work that no box drawn inside it shows: a closed group
+  everything inside it, as before, an open group only the items tagged to the group itself (on
+  a filtered map also those of the nodes inside it that Filter leaves out), where it used to
+  count everything inside it once more. The strips and bars of open groups are therefore
+  shorter than before, and gone where nothing is left; the same work is no longer counted again
+  on every group around it. The scale of the heat is unchanged — the hottest box of the level,
+  counted with everything inside it — so no other strip changes when a group opens or closes.
+  The tooltips say when a box holds more than it shows, and the detail panel still states the
+  totals of a node with everything inside it, and adds what the box on the map shows.
 
 ## 0.2.0 — 2026-10-08
 

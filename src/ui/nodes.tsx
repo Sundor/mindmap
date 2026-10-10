@@ -6,11 +6,12 @@ import {
   collapseAction,
   COMPACT_GROUP,
   compactGroupText,
+  drawnProgressText,
   HEAT_STOPS,
+  heatText,
   NODE_LEVEL_NAMES,
   PLACED_BY_CONNECTIONS,
   plural,
-  progressText,
   SIDES,
   sourceHandleId,
   targetHandleId,
@@ -19,6 +20,7 @@ import {
 } from '../core';
 import { CollapseContext } from './collapseContext';
 import { NodeLensContext, type NodeLenses } from './nodeLensContext';
+import { ResizeHandles } from './ResizeHandles';
 import { WorkItemBadge, WorkItemBlock } from './WorkItemBlock';
 import type { ArchRFNode, BandRFNode } from './flowTypes';
 
@@ -104,9 +106,11 @@ function lensStyle(id: string, lenses: NodeLenses): { className: string; style?:
 }
 
 /**
- * What the lenses draw on a box: the heat strips up its sides (as tall as the work left in it,
- * against the hottest box of its level; smouldering at the bottom, white-hot at the top) and the
- * progress bar along its bottom edge.
+ * What the lenses draw on a box, of the work no box drawn inside it shows: the heat strips up its
+ * sides (as tall as the open work, against the hottest node of its level with everything inside
+ * it; smouldering at the bottom, white-hot at the top) and the progress bar along its bottom
+ * edge. The `-all` attributes give the figures of the node with everything inside it, and the
+ * tooltips do where the box shows less than that.
  */
 function LensMarks({ id }: { id: string }) {
   const lenses = useContext(NodeLensContext);
@@ -119,7 +123,7 @@ function LensMarks({ id }: { id: string }) {
         backgroundImage: HEAT_GRADIENT,
       } as CSSProperties)
     : undefined;
-  const heatTitle = heat ? `${plural(heat.open, 'open work item')} in here` : undefined;
+  const heatTitle = heat ? heatText(heat) : undefined;
   const done = progress && progress.total > 0 ? progress.done / progress.total : 0;
   return (
     <>
@@ -130,6 +134,7 @@ function LensMarks({ id }: { id: string }) {
             style={heatStyle}
             title={heatTitle}
             data-heat={heat.open}
+            data-heat-all={heat.inAll}
           />
           <span className="arch-heat arch-heat-right" style={heatStyle} title={heatTitle} />
         </>
@@ -138,9 +143,11 @@ function LensMarks({ id }: { id: string }) {
         <span
           className="arch-progress"
           style={{ '--done': done } as CSSProperties}
-          title={progressText(progress)}
+          title={drawnProgressText(progress)}
           data-done={progress.done}
           data-total={progress.total}
+          data-done-all={progress.inAll.done}
+          data-total-all={progress.inAll.total}
         />
       )}
     </>
@@ -160,10 +167,15 @@ const COMPACT_STYLE = {
   '--compact-body-bottom': `${COMPACT_GROUP.bodyBottom}px`,
 } as CSSProperties;
 
-export function GroupNode({ id, data }: NodeProps<ArchRFNode>) {
+export function GroupNode({ id, data, dragHandle }: NodeProps<ArchRFNode>) {
   const toggleCollapse = useContext(CollapseContext);
   const lens = lensStyle(id, useContext(NodeLensContext));
   const { collapsed } = data;
+  const description = tooltip(data);
+  // A group that is moved by its title bar only takes the pointer nowhere else (styles.css): the
+  // title bar says how to move it, and has the tooltip the whole box has otherwise.
+  const moveHint = dragHandle === undefined ? undefined : `Drag the title bar to move ${data.name}`;
+  const headerTitle = moveHint && description ? `${moveHint}\n${description}` : moveHint;
   // The chevron edits the manual set only; a group closed just by the level of detail has no
   // toggle (see `collapseAction`) and opens by zooming in.
   const toggle = collapseAction(data);
@@ -179,14 +191,15 @@ export function GroupNode({ id, data }: NodeProps<ArchRFNode>) {
         className={`${nodeClass('group', data)}${collapsed ? ' arch-collapsed' : ''}${
           data.compact ? ' arch-compact' : ''
         }${lens.className}`}
-        title={tooltip(data)}
+        title={description}
         data-placed={data.placedRowName !== undefined || undefined}
         data-collapsed={collapsed}
+        data-resized={data.resize?.resized || undefined}
         {...(data.compact || lens.style
           ? { style: { ...(data.compact ? COMPACT_STYLE : {}), ...lens.style } }
           : {})}
       >
-        <div className="arch-group-header">
+        <div className="arch-group-header" title={headerTitle}>
           <button
             type="button"
             // `nokey`: Enter / Space on the button must not also select the node (React Flow
@@ -226,6 +239,7 @@ export function GroupNode({ id, data }: NodeProps<ArchRFNode>) {
       {/* The badge of an open group; its lines are drawn above the edges (GroupWorkItemLists). */}
       {!collapsed && <WorkItemBlock data={data} />}
       <SideHandles />
+      {data.resize && <ResizeHandles id={id} name={data.name} resize={data.resize} />}
     </>
   );
 }
