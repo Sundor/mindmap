@@ -32,6 +32,11 @@ export interface SavedView {
    * the whole map. Absent for a view of the whole map.
    */
   readonly focusMode?: 'filter';
+  /**
+   * Set when the view was saved with the map closed up (`DisplaySettings.closeGaps`): `center`
+   * is a point of that arrangement. Absent for a view of the full map.
+   */
+  readonly closeGaps?: true;
   /** A `ColorBy` value; checked against the structure when applied. */
   readonly colorBy?: string;
   readonly storyMode?: StoryMode;
@@ -140,6 +145,7 @@ export function parseSavedView(value: unknown, model: ArchitectureModel): SavedV
     ...(focus ? { focus } : {}),
     // Without its focus too: the centre is still not a place on the whole map.
     ...(value.focusMode === 'filter' ? { focusMode: 'filter' as const } : {}),
+    ...(value.closeGaps === true ? { closeGaps: true as const } : {}),
     ...(colorBy !== undefined ? { colorBy } : {}),
     ...(storyMode !== undefined ? { storyMode } : {}),
   };

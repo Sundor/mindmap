@@ -1,7 +1,8 @@
-// Geometry of the minimap: the whole map at one fixed scale, with the part the
-// canvas shows drawn as a rectangle. Unlike React Flow's own minimap the scale depends on the
-// map alone, never on the viewport: a view panned off the map is drawn where it is and simply
-// cut off at the edge of the minimap. Pure; the component is src/ui/MiniMapFixed.tsx.
+// Geometry of the minimap: the whole map at a scale set by its size alone, with the part the
+// canvas shows drawn as a rectangle. Unlike React Flow's own minimap the scale never depends on
+// the viewport: a view panned off the map is drawn where it is and simply cut off at the edge of
+// the minimap. A map given at another size gets another scale. Pure; the component is
+// src/ui/MiniMapFixed.tsx.
 
 import type { Rect, Size } from './layout/types';
 import { ZOOM_RANGE, type Viewport, type ZoomRange } from './navigate';

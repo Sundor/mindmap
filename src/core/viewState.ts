@@ -3,7 +3,7 @@
 // storage, with a storage that throws, or with a corrupt entry the app simply starts fresh.
 // Pure: the storage is passed in.
 
-import type { Size } from './layout/types';
+import type { Rect, Size } from './layout/types';
 import { isEdgeKind, type ArchitectureModel, type EdgeKind } from './model';
 import {
   isValidViewport,
@@ -57,14 +57,78 @@ function safeSet(storage: ViewStateStorage | undefined, key: string, value: stri
 
 // --- Viewport -------------------------------------------------------------------------------
 
-/** Stored form of a viewport; coordinates rounded so that the entry stays short. */
-export function serializeViewport(viewport: Viewport): string {
-  const round = (value: number, digits: number): number => Number(value.toFixed(digits));
+/**
+ * What a viewport was taken on: the map can be drawn otherwise the next time (another level of
+ * detail, closed up otherwise, with or without the work-item lists), and the same numbers then
+ * show another place. With this the place can be kept instead (`viewportKeepingPlace`).
+ */
+export interface ViewportPlace {
+  /** Key of the arrangement that was drawn. */
+  readonly key: string;
+  /** Size of the canvas. */
+  readonly size: Size;
+  /** The boxes the place is held by (`heldRects`), as they were drawn. */
+  readonly rects: ReadonlyMap<string, Rect>;
+}
+
+function round(value: number, digits: number): number {
+  return Number(value.toFixed(digits));
+}
+
+/**
+ * Stored form of a viewport, with what it was taken on when `place` says so; coordinates rounded
+ * so that the entry stays short.
+ */
+export function serializeViewport(viewport: Viewport, place?: ViewportPlace): string {
   return JSON.stringify({
     x: round(viewport.x, 1),
     y: round(viewport.y, 1),
     zoom: round(viewport.zoom, 4),
+    ...(place
+      ? {
+          on: {
+            key: place.key,
+            size: [round(place.size.width, 1), round(place.size.height, 1)],
+            rects: Object.fromEntries(
+              [...place.rects].map(([id, rect]) => [
+                id,
+                [rect.x, rect.y, rect.width, rect.height].map((value) => round(value, 1)),
+              ]),
+            ),
+          },
+        }
+      : {}),
   });
+}
+
+function isNumbers(value: unknown, count: number): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === count &&
+    value.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+  );
+}
+
+/**
+ * Reads what a stored viewport was taken on ({@link serializeViewport}); undefined when the
+ * entry says nothing of it, or nothing that can be used.
+ */
+export function parseViewportPlace(text: string | null | undefined): ViewportPlace | undefined {
+  const value = parseJson(text);
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { on } = value as Record<string, unknown>;
+  if (typeof on !== 'object' || on === null) return undefined;
+  const { key, size, rects } = on as Record<string, unknown>;
+  if (typeof key !== 'string' || !isNumbers(size, 2)) return undefined;
+  if (typeof rects !== 'object' || rects === null) return undefined;
+  const held = new Map<string, Rect>();
+  for (const [id, rect] of Object.entries(rects)) {
+    if (!isNumbers(rect, 4)) return undefined;
+    const [x = 0, y = 0, width = 0, height = 0] = rect;
+    held.set(id, { x, y, width, height });
+  }
+  const [width = 0, height = 0] = size;
+  return { key, size: { width, height }, rects: held };
 }
 
 /**
@@ -117,14 +181,29 @@ export function readViewport(
   return viewport;
 }
 
-/** Stores the viewport of `model`. Returns false when it is invalid, or the storage fails. */
+/**
+ * What the viewport stored for `model` was taken on; undefined when there is no viewport, or it
+ * was stored without.
+ */
+export function readViewportPlace(
+  storage: ViewStateStorage | undefined,
+  model: ArchitectureModel,
+): ViewportPlace | undefined {
+  return parseViewportPlace(safeGet(storage, viewportStorageKey(model)));
+}
+
+/**
+ * Stores the viewport of `model`, with what it was taken on when `place` says so. Returns false
+ * when it is invalid, or the storage fails.
+ */
 export function writeViewport(
   storage: ViewStateStorage | undefined,
   model: ArchitectureModel,
   viewport: Viewport,
+  place?: ViewportPlace,
 ): boolean {
   if (!isValidViewport(viewport, { min: Number.MIN_VALUE, max: Infinity })) return false;
-  return safeSet(storage, viewportStorageKey(model), serializeViewport(viewport));
+  return safeSet(storage, viewportStorageKey(model), serializeViewport(viewport, place));
 }
 
 // --- Hidden edge kinds ----------------------------------------------------------------------

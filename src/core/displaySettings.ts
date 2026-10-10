@@ -12,6 +12,12 @@ export interface DisplaySettings {
   /** Draw closed groups shrunk around their middle instead of keeping the full box. */
   readonly compactCollapsed: boolean;
   /**
+   * Closed groups are drawn shrunk and the boxes that are drawn close up around them, for every
+   * level of detail and every group opened or closed (`arrangeLayout`). Implies shrunk closed
+   * groups whatever `compactCollapsed` says, which keeps its own value.
+   */
+  readonly closeGaps: boolean;
+  /**
    * Arrange the map in its row bands. Off: the rows are left out of the layout altogether and
    * the nodes are arranged by their connections alone (`withoutRows`).
    */
@@ -31,7 +37,7 @@ export interface DisplaySettings {
   readonly heat: boolean;
   /** Progress: the bottom edge of a box is a bar of the completed items over all of them. */
   readonly progress: boolean;
-  /** Edges on demand: at the coarse levels, edges show only at the hovered or selected box. */
+  /** Edges on demand: edges show only at the hovered or selected box, and those of the focus. */
   readonly edgesOnDemand: boolean;
   /** What the boxes are coloured by (`ColorBy`: `none`, an attribute, or `metric:<name>`). */
   readonly colorBy: string;
@@ -42,6 +48,7 @@ export interface DisplaySettings {
 export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   lod: LOD_CONFIG,
   compactCollapsed: false,
+  closeGaps: false,
   showRows: true,
   storyMode: 'stories',
   hiddenStates: [],
@@ -82,6 +89,7 @@ export function serializeDisplaySettings(settings: DisplaySettings): string {
   return JSON.stringify({
     lod,
     compactCollapsed: settings.compactCollapsed,
+    closeGaps: settings.closeGaps,
     showRows: settings.showRows,
     storyMode: settings.storyMode,
     hiddenStates: settings.hiddenStates,
@@ -110,6 +118,7 @@ export function parseDisplaySettings(text: string | null | undefined): DisplaySe
   return {
     lod: lodConfigFromStored(record.lod),
     compactCollapsed: record.compactCollapsed === true,
+    closeGaps: record.closeGaps === true,
     showRows: record.showRows !== false,
     storyMode: isStoryMode(record.storyMode)
       ? record.storyMode

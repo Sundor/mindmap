@@ -2,7 +2,7 @@
 // The browser's frames and timers are played by hand.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { whenCanvasReady } from './canvasReady';
+import { canvasIsUp, whenCanvasReady } from './canvasReady';
 
 /** The frame callbacks asked for and not yet run. */
 let frames: FrameRequestCallback[] = [];
@@ -39,6 +39,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe('canvasIsUp', () => {
+  it('holds once the canvas has its pan/zoom, a size and its first view', () => {
+    expect(canvasIsUp(canvas(UP))).toBe(true);
+    for (const notYet of [
+      { ...UP, panZoom: null },
+      { ...UP, width: 0 },
+      { ...UP, height: 0 },
+      { ...UP, fitViewQueued: true },
+    ]) {
+      expect(canvasIsUp(canvas(notYet))).toBe(false);
+    }
+  });
 });
 
 describe('whenCanvasReady', () => {

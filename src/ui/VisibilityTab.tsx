@@ -163,7 +163,10 @@ export function VisibilityTab({
             />
             <span>
               Edges on demand
-              <small> (zoomed out, edges show only at the box under the pointer or selected)</small>
+              <small>
+                {' '}
+                (edges show only at the box under the pointer or selected, and those of the focus)
+              </small>
             </span>
           </label>
         </>

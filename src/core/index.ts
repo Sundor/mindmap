@@ -1,6 +1,7 @@
 // Pure core logic. Must not import React, React Flow or anything browser-specific.
 
 export * from './diagnostics';
+export * from './arrange';
 export * from './flow';
 export * from './ids';
 export * from './model';
@@ -24,6 +25,7 @@ export * from './workItemOverlay';
 export * from './workItemContent';
 export { parseArchitecture, type ParseOptions, type ParseResult } from './parse';
 export * from './focus';
+export * from './edgesOnDemand';
 export * from './focusFilter';
 export * from './workload';
 export * from './colorBy';

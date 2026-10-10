@@ -1,5 +1,6 @@
-// The Layout tab of the control panel: whether the map is arranged in rows, and the positions
-// set by hand — unlocking the boxes to drag them, and putting them back.
+// The Layout tab of the control panel: whether the map is arranged in rows, whether the boxes
+// close up around closed groups, and the positions set by hand — unlocking the boxes to drag
+// them, and putting them back.
 
 import type { DisplaySettings } from '../core';
 
@@ -42,6 +43,23 @@ export function LayoutTab({
               <small> (off: no row bands; nodes are arranged by their connections)</small>
             </span>
           </label>
+          <h3 className="cp-section-title">Closed groups</h3>
+          <label className="settings-row settings-check">
+            <input
+              type="checkbox"
+              id="close-gaps"
+              checked={settings.closeGaps}
+              onChange={(event) => onChange({ ...settings, closeGaps: event.target.checked })}
+            />
+            <span>
+              Close up the gaps
+              <small>
+                {' '}
+                (closed groups are drawn shrunk and the boxes move together, whenever groups close
+                or open — by hand or by the level of detail)
+              </small>
+            </span>
+          </label>
         </>
       )}
       <h3 className="cp-section-title">Positions</h3>
@@ -71,7 +89,8 @@ export function LayoutTab({
         </button>
       </div>
       <small className="settings-note">
-        Moved positions belong to one arrangement: each layout has its own.
+        Moved positions belong to one arrangement: each layout, and each closed-up arrangement of
+        it, has its own.
       </small>
     </>
   );

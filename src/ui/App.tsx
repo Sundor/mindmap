@@ -5,8 +5,12 @@ import {
   availableIterations,
   availableStates,
   applyPositionOverrides,
+  arrangedLayout,
+  arrangedSourceNodes,
   buildFlow,
   buildWorkItemOverlay,
+  drawnNodeRects,
+  closedGroupSize,
   computeLayout,
   CONTROL_PANEL_DOCK_WIDTH,
   CONTROL_TABS,
@@ -27,10 +31,13 @@ import {
   effectiveLod,
   expandToOpen,
   expandToReveal,
+  fitAmongLevels,
   groupIds,
   highlightFlow,
   LOD_LEVELS,
+  lodForZoom,
   lodModeToDraw,
+  miniMapNodes,
   lodRevealZoom,
   minLodForNode,
   parseArchitecture,
@@ -45,6 +52,7 @@ import {
   readDisplaySettings,
   readHiddenKinds,
   readViewport,
+  readViewportPlace,
   renderedSelection,
   resolveSelection,
   revealZoomForNodes,
@@ -54,6 +62,8 @@ import {
   usableWorkItemFilter,
   viewportKeepingPlace,
   viewportToReveal,
+  visibleNodes,
+  visibleRects,
   withoutEdgeKinds,
   workItemContent,
   workItemDiagnostics,
@@ -67,15 +77,18 @@ import {
   writeHiddenKinds,
   writeViewport,
   type ArchitectureModel,
+  type ArrangeView,
   type DisplaySettings,
   type EdgeKind,
   type FlowGraph,
+  type FlowWorkItems,
   type LayoutResult,
   type LodLevel,
   type LodMode,
   type NodeContent,
   type Rect,
   type Selection,
+  type Size,
   type StoryMode,
   type Viewport,
   type WorkItemOverlay,
@@ -89,10 +102,14 @@ import {
   focusSet,
   goToTiming,
   heatByWork,
+  heldRects,
   modelShows,
   nodeColoring,
   progressByNode,
+  boxesAsked,
+  onDemandIndex,
   quietEdges,
+  revealEdges,
   readSavedViews,
   rowPlacement,
   sameFocus,
@@ -138,9 +155,9 @@ import {
 } from '../providers/workItemSource';
 import { afterNextPaint } from './afterNextPaint';
 import { browserStorage } from './browserStorage';
-import { whenCanvasReady } from './canvasReady';
+import { canvasIsUp, whenCanvasReady } from './canvasReady';
 import { ColorLegend } from './ColorLegend';
-import { DETAIL_PANEL_WIDTH, fitOptions, fitRoom, fitWithRoom } from './constants';
+import { DETAIL_PANEL_WIDTH, fitOptions, fitRoom, fittedViewport, fitWithRoom } from './constants';
 import { ControlPanel, type ControlTabMarks } from './ControlPanel';
 import { coveredCanvasLeft } from './coveredCanvas';
 import { DetailPanel } from './DetailPanel';
@@ -158,7 +175,7 @@ import type { NodeLenses } from './nodeLensContext';
 import { PanelIcon } from './PanelIcons';
 import { RecentList } from './RecentList';
 import { SearchBox, type SearchOutside } from './SearchBox';
-import { useLodLevel } from './useLodLevel';
+import { useLevelAtRest, useLodLevel } from './useLodLevel';
 import { APP_VERSION } from './version';
 import { ViewsTab } from './ViewsTab';
 import { VisibilityTab, type WorkItemFilterChoices } from './VisibilityTab';
@@ -189,6 +206,8 @@ interface WorkItemView {
   readonly overlay: WorkItemOverlay;
   readonly mode: StoryMode;
   readonly content: ReadonlyMap<string, NodeContent>;
+  /** Whether `content` has the room of the lists (the Everything level), or none. */
+  readonly lines: boolean;
 }
 
 /** What a layout is computed for and the canvas draws: the whole model or what a focus involves. */
@@ -231,6 +250,11 @@ type LayoutState =
 interface CollapsedEdit {
   readonly model: ArchitectureModel;
   readonly ids: ReadonlySet<string>;
+  /**
+   * The group opened or closed on the canvas (its chevron, or a double-click): it keeps its place
+   * on the screen.
+   */
+  readonly anchor?: string;
 }
 
 /** The hidden edge kinds as changed by the user, for the model they belong to. */
@@ -248,6 +272,18 @@ interface SelectionEdit {
 type FlowState =
   | { readonly flow: FlowGraph; readonly error?: undefined }
   | { readonly flow?: undefined; readonly error: string };
+
+/** A move of the view still to be worked out on the layout that will be on screen. */
+interface PendingMove {
+  /** Where to go on `layout`, and how; undefined: nowhere. */
+  readonly move: (
+    layout: LayoutResult,
+  ) => { readonly to: Viewport; readonly duration: number; readonly fit?: true } | undefined;
+  /** 2: worked out once more at most — on the arrangement of the level it ends on. */
+  readonly pass: 1 | 2;
+  /** A fit of the map: the level of detail is not judged until it is made. */
+  readonly fit?: true;
+}
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
 const NO_KINDS_HIDDEN: ReadonlySet<EdgeKind> = new Set();
@@ -292,6 +328,41 @@ function isTextEntry(target: EventTarget | null): boolean {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * What of the map `model` closes up around (`arrangedLayout`): the `visible` nodes, closed groups
+ * drawn shrunk — with the line of their badge when `workItems` give them one —, and the content
+ * blocks the layout was computed with.
+ */
+function arrangeView(
+  model: ArchitectureModel,
+  workItems: WorkItemView | undefined,
+  visible: ReadonlySet<string>,
+): ArrangeView {
+  const drawnItems: FlowWorkItems | undefined = workItems
+    ? { overlay: workItems.overlay, mode: workItems.mode }
+    : undefined;
+  return {
+    visible,
+    closedSize: (node, full) =>
+      closedGroupSize(model, node, full, {
+        compactCollapsed: true,
+        ...(drawnItems ? { workItems: drawnItems } : {}),
+      }),
+    content: workItems?.content,
+  };
+}
+
+/**
+ * The absolute rectangles of the model nodes as `flow` draws them: a closed group that spans
+ * rows is drawn shrunk in the middle of its column, which is its box in the layout.
+ */
+function drawnRects(flow: FlowGraph): Map<string, Rect> {
+  const rects = new Map<string, Rect>();
+  for (const node of miniMapNodes(flow.nodes))
+    if (node.type !== 'band') rects.set(node.id, node.rect);
+  return rects;
 }
 
 /** True when two viewports show the same: within a pixel and a thousandth of the zoom. */
@@ -411,10 +482,21 @@ function Viewer() {
     [changeSettings],
   );
   const lodConfig = settings.lod;
-  const zoomLod = useLodLevel(lodConfig);
+  // Moves of the view started by the viewer (see `moveOnArrangement`). A fit among them — asked
+  // for, or under way — is judged like a fit of the canvas itself: the level of detail holds
+  // until the view is there, and is then the one the plain thresholds give for it.
+  const [pendingMove, setPendingMove] = useState<PendingMove>();
+  const [fitMoving, setFitMoving] = useState<number>();
+  const fitting = pendingMove?.fit === true || fitMoving !== undefined;
+  const zoomLod = useLodLevel(lodConfig, fitting);
   // 'auto' follows the zoom; any other mode pins that level whatever the zoom.
   const [lodMode, setLodMode] = useState<LodMode>('auto');
   const lodLevel = effectiveLod(lodMode, zoomLod);
+  // The level that is drawn. With the map closed up, Auto draws the level of the zoom once the
+  // view has come to rest: another level is another arrangement, whose place can only be kept
+  // between gestures (in the middle of one the gesture would put the view back).
+  const [arrangedLevel, setArrangedLevel] = useLevelAtRest(zoomLod, fitting);
+  const drawnLevel = settings.closeGaps && lodMode === 'auto' ? arrangedLevel : lodLevel;
 
   /** Queues a change to the list of recent maps; resolves when it is done. Never rejects. */
   const queueRecent = useCallback((task: () => void | Promise<void>): Promise<void> => {
@@ -843,26 +925,56 @@ function Viewer() {
   // Room for the lists is reserved only while they are drawn — at the Everything level. At the
   // coarser levels the boxes are as small as without work items (a badge needs no room), so
   // switching the story mode there changes nothing on screen. Reaching or leaving the Everything
-  // level therefore lays the map out again, keeping the place in view.
-  const linesWanted = lodLevel === 'detail';
+  // level therefore lays the map out again, keeping the place in view. It is the level drawn
+  // that counts: closed up in Auto, the lists come and go like every other level, once the view
+  // rests.
+  const linesWanted = drawnLevel === 'detail';
   const [linesDrawn, setLinesDrawn] = useState(linesWanted);
+  // A map that is not drawn yet is laid out for the level it starts at: that of the view kept
+  // in the browser for it, which is a place on that very layout.
+  const [linesModel, setLinesModel] = useState<ArchitectureModel>();
+  if (model !== linesModel) {
+    setLinesModel(model);
+    const stored = model ? readViewport(browserStorage(), model) : undefined;
+    if (stored) {
+      const level = effectiveLod(lodMode, lodForZoom(stored.zoom, undefined, lodConfig));
+      setLinesDrawn(level === 'detail');
+    }
+  }
   /** Until when (performance.now()) an animated move of the view started by the app is under way. */
   const movingUntil = useRef(0);
-  /** Where that move is going. */
+  /** Where that move is going, or where a place kept on its way ended it. */
   const movingTo = useRef<Viewport>(undefined);
+  /**
+   * The place of a saved view that is still to be shown (see `applyView`). It waits for the map
+   * of that view only: whatever the reader chooses next for the focus or its mode drops it.
+   */
+  const pendingCentre = useRef<{
+    model: ArchitectureModel;
+    center: ViewCenter;
+    /** The view was saved on a map reduced to its focus: its place means nothing elsewhere. */
+    filtered: boolean;
+  }>(undefined);
+  // Only once the map is drawn: until then the level is not that of its view.
+  const laidOut = layoutState?.model === model && layoutState?.layout !== undefined;
+  const levelAtRest = settings.closeGaps && lodMode === 'auto';
   useEffect(() => {
-    if (linesWanted === linesDrawn) return;
+    if (linesWanted === linesDrawn || !laidOut) return;
     let timer: ReturnType<typeof setTimeout>;
-    // Not while the app is moving the view: the move may well end on the other side again.
+    // Not while the app is moving the view: the move may well end on the other side again. Nor
+    // while the place of a saved view waits for its map, which is laid out for the level of
+    // that view: the level is judged again once the map is there.
     const settle = () => {
       const wait = movingUntil.current - performance.now();
       if (wait > 0) timer = setTimeout(settle, wait + 50);
+      else if (pendingCentre.current) timer = setTimeout(settle, LINES_SETTLE_MS);
       else setLinesDrawn(linesWanted);
     };
-    // A pinned level is the user's click: at once. The zoom has to come to rest first.
-    timer = setTimeout(settle, lodMode === 'auto' ? LINES_SETTLE_MS : 0);
+    // A pinned level is the user's click: at once, like a level that waited for the view to
+    // rest already. Else the zoom has to come to rest first.
+    timer = setTimeout(settle, lodMode === 'auto' && !levelAtRest ? LINES_SETTLE_MS : 0);
     return () => clearTimeout(timer);
-  }, [linesWanted, linesDrawn, lodMode]);
+  }, [linesWanted, linesDrawn, lodMode, levelAtRest, laidOut]);
   // One overlay, over the whole model, whatever of the map is drawn.
   const wantedOverlay = useMemo(
     () =>
@@ -878,6 +990,7 @@ function Viewer() {
             overlay: wantedOverlay,
             mode: storyMode,
             content: workItemContent(wantedOverlay, linesDrawn ? storyMode : 'off'),
+            lines: linesDrawn,
           }
         : undefined,
     [wantedOverlay, storyMode, linesDrawn],
@@ -921,34 +1034,53 @@ function Viewer() {
   }, [model, whole, settings.focusMode, focus, wantedFocused, wholePlacement]);
 
   // Layout: once per drawn model and per work-item content (new data, another story mode or
-  // filter, a map reduced to a focus: an explicit action), never on zoom or collapse. When it
-  // replaces another layout of the same model, the view keeps the place the user was looking at:
+  // filter, a map reduced to a focus: an explicit action), never on zoom or collapse — with Close
+  // up the gaps on, the boxes of that one layout close up instead (`arrangedLayout`, below). When
+  // it replaces another layout of the same model, the view keeps the place the user was looking at:
   // the node in the middle of the canvas stays there, at the same zoom. A map reduced to a focus
   // is fitted instead, and leaving it brings back the view the whole map had before.
   const shownLayout = useRef<{
     model: ArchitectureModel;
+    /** As drawn: the reference, or that closed up, with the positions moved by hand. */
     layout: LayoutResult;
     filteredTo: Focus | undefined;
+    /** Key of the layout computed for the drawn model (`computeLayout`). */
+    referenceKey: string;
+    /** Key of the arrangement of it that is drawn (the reference's own when not closed up). */
+    arrangedKey: string;
+    /**
+     * What the place is kept on: closed up, the rectangles of the boxes as they are drawn; else
+     * every rectangle of the layout.
+     */
+    rects: ReadonlyMap<string, Rect>;
+    /** The collapsed set it was drawn with. */
+    collapsed: ReadonlySet<string>;
   }>(undefined);
   /** Where the whole map was when a filtered one replaced it. */
   const viewBeforeFilter = useRef<{
     model: ArchitectureModel;
     key: string;
     viewport: Viewport;
-    absolute: LayoutResult['absolute'];
+    absolute: ReadonlyMap<string, Rect>;
   }>(undefined);
-  /** The filtered layout that was fitted when it arrived and, once known, where that fit rested. */
-  const refit = useRef<{ key: string; viewport?: Viewport }>(undefined);
   /**
-   * The place of a saved view that is still to be shown (see `applyView`). It waits for the map
-   * of that view only: whatever the reader chooses next for the focus or its mode drops it.
+   * The key and the rectangles of what will be drawn of a layout that arrives (`computed` for
+   * `drawn` and `workItems`) at `zoom`, as the place is kept on (see `shownLayout`).
    */
-  const pendingCentre = useRef<{
-    model: ArchitectureModel;
-    center: ViewCenter;
-    /** The view was saved on a map reduced to its focus: its place means nothing elsewhere. */
-    filtered: boolean;
-  }>(undefined);
+  const arriving = useRef<
+    (
+      drawn: DrawnModel,
+      computed: LayoutResult,
+      workItems: WorkItemView,
+      zoom: number,
+    ) => { key: string; rects: ReadonlyMap<string, Rect> }
+  >(() => ({ key: '', rects: new Map() }));
+  /**
+   * The layout that was fitted — a filtered one when it arrived, the whole map with Fit view —
+   * and, once known, where that fit rested. `lines`, for the whole map: whether the lists were
+   * laid out then.
+   */
+  const refit = useRef<{ key: string; viewport?: Viewport; lines?: boolean }>(undefined);
   const { showRows } = settings;
   useEffect(() => {
     if (!model || !workItemView || !wantedDrawn) return;
@@ -974,10 +1106,35 @@ function Viewer() {
       const previous = shownLayout.current;
       // A layout that failed takes no saved place.
       if (!state.layout) pendingCentre.current = undefined;
-      // The first layout of the model, an error, or the canvas that is on screen already (only
-      // another key mounts a new one).
-      if (!state.layout || previous?.model !== model || previous.layout.key === state.layout.key) {
+      // An error, or the canvas that is on screen already (only another key mounts a new one).
+      if (
+        !state.layout ||
+        (previous?.model === model && previous.referenceKey === state.layout.key)
+      ) {
         setLayoutState(state);
+        return;
+      }
+      const computed = state.layout;
+      const arrivingAt = (zoom: number) =>
+        arriving.current(state.drawn, computed, state.workItems, zoom);
+      /**
+       * Where the view kept in the browser starts on this layout when it was taken on a map
+       * drawn otherwise (another level of detail, closed up otherwise, with or without the
+       * lists): at the place it showed. Nothing when it is a view of what is drawn now, which
+       * the canvas takes as it is, or when there is none.
+       */
+      const storedStart = (): { startViewport?: Viewport } => {
+        const stored = readViewport(browserStorage(), model);
+        const place = stored ? readViewportPlace(browserStorage(), model) : undefined;
+        if (!stored || !place) return {};
+        const drawnNow = arrivingAt(stored.zoom);
+        if (drawnNow.key === place.key) return {};
+        const startViewport = viewportKeepingPlace(stored, place.size, place.rects, drawnNow.rects);
+        return startViewport === stored ? {} : { startViewport };
+      };
+      // The first layout of the model: the whole map, at the view kept for it.
+      if (previous?.model !== model) {
+        setLayoutState(state.drawn.filteredTo ? state : { ...state, ...storedStart() });
         return;
       }
       const { width, height, panZoom, fitViewQueued } = flowStore.getState();
@@ -995,14 +1152,14 @@ function Viewer() {
       if (to && !from) {
         const settled = panZoom !== null && width > 0 && height > 0 && !fitViewQueued;
         viewBeforeFilter.current = settled
-          ? { model, key: previous.layout.key, viewport: now, absolute: previous.layout.absolute }
+          ? { model, key: previous.arrangedKey, viewport: now, absolute: previous.rects }
           : undefined;
       }
       const before = from && !to ? viewBeforeFilter.current : undefined;
       if (!to) viewBeforeFilter.current = undefined;
       const fitted = refit.current;
       refit.current = undefined;
-      let start: { startViewport?: Viewport; startFitted?: true } = {};
+      let start: { startViewport?: Viewport; startFitted?: true };
       if (
         centre?.model === model &&
         width > 0 &&
@@ -1023,14 +1180,14 @@ function Viewer() {
         // may be one nobody asked for (fitting moved the zoom out of the Everything level, so the
         // lists went), and the fit was made for a map of another size.
         start =
-          fitted?.key === previous.layout.key && fitted.viewport && sameView(fitted.viewport, now)
+          fitted?.key === previous.referenceKey && fitted.viewport && sameView(fitted.viewport, now)
             ? { startFitted: true }
             : {
                 startViewport: viewportKeepingPlace(
                   now,
                   size,
-                  previous.layout.absolute,
-                  state.layout.absolute,
+                  previous.rects,
+                  arrivingAt(now.zoom).rects,
                 ),
               };
       } else if (from) {
@@ -1039,27 +1196,36 @@ function Viewer() {
         // was not on screen before, or had not come to rest) the stored viewport or a fit, like
         // on load.
         if (before?.model === model) {
+          const back = arrivingAt(before.viewport.zoom);
           start = {
             startViewport:
-              before.key === state.layout.key
+              before.key === back.key
                 ? before.viewport
-                : viewportKeepingPlace(
-                    before.viewport,
-                    size,
-                    before.absolute,
-                    state.layout.absolute,
-                  ),
+                : viewportKeepingPlace(before.viewport, size, before.absolute, back.rects),
           };
+        } else {
+          start = storedStart();
         }
       } else {
-        start = {
-          startViewport: viewportKeepingPlace(
-            now,
-            size,
-            previous.layout.absolute,
-            state.layout.absolute,
-          ),
-        };
+        // The whole map with other content. The place is kept — but a view that still rests
+        // where Fit view put it is fitted again, once, when the lists have come or gone since:
+        // the fit itself took the zoom to another side of the Everything level, and was made
+        // for a map of another size.
+        start =
+          fitted?.key === previous.referenceKey &&
+          fitted.viewport &&
+          fitted.lines !== undefined &&
+          fitted.lines !== state.workItems.lines &&
+          sameView(fitted.viewport, now)
+            ? { startFitted: true }
+            : {
+                startViewport: viewportKeepingPlace(
+                  now,
+                  size,
+                  previous.rects,
+                  arrivingAt(now.zoom).rects,
+                ),
+              };
       }
       setLayoutState({ ...state, ...start });
     });
@@ -1077,16 +1243,94 @@ function Viewer() {
   const drawnModel = drawn?.model;
   const filteredTo = drawn?.filteredTo;
 
+  // Collapsed groups: restored from localStorage per structure, then whatever the
+  // user changes for this model. A newly loaded file starts again from its own stored set.
+  const storedCollapsed = useMemo(
+    () => (model ? readCollapsed(browserStorage(), model) : NOTHING_COLLAPSED),
+    [model],
+  );
+  const collapsed =
+    collapsedEdit !== undefined && collapsedEdit.model === model
+      ? collapsedEdit.ids
+      : storedCollapsed;
+
   // Positions set by hand: while unlocked, groups and nodes can be dragged. The
-  // moved positions are overrides on top of the computed layout, kept in the browser per layout
-  // (rows shown or hidden, each story mode and each map reduced to a focus have their own);
-  // nothing else moves.
+  // moved positions are overrides on top of the layout drawn, kept in the browser per layout
+  // (rows shown or hidden, each story mode, each map reduced to a focus and each arrangement of
+  // a map closed up have their own); nothing else moves.
   const [positionsUnlocked, setPositionsUnlocked] = useState(false);
   const [positionEdit, setPositionEdit] = useState<{
     readonly key: string;
     readonly positions: PositionOverrides;
   }>();
-  const positionsKey = computedLayout?.key;
+  // A reduced model carries the rows its nodes have on the whole map, so its own layout places
+  // none by their connections: the marks of those the whole map places so are put back. This is
+  // the reference: the layout of the fully expanded map, one object for as long as it is drawn
+  // (the arrangements of it are remembered per object).
+  const reference = useMemo(
+    () =>
+      drawn && computedLayout
+        ? withPlacedRows(computedLayout, drawn.placedRow ?? NO_PLACED_ROWS)
+        : computedLayout,
+    [drawn, computedLayout],
+  );
+  // Last viewport: restored on mount instead of fitting (the canvas checks that it
+  // still shows some of the map, see MapCanvas); stored whenever the view comes to rest.
+  // Read again for every layout of the model: a layout for other work-item content remounts the
+  // canvas, which then starts from where the view was left.
+  // A layout that replaces another one of the same model (another story mode, filter or
+  // work-items file) starts from the place the user was looking at instead; should that show
+  // nothing of the new map, the canvas fits the view like for any useless viewport.
+  // The stored viewport is that of the whole map: a map reduced to a focus neither starts from it
+  // (it is fitted, unless the layout effect gave it a place) nor is stored.
+  const layoutKey = reference?.key;
+  const startViewport = current?.startViewport;
+  const startFitted = current?.startFitted;
+  const initialViewport = useMemo(() => {
+    if (startViewport) return startViewport;
+    if (startFitted || filteredTo) return undefined;
+    return model && layoutKey !== undefined ? readViewport(browserStorage(), model) : undefined;
+  }, [model, layoutKey, startViewport, startFitted, filteredTo]);
+  // Only another layout mounts another canvas. One that starts from a viewport draws the level
+  // that viewport shows from its first frame, judged by the plain thresholds like the new canvas
+  // judges it (see `useLodLevel`).
+  const canvasKey = layoutKey !== undefined ? `${loadId}:${layoutKey}` : undefined;
+  const [levelCanvas, setLevelCanvas] = useState<string>();
+  if (canvasKey !== levelCanvas) {
+    setLevelCanvas(canvasKey);
+    if (canvasKey !== undefined && initialViewport) {
+      setArrangedLevel(lodForZoom(initialViewport.zoom, undefined, lodConfig));
+    }
+  }
+  // Whether the canvas of the layout on screen is up (`canvasIsUp`). From the render that mounts
+  // a canvas until that canvas has started, the store still says what the one before it did.
+  const startedCanvas = useRef<string>(undefined);
+  const canvasStarted = useCallback(() => {
+    startedCanvas.current = canvasKey;
+  }, [canvasKey]);
+  const canvasUp = useCallback(
+    () => startedCanvas.current === canvasKey && canvasIsUp(flowStore),
+    [canvasKey, flowStore],
+  );
+  const shownWorkItems = current?.workItems;
+  // With Close up the gaps, what is drawn is the reference closed up around the boxes that are
+  // visible: closed groups shrunk, the rest moved together, each box on its side of every other.
+  const arrangeViewFor = useCallback(
+    (visible: ReadonlySet<string>): ArrangeView | undefined =>
+      drawnModel ? arrangeView(drawnModel, shownWorkItems, visible) : undefined,
+    [drawnModel, shownWorkItems],
+  );
+  const visible = useMemo(
+    () => (drawnModel ? visibleNodes(drawnModel, collapsed, drawnLevel) : undefined),
+    [drawnModel, collapsed, drawnLevel],
+  );
+  const arranged = useMemo(() => {
+    const view = visible && settings.closeGaps ? arrangeViewFor(visible) : undefined;
+    return drawnModel && reference && view
+      ? arrangedLayout(drawnModel, reference, view)
+      : reference;
+  }, [settings.closeGaps, drawnModel, reference, visible, arrangeViewFor]);
+  const positionsKey = arranged?.key;
   const storedPositions = useMemo(
     () =>
       positionsKey === undefined
@@ -1098,18 +1342,9 @@ function Viewer() {
     positionEdit !== undefined && positionEdit.key === positionsKey
       ? positionEdit.positions
       : storedPositions;
-  // A reduced model carries the rows its nodes have on the whole map, so its own layout places
-  // none by their connections: the marks of those the whole map places so are put back.
   const layout = useMemo(
-    () =>
-      drawn && computedLayout
-        ? applyPositionOverrides(
-            drawn.model,
-            withPlacedRows(computedLayout, drawn.placedRow ?? NO_PLACED_ROWS),
-            positions,
-          )
-        : computedLayout,
-    [drawn, computedLayout, positions],
+    () => (drawn && arranged ? applyPositionOverrides(drawn.model, arranged, positions) : arranged),
+    [drawn, arranged, positions],
   );
   const changePositions = useCallback(
     (next: PositionOverrides) => {
@@ -1128,10 +1363,6 @@ function Viewer() {
     [layout, positions, changePositions],
   );
   const resetPositions = () => changePositions(NO_POSITION_OVERRIDES);
-  useEffect(() => {
-    shownLayout.current =
-      model && layout && drawn ? { model, layout, filteredTo: drawn.filteredTo } : undefined;
-  }, [model, layout, drawn]);
   // Another story mode, filter or work-items file, or the map reduced to another focus (or whole
   // again): its layout is being computed.
   const layoutPending =
@@ -1139,7 +1370,6 @@ function Viewer() {
     workItemView !== undefined &&
     wantedDrawn !== undefined &&
     (current.workItems !== workItemView || current.drawn !== wantedDrawn);
-  const shownWorkItems = current?.workItems;
   const overlay = shownWorkItems?.overlay;
 
   // The lenses, all of the whole model: a box says the same whether or not the rest is drawn.
@@ -1189,22 +1419,14 @@ function Viewer() {
   // A valid file may declare no domains at all: say so instead of showing a blank canvas.
   const isEmptyModel = model !== undefined && model.nodes.size === 0;
 
-  // Collapsed groups: restored from localStorage per structure, then whatever the
-  // user changes for this model. A newly loaded file starts again from its own stored set.
-  const storedCollapsed = useMemo(
-    () => (model ? readCollapsed(browserStorage(), model) : NOTHING_COLLAPSED),
-    [model],
-  );
-  const collapsed =
-    collapsedEdit !== undefined && collapsedEdit.model === model
-      ? collapsedEdit.ids
-      : storedCollapsed;
+  /** Changes the collapsed set; `anchor`: the group opened or closed on the canvas. */
   const changeCollapsed = useCallback(
-    (change: (current: ReadonlySet<string>) => ReadonlySet<string>) => {
+    (change: (current: ReadonlySet<string>) => ReadonlySet<string>, anchor?: string) => {
       if (!model) return;
       setCollapsedEdit((previous) => ({
         model,
         ids: change(previous?.model === model ? previous.ids : storedCollapsed),
+        ...(anchor !== undefined ? { anchor } : {}),
       }));
     },
     [model, storedCollapsed],
@@ -1213,13 +1435,15 @@ function Viewer() {
     if (collapsedEdit) writeCollapsed(browserStorage(), collapsedEdit.model, collapsedEdit.ids);
   }, [collapsedEdit]);
 
+  // A group opened or closed on the canvas stays where it is on the screen, should the map close
+  // up otherwise around it.
   const toggleCollapsed = useCallback(
     (id: string) => {
       changeCollapsed((current) => {
         const next = new Set(current);
         if (!next.delete(id)) next.add(id);
         return next;
-      });
+      }, id);
     },
     [changeCollapsed],
   );
@@ -1263,18 +1487,20 @@ function Viewer() {
 
   // Nodes and edges for the current view. Only visibility and the edge rollup depend on the
   // collapsed set and the level of detail: positions and sizes always come from the one layout,
-  // which the effect above computes per drawn model alone, so zooming never lays anything out.
-  // The model and the layout both come from the state on screen: a model with a node the layout
-  // lacks cannot be drawn. The collapsed set is that of the whole model; groups that are not
-  // drawn have no effect.
+  // which the effect above computes per drawn model alone — closed up for what is drawn when
+  // Close up the gaps is on —, so zooming never lays anything out. Closing up implies shrunk
+  // closed groups. The model and the layout both come from the state on screen: a model with a
+  // node the layout lacks cannot be drawn. The collapsed set is that of the whole model; groups
+  // that are not drawn have no effect.
+  const shrinkClosed = settings.compactCollapsed || settings.closeGaps;
   const flowState = useMemo((): FlowState | undefined => {
     if (!shownModel || !layout || shownModel.nodes.size === 0) return undefined;
     try {
       return {
         flow: buildFlow(shownModel, layout, {
           collapsedIds: collapsed,
-          lodLevel,
-          compactCollapsed: settings.compactCollapsed,
+          lodLevel: drawnLevel,
+          compactCollapsed: shrinkClosed,
           draggable: positionsUnlocked,
           ...(shownWorkItems
             ? { workItems: { overlay: shownWorkItems.overlay, mode: shownWorkItems.mode } }
@@ -1284,17 +1510,163 @@ function Viewer() {
     } catch (err: unknown) {
       return { error: errorMessage(err) };
     }
-  }, [
-    shownModel,
-    layout,
-    collapsed,
-    lodLevel,
-    settings.compactCollapsed,
-    positionsUnlocked,
-    shownWorkItems,
-  ]);
+  }, [shownModel, layout, collapsed, drawnLevel, shrinkClosed, positionsUnlocked, shownWorkItems]);
   const flow = flowState?.flow;
   const renderError = current?.error ?? flowState?.error;
+
+  // The layout on screen, for what follows it. When another arrangement of the same layout
+  // replaces the one drawn (the map closed up otherwise), the place is kept: the group opened or
+  // closed on the canvas stays where it is, or else the box under the middle of the canvas, at
+  // the same zoom — as they are drawn. A passive effect: React Flow has put the new nodes into
+  // its store by now, so nodes and viewport change in the same frame.
+  useEffect(() => {
+    const before = shownLayout.current;
+    let rects: ReadonlyMap<string, Rect> | undefined;
+    if (layout && visible) {
+      if (!settings.closeGaps) rects = layout.absolute;
+      else rects = flow ? drawnRects(flow) : visibleRects(layout, visible);
+    }
+    const now =
+      model && layout && drawn && reference && arranged && rects
+        ? {
+            model,
+            layout,
+            filteredTo: drawn.filteredTo,
+            referenceKey: reference.key,
+            arrangedKey: arranged.key,
+            rects,
+            collapsed,
+          }
+        : undefined;
+    shownLayout.current = now;
+    if (
+      !before ||
+      !now ||
+      before.model !== now.model ||
+      before.referenceKey !== now.referenceKey ||
+      before.arrangedKey === now.arrangedKey
+    ) {
+      return;
+    }
+    const { width, height } = flowStore.getState();
+    const moving = performance.now() < movingUntil.current ? movingTo.current : undefined;
+    const from = moving ?? getViewport();
+    const anchor =
+      collapsedEdit !== undefined &&
+      collapsedEdit.model === now.model &&
+      collapsedEdit.ids === collapsed &&
+      before.collapsed !== collapsed
+        ? collapsedEdit.anchor
+        : undefined;
+    const next = viewportKeepingPlace(from, { width, height }, before.rects, now.rects, anchor);
+    if (next !== from || moving) void setViewport(next);
+    // That ends the move under way, here: whatever keeps a place before the time of the move is
+    // up starts from this view, not from where the move was going.
+    if (moving) movingTo.current = next;
+  }, [
+    model,
+    layout,
+    drawn,
+    reference,
+    arranged,
+    visible,
+    collapsed,
+    collapsedEdit,
+    flow,
+    settings.closeGaps,
+    flowStore,
+    getViewport,
+    setViewport,
+  ]);
+
+  // What a layout that arrives will draw, with what the viewer has chosen now: the level the
+  // zoom shows (judged by the plain thresholds, as a new canvas judges it) or the pinned one.
+  const { closeGaps } = settings;
+  useEffect(() => {
+    arriving.current = (arrivingDrawn, computed, workItems, zoom) => {
+      const placed = withPlacedRows(computed, arrivingDrawn.placedRow ?? NO_PLACED_ROWS);
+      if (!closeGaps) return { key: placed.key, rects: placed.absolute };
+      const level = lodMode === 'auto' ? lodForZoom(zoom, undefined, lodConfig) : lodMode;
+      const shown = visibleNodes(arrivingDrawn.model, collapsed, level);
+      const at = arrangedLayout(
+        arrivingDrawn.model,
+        placed,
+        arrangeView(arrivingDrawn.model, workItems, shown),
+      );
+      // As they will be drawn, like the rectangles of the map on screen they are held against:
+      // a closed group that spans rows shrunk in its column.
+      return {
+        key: at.key,
+        rects: drawnNodeRects(arrivingDrawn.model, at, {
+          collapsedIds: collapsed,
+          lodLevel: level,
+          compactCollapsed: true,
+          workItems: { overlay: workItems.overlay, mode: workItems.mode },
+        }),
+      };
+    };
+  }, [closeGaps, collapsed, lodMode, lodConfig]);
+
+  // Moves of the view started by the viewer. With the map closed up, a move worked out on one
+  // arrangement must not run while another arrives: it is worked out on the arrangement the
+  // change that asked for it gives (the effect below, after the place has been kept), and again
+  // on that of the level it ends on when that is another one.
+  const fitMoves = useRef(0);
+  const startMove = useCallback(
+    (to: Viewport, duration: number, fit?: true) => {
+      movingUntil.current = performance.now() + duration + 100;
+      movingTo.current = to;
+      // The view goes somewhere on purpose: it no longer rests where a fit put it.
+      if (!fit) refit.current = undefined;
+      const moved = setViewport(to, duration > 0 ? { duration } : undefined);
+      if (!fit || !(duration > 0)) {
+        setFitMoving(undefined);
+        return;
+      }
+      // An animated fit is under way until it is there — or until its time is up: a move that
+      // is cut short (a gesture, a place kept on its way) never says that it ended.
+      const move = (fitMoves.current += 1);
+      const over = () => setFitMoving((now) => (now === move ? undefined : now));
+      setFitMoving(move);
+      void moved.then(over);
+      setTimeout(over, duration + 100);
+    },
+    [setViewport],
+  );
+  /** Moves the view by `move`, on the layout drawn; `level`: the level it ends on, when known. */
+  const moveOnArrangement = useCallback(
+    (level: LodLevel | undefined, move: PendingMove['move']) => {
+      if (!settingsNow.current.closeGaps) {
+        const step = layout ? move(layout) : undefined;
+        if (step) startMove(step.to, step.duration, step.fit);
+        return;
+      }
+      if (level !== undefined) setArrangedLevel(level);
+      setPendingMove({ move, pass: 1 });
+    },
+    [layout, startMove, setArrangedLevel],
+  );
+  useEffect(() => {
+    if (!pendingMove) return;
+    const shown = shownLayout.current;
+    const step = shown ? pendingMove.move(shown.layout) : undefined;
+    if (step && pendingMove.pass === 1 && lodMode === 'auto') {
+      // What the tracker will say there: when it is another level, the move is worked out again
+      // on the arrangement of that level.
+      const end = lodForZoom(step.to.zoom, zoomLod, lodConfig);
+      if (end !== arrangedLevel) {
+        setArrangedLevel(end);
+        setPendingMove((asked) =>
+          asked === pendingMove ? { move: pendingMove.move, pass: 2 } : asked,
+        );
+        return;
+      }
+    }
+    // Only this move is done with: one asked for since it was (by something that waited for the
+    // canvas, between two renders) is still to be made, from where this one ends.
+    setPendingMove((asked) => (asked === pendingMove ? undefined : asked));
+    if (step) startMove(step.to, step.duration, step.fit);
+  }, [pendingMove, lodMode, zoomLod, lodConfig, arrangedLevel, setArrangedLevel, startMove]);
 
   // Selection. A node or an edge is held in terms of the whole model, so it survives
   // collapsing and zooming, and a map reduced to a focus that leaves it out: its panel stays
@@ -1374,6 +1746,8 @@ function Viewer() {
    * about to be: it is then selected (its panel opens at once) and gone to later, on the map
    * that has it. When that is not the map wanted now — it is filtered to a focus that leaves the
    * target out — the mode goes back to Focus, with the focus kept, and the focus bar says so.
+   * Later too on a canvas that is not up yet: one just mounted for another layout still has its
+   * own fit to make, which would undo the move.
    */
   const deferGoTo = useCallback(
     (target: Selection): boolean => {
@@ -1383,7 +1757,7 @@ function Viewer() {
       // arrived yet, and there is only to wait. Something the structure does not have is handled
       // as on the whole map.
       const timing = goToTiming(model, wantedDrawn?.model, drawnModel, target, wantedOverlay);
-      if (timing === 'now') return false;
+      if (timing === 'now' && (!laidOut || canvasUp())) return false;
       select(target);
       setPendingGoTo({ model, target });
       if (timing === 'leave') {
@@ -1397,55 +1771,167 @@ function Viewer() {
       }
       return true;
     },
-    [model, wantedOverlay, wantedDrawn, drawnModel, select, setFocusMode],
+    [model, wantedOverlay, wantedDrawn, drawnModel, laidOut, canvasUp, select, setFocusMode],
   );
-  // Edges on demand holds at the coarse levels, where the edges are the clutter.
-  const edgesQuiet =
-    settings.edgesOnDemand && (lodLevel === 'domains' || lodLevel === 'components');
-  // On a map reduced to its focus every edge is one of the focus: none is held back.
-  const edgesHeldBack = edgesQuiet && !filteredTo;
+  // Edges on demand holds at every level of detail; on a map reduced to its focus every edge is
+  // one of the focus, and none is held back.
+  const edgesHeldBack = settings.edgesOnDemand && !filteredTo;
+  // The selection where the drawn model has it (the whole model would mark the nearest group
+  // around a node that is left out, as if the node were inside it).
+  const drawnSelection = useMemo(
+    () =>
+      drawnModel && flow ? renderedSelection(drawnModel, flow, selection, overlay) : undefined,
+    [drawnModel, flow, selection, overlay],
+  );
   // The flow as drawn: the selected element marked and everything outside its neighbourhood
   // dimmed; then what the focus does not involve paled, but for what the selection is on (gone
-  // to from the search or a panel, it has to be readable); then, with edges on demand, every edge
-  // hidden but those at the hovered or selected box and those of the focus. The selection is
-  // marked where the drawn model has it (the whole model would mark the nearest group around a
-  // node that is left out, as if the node were inside it). A map reduced to its focus has
+  // to from the search or a panel, it has to be readable). A map reduced to its focus has
   // nothing to pale; a whole map with a filtered one on its way is paled meanwhile.
-  const shownFlow = useMemo(() => {
+  const markedFlow = useMemo(() => {
     if (!model || !drawnModel || !flow) return flow;
-    const rendered = renderedSelection(drawnModel, flow, selection, overlay);
-    let shown = highlightFlow(flow, rendered);
-    if (focused && !filteredTo) shown = focusFlow(model, shown, focused, rendered);
-    if (edgesHeldBack) {
-      const loud = new Set<string>();
-      if (hoveredNode !== undefined) loud.add(hoveredNode);
-      if (rendered?.type === 'node') loud.add(rendered.id);
-      if (rendered?.type === 'workitem') for (const id of rendered.nodeIds) loud.add(id);
-      shown = quietEdges(shown, loud, focused, rendered?.type === 'edge' ? rendered.id : undefined);
-    }
-    return shown;
-  }, [
-    model,
-    drawnModel,
-    filteredTo,
-    flow,
-    selection,
-    overlay,
-    focused,
-    edgesHeldBack,
-    hoveredNode,
-  ]);
+    const shown = highlightFlow(flow, drawnSelection);
+    return focused && !filteredTo ? focusFlow(model, shown, focused, drawnSelection) : shown;
+  }, [model, drawnModel, filteredTo, flow, drawnSelection, focused]);
+  // With edges on demand, every edge hidden but those at the selected box (with what is drawn
+  // inside it), the selected edge and those of the focus; then the edges at the box under the
+  // pointer shown again. The pointer only reveals: the work it costs is that of the box, on an
+  // index built once per flow.
+  const onDemand = useMemo(
+    () => (edgesHeldBack && flow ? onDemandIndex(flow) : undefined),
+    [edgesHeldBack, flow],
+  );
+  // The box under the pointer only counts while edges are held back and the box is drawn. A box
+  // hovered before the setting was switched on must not bring its edges back on its own; neither
+  // must one that was taken away under the pointer (another level of detail, a group closed
+  // around it: an element that goes gets no leave event) when it is drawn again.
+  if (hoveredNode !== undefined && !onDemand?.boxes.has(hoveredNode)) setHoveredNode(undefined);
+  const quietFlow = useMemo(() => {
+    if (!markedFlow || !onDemand) return markedFlow;
+    let asked: readonly string[] = [];
+    if (drawnSelection?.type === 'node') asked = [drawnSelection.id];
+    else if (drawnSelection?.type === 'workitem') asked = drawnSelection.nodeIds;
+    const edgeId = drawnSelection?.type === 'edge' ? drawnSelection.id : undefined;
+    return quietEdges(markedFlow, boxesAsked(onDemand, asked), focused, edgeId);
+  }, [markedFlow, onDemand, drawnSelection, focused]);
+  const shownFlow = useMemo(() => {
+    if (!quietFlow || !markedFlow || !onDemand || hoveredNode === undefined) return quietFlow;
+    return revealEdges(quietFlow, markedFlow, onDemand, boxesAsked(onDemand, [hoveredNode]));
+  }, [quietFlow, markedFlow, onDemand, hoveredNode]);
+  // The fit of a map closed up in Auto, into a canvas of `size`: each level is closed up
+  // otherwise, so the fit is that of the arrangement of the level its zoom shows by the plain
+  // thresholds (`fitAmongLevels`) — whatever level the view comes from, so that fitting again
+  // changes nothing. Undefined when the map is not closed up, a level is pinned (the arrangement
+  // does not depend on the zoom), or no level holds.
+  const arrangedFit = useCallback(
+    (size: Size) => {
+      if (!settings.closeGaps || lodMode !== 'auto' || !drawnModel || !reference) return undefined;
+      if (!(size.width > 0 && size.height > 0)) return undefined;
+      const plain = fitOptions(coveredCanvasLeft());
+      return fitAmongLevels(
+        (level, maxZoom) => {
+          const shown = visibleNodes(drawnModel, collapsed, level);
+          const at = arrangedLayout(
+            drawnModel,
+            reference,
+            arrangeView(drawnModel, shownWorkItems, shown),
+          );
+          // As it is drawn there: with the positions moved by hand in that arrangement.
+          const moved =
+            at.key === positionsKey ? positions : readPositions(browserStorage(), at.key);
+          return fittedViewport(
+            { ...plain, maxZoom: Math.min(plain.maxZoom, maxZoom) },
+            arrangedSourceNodes(drawnModel, applyPositionOverrides(drawnModel, at, moved), shown),
+            size,
+          );
+        },
+        undefined,
+        lodConfig,
+      );
+    },
+    [
+      settings.closeGaps,
+      lodMode,
+      drawnModel,
+      reference,
+      collapsed,
+      shownWorkItems,
+      positionsKey,
+      positions,
+      lodConfig,
+    ],
+  );
   // Fits the map into the canvas, clear of what lies over it: the body of the control panel in a
-  // narrow window, and the minimap where the map would have a box under it.
+  // narrow window, and the minimap where the map would have a box under it. A map closed up in
+  // Auto is fitted as it is drawn at the level the fit ends on.
   const fitMap = useCallback(
     (duration?: number) => {
       const { width, height } = flowStore.getState();
+      // Of the whole map: should the lists come or go because of where the fit ends, the map
+      // that arrives then is fitted once more (see the layout effect).
+      const fitted =
+        layoutKey !== undefined && !filteredTo ? { key: layoutKey, lines: linesDrawn } : undefined;
+      if (!filteredTo) refit.current = fitted;
+      const rested = (viewport: Viewport) => {
+        if (fitted && refit.current === fitted) refit.current = { ...fitted, viewport };
+      };
+      const arrangedAt = arrangedFit({ width, height });
+      if (arrangedAt) {
+        rested(arrangedAt.viewport);
+        setArrangedLevel(arrangedAt.level);
+        setPendingMove({
+          move: () => ({ to: arrangedAt.viewport, duration: duration ?? 0, fit: true }),
+          pass: 2,
+          fit: true,
+        });
+        return;
+      }
       const plain = fitOptions(coveredCanvasLeft());
       const fit = fitWithRoom(plain, fitRoom(plain, flow?.nodes ?? [], { width, height }));
-      void fitView(duration === undefined ? fit : { ...fit, duration });
+      void fitView(duration === undefined ? fit : { ...fit, duration }).then(() =>
+        rested(getViewport()),
+      );
     },
-    [flow, flowStore, fitView],
+    [
+      flow,
+      flowStore,
+      fitView,
+      getViewport,
+      arrangedFit,
+      setArrangedLevel,
+      layoutKey,
+      filteredTo,
+      linesDrawn,
+    ],
   );
+  const fitToNow = useRef<(size: Size) => boolean>(() => false);
+  useEffect(() => {
+    fitToNow.current = (size) => {
+      const arrangedAt = arrangedFit(size);
+      if (!arrangedAt) return false;
+      // This fit takes the place of the one a canvas just mounted may still have to make on its
+      // own: that one comes with the first measurement of the nodes, fits whatever is drawn then
+      // without the ceiling of its level, and would undo this one. While it is still to come,
+      // the view goes to the fit at once — the canvas may be painted before the arrangement of
+      // that level is drawn — and only then is the fit of the canvas dropped: the level tracker
+      // judges the zoom it finds then by the plain thresholds, as the fit was worked out. The
+      // move below puts the view there exactly, after the place has been kept for that
+      // arrangement; it is the whole of the fit when the canvas has made its own already.
+      if (flowStore.getState().fitViewQueued) {
+        void setViewport(arrangedAt.viewport);
+        flowStore.setState({ fitViewQueued: false, fitViewOptions: undefined });
+      }
+      setArrangedLevel(arrangedAt.level);
+      setPendingMove({
+        move: () => ({ to: arrangedAt.viewport, duration: 0, fit: true }),
+        pass: 2,
+        fit: true,
+      });
+      return true;
+    };
+  }, [arrangedFit, flowStore, setViewport, setArrangedLevel]);
+  /** The fit of a canvas that is mounted: one function for the canvas, whatever it does. */
+  const fitCanvas = useCallback((size: Size) => fitToNow.current(size), []);
+  const fitFromControls = useCallback(() => fitMap(), [fitMap]);
 
   const toggleKind = (kind: EdgeKind) => {
     if (!model) return;
@@ -1457,11 +1943,12 @@ function Viewer() {
     if (selectedEdge && kinds.has(selectedEdge.kind)) clearSelection();
   };
 
-  // Moves the view, only if needed, so that `target` (canvas coordinates) is on screen at a zoom
-  // of at least `minZoom`; `primary` is the part kept on screen when not all of it fits.
+  // The viewport that shows `target` (canvas coordinates) at a zoom of at least `minZoom`, moving
+  // the view only if needed (undefined: no need); `primary` is the part kept on screen when not
+  // all of it fits.
   const panelOpen = selection !== undefined;
-  const bringOnScreen = useCallback(
-    (target: Rect, primary: Rect | undefined, minZoom: number) => {
+  const viewportShowing = useCallback(
+    (target: Rect, primary: Rect | undefined, minZoom: number): Viewport | undefined => {
       // The canvas as it will be once the detail panel is open beside it (the panel never takes
       // more than half the row, see `.detail-panel` in styles.css).
       const { width, height } = flowStore.getState();
@@ -1478,15 +1965,9 @@ function Viewer() {
         minZoom,
         ...(primary ? { primary } : {}),
       });
-      if (to === shifted) return;
-      const moved = { ...to, x: to.x + inset };
-      movingUntil.current = performance.now() + REVEAL_DURATION_MS + 100;
-      movingTo.current = moved;
-      // The view goes somewhere on purpose: it no longer rests where a fit put it.
-      refit.current = undefined;
-      void setViewport(moved, { duration: REVEAL_DURATION_MS });
+      return to === shifted ? undefined : { ...to, x: to.x + inset };
     },
-    [flowStore, panelOpen, getViewport, setViewport],
+    [flowStore, panelOpen, getViewport],
   );
   // Brings the given nodes on screen: opens the groups around them and, only if needed, pans
   // and zooms — at least far enough in for the level of detail to draw them. Without `move` the
@@ -1506,22 +1987,22 @@ function Viewer() {
       const mode = needed ? lodModeToDraw(lodMode, needed, lodConfig) : lodMode;
       setLodMode(mode);
       if (options?.move === false) return;
-      const target = unionRect(
-        ids.map((id) => layout.absolute.get(id)).filter((rect) => rect !== undefined),
-      );
-      if (!target) return;
-      // When not everything fits at the zoom that draws it, the first node (the source of an
-      // edge) is the one kept on screen.
-      const [first] = ids;
-      const primary = first === undefined ? undefined : layout.absolute.get(first);
       // Only the zoom-driven mode needs a zoom that draws the nodes.
-      bringOnScreen(
-        target,
-        primary,
-        mode === 'auto' ? revealZoomForNodes(model, ids, lodConfig) : 0,
-      );
+      const minZoom = mode === 'auto' ? revealZoomForNodes(model, ids, lodConfig) : 0;
+      moveOnArrangement(undefined, (on) => {
+        const target = unionRect(
+          ids.map((id) => on.absolute.get(id)).filter((rect) => rect !== undefined),
+        );
+        if (!target) return undefined;
+        // When not everything fits at the zoom that draws it, the first node (the source of an
+        // edge) is the one kept on screen.
+        const [first] = ids;
+        const primary = first === undefined ? undefined : on.absolute.get(first);
+        const to = viewportShowing(target, primary, minZoom);
+        return to && { to, duration: REVEAL_DURATION_MS };
+      });
     },
-    [model, layout, lodMode, lodConfig, changeCollapsed, bringOnScreen],
+    [model, layout, lodMode, lodConfig, changeCollapsed, moveOnArrangement, viewportShowing],
   );
   // Brings the work-item list of a node on screen, drawn: the node and the groups around it are
   // opened (a closed group shows a badge instead), a pinned level coarser than Everything is
@@ -1529,8 +2010,7 @@ function Viewer() {
   // Everything threshold is set beyond the zoom range, Everything is pinned.
   const revealWorkItems = useCallback(
     (nodeId: string, itemId: number) => {
-      const box = layout?.absolute.get(nodeId);
-      if (!model || !layout || !box || !shownWorkItems) return;
+      if (!model || !layout?.absolute.has(nodeId) || !shownWorkItems) return;
       // No room reserved yet (a coarser level is shown): come back once the layout with the
       // lists has arrived.
       pendingWorkItemReveal.current = layout.content.has(nodeId) ? undefined : { nodeId, itemId };
@@ -1540,24 +2020,35 @@ function Viewer() {
       });
       const mode = lodModeToDraw(lodMode, 'detail', lodConfig);
       setLodMode(mode);
-      // The name of the node with the list below it — not all of a large group, whose header
-      // strip may be many times wider than the list at its left end — and, when even that does
-      // not fit, the line of the item itself.
-      const block = layout.content.get(nodeId);
+      const minZoom = mode === 'auto' ? lodRevealZoom('detail', lodConfig) : 0;
       const lines = workItemLines(shownWorkItems.overlay, nodeId, shownWorkItems.mode);
-      const list = block ? workItemLinesRect(block, lines) : undefined;
-      const line = block ? workItemLineRect(block, lines, itemId) : undefined;
-      const inCanvas = (rect: Rect): Rect => ({ ...rect, x: box.x + rect.x, y: box.y + rect.y });
-      const target = list
-        ? { x: box.x, y: box.y, width: list.x + list.width, height: list.y + list.height }
-        : box;
-      bringOnScreen(
-        target,
-        line ? inCanvas(line) : target,
-        mode === 'auto' ? lodRevealZoom('detail', lodConfig) : 0,
-      );
+      moveOnArrangement(undefined, (on) => {
+        const box = on.absolute.get(nodeId);
+        if (!box) return undefined;
+        // The name of the node with the list below it — not all of a large group, whose header
+        // strip may be many times wider than the list at its left end — and, when even that
+        // does not fit, the line of the item itself.
+        const block = on.content.get(nodeId);
+        const list = block ? workItemLinesRect(block, lines) : undefined;
+        const line = block ? workItemLineRect(block, lines, itemId) : undefined;
+        const inCanvas = (rect: Rect): Rect => ({ ...rect, x: box.x + rect.x, y: box.y + rect.y });
+        const target = list
+          ? { x: box.x, y: box.y, width: list.x + list.width, height: list.y + list.height }
+          : box;
+        const to = viewportShowing(target, line ? inCanvas(line) : target, minZoom);
+        return to && { to, duration: REVEAL_DURATION_MS };
+      });
     },
-    [model, layout, shownWorkItems, lodMode, lodConfig, changeCollapsed, bringOnScreen],
+    [
+      model,
+      layout,
+      shownWorkItems,
+      lodMode,
+      lodConfig,
+      changeCollapsed,
+      moveOnArrangement,
+      viewportShowing,
+    ],
   );
   useEffect(() => {
     const pending = pendingWorkItemReveal.current;
@@ -1614,10 +2105,24 @@ function Viewer() {
       const reduced =
         settings.focusMode === 'filter' && filterToFocus(model, set, wholePlacement) !== undefined;
       const timing = focusMoveTiming(next, reduced, filteredTo);
-      if (timing === 'wait') setPendingGoTo({ model, target: next });
-      reveal([...set.nodes], { move: timing === 'now' });
+      // On a canvas that is not up yet (see `deferGoTo`) the view moves once it is.
+      const move = timing === 'now' && (!laidOut || canvasUp());
+      if (timing === 'wait' || (timing === 'now' && !move)) {
+        setPendingGoTo({ model, target: next });
+      }
+      reveal([...set.nodes], { move });
     },
-    [model, settings.focusMode, wholePlacement, filteredTo, setFocus, select, reveal],
+    [
+      model,
+      settings.focusMode,
+      wholePlacement,
+      filteredTo,
+      laidOut,
+      canvasUp,
+      setFocus,
+      select,
+      reveal,
+    ],
   );
   const chooseFocus = useCallback(
     (next: Focus | undefined) => {
@@ -1679,28 +2184,26 @@ function Viewer() {
     goToFlow,
   ]);
 
-  // Last viewport: restored on mount instead of fitting (the canvas checks that it
-  // still shows some of the map, see MapCanvas); stored whenever the view comes to rest.
-  // Read again for every layout of the model: a layout for other work-item content remounts the
-  // canvas, which then starts from where the view was left.
-  // A layout that replaces another one of the same model (another story mode, filter or
-  // work-items file) starts from the place the user was looking at instead; should that show
-  // nothing of the new map, the canvas fits the view like for any useless viewport.
-  // The stored viewport is that of the whole map: a map reduced to a focus neither starts from it
-  // (it is fitted, unless the layout effect gave it a place) nor is stored.
-  const layoutKey = layout?.key;
-  const startViewport = current?.startViewport;
-  const startFitted = current?.startFitted;
-  const initialViewport = useMemo(() => {
-    if (startViewport) return startViewport;
-    if (startFitted || filteredTo) return undefined;
-    return model && layoutKey !== undefined ? readViewport(browserStorage(), model) : undefined;
-  }, [model, layoutKey, startViewport, startFitted, filteredTo]);
+  // The view is kept with what it was taken on — the arrangement drawn and the boxes around the
+  // middle of the canvas —, so that it can be given the same place on a map drawn otherwise.
   const storeViewport = useCallback(
     (viewport: Viewport) => {
-      if (model) writeViewport(browserStorage(), model, viewport);
+      if (!model) return;
+      const shown = shownLayout.current;
+      const { width, height } = flowStore.getState();
+      const size = { width, height };
+      const rects =
+        shown?.model === model && !shown.filteredTo
+          ? heldRects(viewport, size, shown.rects)
+          : undefined;
+      writeViewport(
+        browserStorage(),
+        model,
+        viewport,
+        shown && rects && rects.size > 0 ? { key: shown.arrangedKey, size, rects } : undefined,
+      );
     },
-    [model],
+    [model, flowStore],
   );
   /** Where a filtered canvas reports its view instead: only the rest of its first fit is noted. */
   const noteFilteredView = useCallback(
@@ -1789,6 +2292,7 @@ function Viewer() {
       center: viewportToCenter(getViewport(), { width, height }),
       ...(shownFocus ? { focus: shownFocus } : {}),
       ...(filteredTo ? { focusMode: 'filter' as const } : {}),
+      ...(settings.closeGaps ? { closeGaps: true as const } : {}),
       ...(colorBy !== 'none' ? { colorBy } : {}),
       storyMode: settings.storyMode,
     };
@@ -1799,12 +2303,13 @@ function Viewer() {
       whenCanvasReady(flowStore, () => {
         const { width, height } = flowStore.getState();
         const to = centerToViewport(center, { width, height });
-        movingUntil.current = performance.now() + REVEAL_DURATION_MS + 100;
-        movingTo.current = to;
-        void setViewport(to, { duration: REVEAL_DURATION_MS });
+        moveOnArrangement(
+          lodMode === 'auto' ? lodForZoom(center.zoom, zoomLod, lodConfig) : undefined,
+          () => ({ to, duration: REVEAL_DURATION_MS }),
+        );
       });
     },
-    [flowStore, setViewport],
+    [flowStore, moveOnArrangement, lodMode, zoomLod, lodConfig],
   );
   // A view that was applied: its place is still to be shown (`pendingCentre`).
   const [viewRequest, setViewRequest] = useState(0);
@@ -1827,16 +2332,25 @@ function Viewer() {
       // A view with a focus says how it is shown: one without the mode was saved on the whole
       // map, and its place only means something there. Without a focus the mode is left alone.
       const nextMode = view.focus ? (view.focusMode ?? 'focus') : settings.focusMode;
+      // The map closed up or not, as it was saved: the place is one of that arrangement.
+      const nextClose = view.closeGaps === true;
+      // Laid out with or without the lists, as the level of the view has it: the place is one
+      // of that layout, which the view then starts on.
+      const level =
+        view.lodMode === 'auto' ? lodForZoom(view.center.zoom, undefined, lodConfig) : view.lodMode;
+      setLinesDrawn(level === 'detail');
       if (
         nextColor !== settings.colorBy ||
         nextStory !== settings.storyMode ||
-        nextMode !== settings.focusMode
+        nextMode !== settings.focusMode ||
+        nextClose !== settings.closeGaps
       ) {
         changeSettings({
           ...settings,
           colorBy: nextColor,
           storyMode: nextStory,
           focusMode: nextMode,
+          closeGaps: nextClose,
         });
       }
       // The place: taken by the layout that arrives for the view as the place it starts from —
@@ -1849,7 +2363,7 @@ function Viewer() {
       };
       setViewRequest((count) => count + 1);
     },
-    [model, settings, changeSettings],
+    [model, settings, changeSettings, lodConfig],
   );
   useEffect(() => {
     const centre = pendingCentre.current;
@@ -1978,15 +2492,26 @@ function Viewer() {
   };
 
   const mapDrawn = flow !== undefined;
+  // The level the zoom has reached while the map is still drawn at another one: closed up in
+  // Auto, the level follows once the view rests. A fit of the app is not such a wait.
+  const pendingLevel =
+    lodMode === 'auto' && !fitting && zoomLod !== drawnLevel ? zoomLod : undefined;
   // What the tabs of the control panel say on the rail, where the controls themselves may be
-  // out of sight: the level drawn, that something is hidden or paled, how many views are kept.
+  // out of sight: the level drawn (and the one to come), that something is hidden or paled, how
+  // many views are kept.
   const fileNames = [source?.name, workLoad?.source?.name].filter((name) => name !== undefined);
   const marks: ControlTabMarks = {
-    level: mapDrawn ? { ...LOD_MARKS[lodLevel], pinned: lodMode !== 'auto' } : undefined,
+    level: mapDrawn
+      ? {
+          ...LOD_MARKS[drawnLevel],
+          pinned: lodMode !== 'auto',
+          pending: pendingLevel && LOD_MARKS[pendingLevel].name,
+        }
+      : undefined,
     hiding:
       hiddenKinds.size > 0 ||
       focus !== undefined ||
-      (mapDrawn && edgesQuiet) ||
+      (mapDrawn && edgesHeldBack) ||
       (filterChoices !== undefined && filterChoices.shown < filterChoices.total),
     views: savedViews.length,
     files: fileNames.length > 0 ? fileNames.join(', ') : undefined,
@@ -2000,7 +2525,7 @@ function Viewer() {
       data-workitems={work.status === 'done' ? workItems.length : undefined}
       data-story-mode={flow && shownWorkItems ? shownWorkItems.mode : undefined}
       data-collapsed-count={collapsed.size}
-      data-lod={flow ? lodLevel : undefined}
+      data-lod={flow ? drawnLevel : undefined}
       data-lod-mode={flow ? lodMode : undefined}
       data-zoom-lod={flow ? zoomLod : undefined}
       data-lines-laid-out={
@@ -2010,7 +2535,21 @@ function Viewer() {
             current?.drawn === wantedDrawn
           : undefined
       }
+      data-level-settled={flow ? drawnLevel === lodLevel : undefined}
       data-compact-collapsed={settings.compactCollapsed}
+      data-close-gaps={flow ? settings.closeGaps : undefined}
+      data-arrangement={
+        flow && arranged
+          ? arranged === reference
+            ? 'full'
+            : arranged.key.split('~')[1]
+          : undefined
+      }
+      data-layout-size={
+        flow && layout
+          ? `${Math.round(layout.bounds.width)}x${Math.round(layout.bounds.height)}`
+          : undefined
+      }
       data-show-rows={settings.showRows}
       data-positions-unlocked={positionsUnlocked}
       data-moved-count={positions.size}
@@ -2026,7 +2565,7 @@ function Viewer() {
       data-heat={flow ? settings.heat : undefined}
       data-progress={flow ? settings.progress : undefined}
       data-edges-on-demand={flow ? settings.edgesOnDemand : undefined}
-      data-edges-quiet={flow ? edgesQuiet : undefined}
+      data-edges-held-back={flow ? edgesHeldBack : undefined}
       data-panel-tab={panelTab}
       data-panel-collapsed={panelCollapsed}
     >
@@ -2124,7 +2663,8 @@ function Viewer() {
             <DetailTab
               drawn={mapDrawn}
               lodMode={lodMode}
-              lodLevel={lodLevel}
+              lodLevel={drawnLevel}
+              pendingLevel={pendingLevel}
               lodConfig={lodConfig}
               onChooseLod={chooseLod}
               collapsedCount={collapsed.size}
@@ -2299,7 +2839,7 @@ function Viewer() {
           {model && flow && shownFlow && layout && (
             <div className="map-row">
               <MapCanvas
-                key={`${loadId}:${layout.key}`}
+                key={canvasKey}
                 flow={shownFlow}
                 onToggleCollapse={toggleCollapsed}
                 workItemCanvas={workItemCanvas}
@@ -2311,6 +2851,9 @@ function Viewer() {
                 onNodeMoved={moveNode}
                 lenses={lenses}
                 onHoverNode={edgesHeldBack ? setHoveredNode : undefined}
+                onStarted={canvasStarted}
+                fitTo={fitCanvas}
+                onFit={fitFromControls}
               />
               <div className="map-legends">
                 <EdgeLegend hiddenKinds={hiddenKinds} />

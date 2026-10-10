@@ -127,6 +127,17 @@ describe('parseSavedView', () => {
     }
   });
 
+  it('keeps the mark of a closed-up map only when it is true', () => {
+    const base = { name: 'n', center: { x: 0, y: 0, zoom: 1 } };
+    expect(parseSavedView({ ...base, closeGaps: true }, model)?.closeGaps).toBe(true);
+    for (const junk of [false, 'true', 1, null, {}]) {
+      const parsed = parseSavedView({ ...base, closeGaps: junk }, model);
+      expect(parsed && 'closeGaps' in parsed).toBe(false);
+    }
+    const plain = parseSavedView(base, model);
+    expect(plain && 'closeGaps' in plain).toBe(false);
+  });
+
   it('keeps the focus mode of a view whose focus is dropped: its centre is no place on the whole map', () => {
     const base = { name: 'n', center: { x: 296, y: 208, zoom: 1.5 } };
     // No focus, a flow the model does not have, an implausible work item.
@@ -164,6 +175,12 @@ describe('stored list', () => {
     expect(serializeSavedViews(parseSavedViews(text, model))).toBe(text);
     const filtered: SavedView = { ...view, focusMode: 'filter' };
     expect(parseSavedViews(serializeSavedViews([view, filtered]), model)).toEqual([view, filtered]);
+  });
+
+  it('stores the mark of a closed-up map with the view', () => {
+    const closed: SavedView = { ...view, closeGaps: true };
+    expect(parseSavedViews(serializeSavedViews([view, closed]), model)).toEqual([view, closed]);
+    expect(serializeSavedViews([view])).not.toContain('closeGaps');
   });
 
   it('keeps the mark of a filtered map through being read and stored again without its focus', () => {
@@ -240,6 +257,13 @@ describe('links', () => {
     const hash = viewLinkHash(filtered);
     expect(hash).not.toBe(viewLinkHash(view));
     expect(viewFromLinkHash(hash, model)).toEqual({ ...filtered, name: 'Linked view' });
+  });
+
+  it('carries the mark of a closed-up map', () => {
+    const closed: SavedView = { ...view, closeGaps: true };
+    const hash = viewLinkHash(closed);
+    expect(hash).not.toBe(viewLinkHash(view));
+    expect(viewFromLinkHash(hash, model)).toEqual({ ...closed, name: 'Linked view' });
   });
 
   it('carries the focus mode to a structure that does not have the flow', () => {

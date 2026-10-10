@@ -27,11 +27,12 @@ import {
   NODE_LEVEL_NAMES,
   type ArchEdge,
   type ArchitectureModel,
+  type ArchNode,
   type EdgeKind,
   type NodeLevel,
   type NodeLevelName,
 } from './model';
-import { COMPACT_GROUP, compactGroupBox, fitsCompact } from './compactGroup';
+import { COMPACT_GROUP, compactGroupBox, fitsCompact, type CompactGroupBox } from './compactGroup';
 import { rollupEdges, type AggregateEdge } from './rollup';
 import { allGroupCounts, visibleNodes, type GroupCounts, type LodLevel } from './visibility';
 import { estimateTextWidth, wrapBalanced } from './text';
@@ -346,7 +347,7 @@ export type ArchEdgeData = {
   readonly dimmed?: boolean;
   /** Set by `focusFlow` (src/core/focus.ts): not involved in the focus (pales the label). */
   readonly faded?: boolean;
-  /** Set by `quietEdges` (src/core/focus.ts): out of sight until asked for (hides the label). */
+  /** Set by `quietEdges` (src/core/edgesOnDemand.ts): out of sight until asked for (no label). */
   readonly quiet?: boolean;
 };
 
@@ -392,9 +393,10 @@ export function routeCurve(
  * none is within `maxDistance`. Edges running side by side are closer together than their hit
  * areas are wide, so the hit areas overlap and the element under the pointer may belong to a
  * neighbour: a click is therefore resolved by distance to the lines, not by what is on top.
- * Of edges at the same distance the one drawn last (on top) wins.
+ * Of edges at the same distance the one drawn last (on top) wins. An edge that edges on demand
+ * keeps out of sight is not there to be clicked.
  */
-export function nearestEdgeAt<E extends { readonly data: Pick<ArchEdgeData, 'curve'> }>(
+export function nearestEdgeAt<E extends { readonly data: Pick<ArchEdgeData, 'curve' | 'quiet'> }>(
   point: Point,
   edges: readonly E[],
   maxDistance: number = EDGE_INTERACTION_WIDTH / 2,
@@ -402,6 +404,7 @@ export function nearestEdgeAt<E extends { readonly data: Pick<ArchEdgeData, 'cur
   let best: E | undefined;
   let bestDistance = Infinity;
   for (const edge of edges) {
+    if (edge.data.quiet === true) continue;
     const distance = distanceToCurve(point, edge.data.curve);
     if (distance <= maxDistance && distance <= bestDistance) {
       best = edge;
@@ -728,7 +731,9 @@ export interface FlowView {
   readonly lodLevel?: LodLevel;
   /**
    * Draw closed groups shrunk around the middle of their box ({@link compactGroupBox}) instead
-   * of keeping the full box. Nothing else moves; edges attach to the shrunk box.
+   * of keeping the full box ({@link closedGroupSize}). Nothing else moves; edges attach to the
+   * shrunk box. On a layout closed up around what is drawn (`arrangeLayout`) the box of a closed
+   * group already has that size, and the group fills it.
    */
   readonly compactCollapsed?: boolean;
   /** Positions unlocked: the model nodes can be dragged (see src/core/positions.ts). */
@@ -750,11 +755,102 @@ export interface FlowWorkItems {
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set();
 
 /**
+ * Whether the closed group `nodeId` gets the work-item badge line: work items are drawn
+ * (`workItems` given, mode not `off`) and stories are hidden inside it.
+ */
+export function closedGroupBadge(workItems: FlowWorkItems | undefined, nodeId: string): boolean {
+  return (
+    workItems !== undefined &&
+    workItems.mode !== 'off' &&
+    subtreeWorkItemCounts(workItems.overlay, nodeId).stories > 0
+  );
+}
+
+function childNamesOf(model: ArchitectureModel, node: ArchNode): string[] {
+  return node.childIds.map((child) => model.nodes.get(child)?.name ?? child);
+}
+
+/**
+ * The box of the closed group `node` drawn shrunk inside `rect` ({@link compactGroupBox}), with
+ * a line for the work-item badge when `badge`. Undefined when that box would list none of the
+ * children: a full box that small stays an ordinary collapsed group.
+ */
+function shrunkGroupBox(
+  node: ArchNode,
+  childNames: readonly string[],
+  rect: Rect,
+  badge: boolean,
+): CompactGroupBox | undefined {
+  const box = compactGroupBox(rect, node.name, childNames, badge ? COMPACT_GROUP.badgeLine : 0);
+  return fitsCompact(box, childNames) ? box : undefined;
+}
+
+/**
+ * Size `buildFlow` draws the closed group `node` at when its layout box is `full`: shrunk
+ * (`view.compactCollapsed`, when the shrunk box lists at least one child) or the size of `full`.
+ * A box of the shrunk size gives that size again, so a closed group laid out at this size is
+ * drawn filling its box.
+ */
+export function closedGroupSize(
+  model: ArchitectureModel,
+  node: ArchNode,
+  full: Rect,
+  view: Pick<FlowView, 'compactCollapsed' | 'workItems'>,
+): Size {
+  const box = view.compactCollapsed
+    ? shrunkGroupBox(
+        node,
+        childNamesOf(model, node),
+        full,
+        closedGroupBadge(view.workItems, node.id),
+      )
+    : undefined;
+  const rect = box?.rect ?? full;
+  return { width: rect.width, height: rect.height };
+}
+
+/**
+ * Absolute rectangles of the nodes {@link buildFlow} draws of `layout` through `view`, as it
+ * draws them: a closed group drawn shrunk has its shrunk box, in the middle of the box the layout
+ * gives it (a closed group that spans rows has a whole column there).
+ */
+export function drawnNodeRects(
+  model: ArchitectureModel,
+  layout: LayoutResult,
+  view: Pick<FlowView, 'collapsedIds' | 'lodLevel' | 'compactCollapsed' | 'workItems'> = {},
+): Map<string, Rect> {
+  const visible = visibleNodes(
+    model,
+    view.collapsedIds ?? NOTHING_COLLAPSED,
+    view.lodLevel ?? 'detail',
+  );
+  const rects = new Map<string, Rect>();
+  for (const node of model.nodes.values()) {
+    const full = visible.has(node.id) ? layout.absolute.get(node.id) : undefined;
+    if (!full) continue;
+    const closedGroup =
+      node.childIds.length > 0 && !node.childIds.some((child) => visible.has(child));
+    const box =
+      view.compactCollapsed && closedGroup
+        ? shrunkGroupBox(
+            node,
+            childNamesOf(model, node),
+            full,
+            closedGroupBadge(view.workItems, node.id),
+          )
+        : undefined;
+    rects.set(node.id, box?.rect ?? full);
+  }
+  return rects;
+}
+
+/**
  * React Flow nodes and edges for the model as seen through `view`. Positions and sizes come
- * straight from the layout of the fully expanded graph (relative to the parent), whatever is
- * collapsed: hidden nodes are left out, and a closed group keeps exactly the box it has when open,
- * so nothing is ever laid out again and no node moves. Edges are the rollup of the
- * model's edges onto the visible nodes.
+ * straight from the layout that is passed in (relative to the parent): the layout of the fully
+ * expanded graph, in which a closed group keeps exactly the box it has when open and no node
+ * moves whatever is collapsed, or that layout closed up around what is drawn
+ * (`arrangeLayout`). Nothing is laid out here; hidden nodes are left out. Edges are the rollup
+ * of the model's edges onto the visible nodes.
  *
  * Level of detail, always on top of the manual collapse, which wins:
  * - `domains`: domains only, drawn as closed groups; edges aggregated between domains;
@@ -819,7 +915,7 @@ export function buildFlow(
     // Children are shown or hidden together, so none visible means the box is closed.
     const isClosed = !node.childIds.some((child) => visible.has(child));
     if (isClosed) closed.add(node.id);
-    const childNames = node.childIds.map((child) => model.nodes.get(child)?.name ?? child);
+    const childNames = childNamesOf(model, node);
     let listed: NodeWorkItemLines | undefined;
     let badge: WorkItemCounts | undefined;
     const block = workItems ? layout.content.get(node.id) : undefined;
@@ -844,21 +940,17 @@ export function buildFlow(
         if (found.stories > 0) badge = found;
       }
     }
-    // A shrunk box has a line for the badge below its list of names.
-    const badgeLine = badge ? COMPACT_GROUP.badgeLine : 0;
-    // A full box too small to list even one child stays an ordinary collapsed group.
-    const fitted =
+    // A shrunk box has a line for the badge below its list of names (`closedGroupBadge`).
+    const box =
       compactCollapsed && isGroup && isClosed
-        ? compactGroupBox(full, node.name, childNames, badgeLine)
+        ? shrunkGroupBox(node, childNames, full, badge !== undefined)
         : undefined;
-    const box = fitted && fitsCompact(fitted, childNames) ? fitted : undefined;
     const compact = box !== undefined;
     const rect = box?.rect ?? full;
     if (compact) {
       const absolute = layout.absolute.get(node.id);
-      if (absolute) {
-        shrunk.set(node.id, compactGroupBox(absolute, node.name, childNames, badgeLine).rect);
-      }
+      const around = absolute && shrunkGroupBox(node, childNames, absolute, badge !== undefined);
+      if (around) shrunk.set(node.id, around.rect);
     }
     if (isClosed) {
       const drawn = shrunk.get(node.id) ?? layout.absolute.get(node.id);

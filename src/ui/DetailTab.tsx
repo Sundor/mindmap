@@ -78,6 +78,11 @@ export interface DetailTabProps {
   readonly lodMode: LodMode;
   /** The level being drawn (in Auto mode: the one the zoom selected). */
   readonly lodLevel: LodLevel;
+  /**
+   * The level the zoom has reached and the map is drawn at once the view rests (the map closed
+   * up, in Auto mode); undefined while the level drawn is the one of the zoom.
+   */
+  readonly pendingLevel?: LodLevel | undefined;
   readonly lodConfig: LodConfig;
   readonly onChooseLod: (mode: LodMode) => void;
   /** Groups collapsed by hand. */
@@ -97,6 +102,7 @@ export function DetailTab({
   drawn,
   lodMode,
   lodLevel,
+  pendingLevel,
   lodConfig,
   onChooseLod,
   collapsedCount,
@@ -124,16 +130,23 @@ export function DetailTab({
           aria-label="Level of detail"
           data-lod={lodLevel}
           data-lod-mode={lodMode}
+          data-lod-pending={pendingLevel}
         >
           {LOD_MODES.map((mode) => (
             <button
               key={mode}
               type="button"
-              className={`lod-step${mode === lodLevel ? ' lod-step-current' : ''}`}
+              className={`lod-step${mode === lodLevel ? ' lod-step-current' : ''}${
+                mode === pendingLevel ? ' lod-step-pending' : ''
+              }`}
               data-lod-option={mode}
               aria-pressed={mode === lodMode}
               aria-current={mode === lodLevel ? 'true' : undefined}
-              title={lodHint(mode, lodConfig)}
+              title={
+                mode === pendingLevel
+                  ? `The zoom has reached this level: it is drawn once the view rests. ${lodHint(mode, lodConfig)}`
+                  : lodHint(mode, lodConfig)
+              }
               onClick={() => onChooseLod(mode)}
             >
               {LOD_LABELS[mode]}
@@ -174,12 +187,17 @@ export function DetailTab({
           <input
             type="checkbox"
             id="compact-collapsed"
-            checked={settings.compactCollapsed}
+            checked={settings.compactCollapsed || settings.closeGaps}
+            disabled={settings.closeGaps}
             onChange={(event) => onChange({ ...settings, compactCollapsed: event.target.checked })}
           />
           <span>
             Shrink collapsed groups
-            <small> (off: a collapsed group keeps its full box)</small>
+            {settings.closeGaps ? (
+              <small> (on with Layout → Close up the gaps)</small>
+            ) : (
+              <small> (off: a collapsed group keeps its full box)</small>
+            )}
           </span>
         </label>
       )}

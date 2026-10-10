@@ -1,7 +1,9 @@
-// The minimap: the whole map at a fixed scale, with the part the canvas shows as a rectangle.
-// React Flow's own <MiniMap> fits its view box around the map *and* the viewport, so it shrinks
-// whenever the view is panned off the map; this one never changes scale (src/core/minimap.ts):
-// a view partly or wholly off the map is cut off at the edge of the minimap.
+// The minimap: the whole map, with the part the canvas shows as a rectangle. React Flow's own
+// <MiniMap> fits its view box around the map *and* the viewport, so it shrinks whenever the view
+// is panned off the map; here the scale depends on the size of the map as it is drawn alone,
+// never on the viewport (src/core/minimap.ts): a view partly or wholly off the map is cut off at
+// the edge of the minimap, and the scale is another one only when the map is drawn at another
+// size (closed up, or opened out again).
 
 import { Panel, useReactFlow, useStore, useStoreApi, type ReactFlowState } from '@xyflow/react';
 import { memo, useCallback, useEffect, useMemo, useRef, type PointerEvent } from 'react';

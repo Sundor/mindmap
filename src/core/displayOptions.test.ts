@@ -93,6 +93,7 @@ describe('display settings', () => {
     const settings: DisplaySettings = {
       lod: withLodThreshold(LOD_CONFIG, 'detailZoom', 2.5),
       compactCollapsed: true,
+      closeGaps: true,
       showRows: false,
       showCompleted: false,
       storyMode: 'tasks',
@@ -136,6 +137,19 @@ describe('display settings', () => {
     expect(lodConfigFromStored(disordered)).toBe(LOD_CONFIG);
     expect(lodConfigFromStored({ ...disordered, componentsZoom: -1 })).toBe(LOD_CONFIG);
     expect(parseDisplaySettings('{"compactCollapsed":"yes"}').compactCollapsed).toBe(false);
+  });
+
+  it('closes up the gaps only when stored as true', () => {
+    expect(DEFAULT_DISPLAY_SETTINGS.closeGaps).toBe(false);
+    for (const value of ['true', '1', '"yes"', 'null', '{}']) {
+      expect(parseDisplaySettings(`{"closeGaps":${value}}`).closeGaps).toBe(value === 'true');
+    }
+    const on = { ...DEFAULT_DISPLAY_SETTINGS, closeGaps: true };
+    expect(parseDisplaySettings(serializeDisplaySettings(on))).toEqual(on);
+    expect(JSON.parse(serializeDisplaySettings(DEFAULT_DISPLAY_SETTINGS))).toHaveProperty(
+      'closeGaps',
+      false,
+    );
   });
 
   it('shows stories by default and reads the work-item settings defensively', () => {

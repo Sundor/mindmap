@@ -221,6 +221,12 @@ button {
   font-weight: 600;
 }
 
+/* The level the zoom has reached, drawn once the view rests (the map closed up, in Auto). */
+button.lod-step-pending {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
 /* The mode the user picked. */
 .lod-step[aria-pressed='true'] {
   border-color: var(--accent);
@@ -657,6 +663,13 @@ button {
 
 /* --- React Flow: edges --------------------------------------------------------------------- */
 
+/* The hit area of an edge reaches into the boxes at its ends, by half its width. The line starts
+   half a pixel outside the box it attaches to: a pointer that follows it out of the box would
+   otherwise come to lie, for a moment, on what is between them. */
+.react-flow__edge .react-flow__edge-interaction {
+  stroke-linecap: square;
+}
+
 .arch-defs {
   position: absolute;
   width: 0;
@@ -778,7 +791,8 @@ button {
   fill: var(--leaf-border);
 }
 
-/* Our own minimap (src/ui/MiniMapFixed.tsx): drawn in minimap pixels, at a fixed scale. */
+/* Our own minimap (src/ui/MiniMapFixed.tsx): drawn in minimap pixels, at the scale the size of
+   the map gives it. */
 .arch-minimap .react-flow__minimap-svg {
   display: block;
   cursor: pointer;
@@ -2435,6 +2449,12 @@ input:focus-visible {
   background: none;
   color: inherit;
   font-weight: 400;
+}
+
+/* Another level is drawn once the view rests (the map closed up, in Auto). */
+.cp-tab-mark-pending {
+  border-style: dashed;
+  border-color: var(--accent);
 }
 
 /* A level pinned by hand, not following the zoom. */

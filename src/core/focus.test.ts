@@ -9,8 +9,6 @@ import {
   focusFlow,
   focusSet,
   isFocusMode,
-  QUIET_CLASS,
-  quietEdges,
   buildWorkItemOverlay,
   type WorkItemSummary,
   type WorkItemType,
@@ -101,7 +99,7 @@ describe('isFocusMode', () => {
   });
 });
 
-describe('focusFlow and quietEdges', async () => {
+describe('focusFlow', async () => {
   const layout = await computeLayoutUncached(model);
 
   it('pales what the flow does not involve, keeping the groups around what it does', () => {
@@ -201,26 +199,6 @@ describe('focusFlow and quietEdges', async () => {
     });
     // two-y runs from a.x.two to a.y: both ends light up, nothing else changes.
     expect(fadedNodes(edgeAtGroup)).toEqual([]);
-  });
-
-  it('quietens every edge but those at the given nodes or in the focus', () => {
-    const flow = buildFlow(model, layout, { lodLevel: 'components' });
-    const quiet = quietEdges(flow, new Set(['a.y']), undefined);
-    const loud = quiet.edges.filter((edge) => !edge.className.includes(QUIET_CLASS));
-    expect(loud.every((edge) => edge.source === 'a.y' || edge.target === 'a.y')).toBe(true);
-    expect(loud.length).toBeGreaterThan(0);
-    const set = focusSet(model, { type: 'flow', id: 'deploy' });
-    const withFocus = quietEdges(flow, new Set(), set);
-    expect(
-      withFocus.edges
-        .filter((edge) => !edge.className.includes(QUIET_CLASS))
-        .every((edge) => edge.data.memberEdgeIds.includes('p-one')),
-    ).toBe(true);
-    // Nothing to quieten: the same graph.
-    expect(quietEdges({ nodes: [], edges: [] }, new Set(), undefined)).toEqual({
-      nodes: [],
-      edges: [],
-    });
   });
 });
 

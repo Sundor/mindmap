@@ -596,14 +596,14 @@ panel shows the name and version of the viewer, the names of the two data files,
 box and the tab that is chosen. Below, "**Lenses → Colour by**" means the control _Colour by_
 on the tab _Lenses_.
 
-| Tab            | Holds                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Detail**     | The level of detail; Collapse all, Expand all, Shrink collapsed groups; Work items on the map; the zoom thresholds of Auto |
-| **Visibility** | Focus, with the Focus / Filter switch; the four edge-kind buttons, Edges on demand; Work items shown (states, iteration)   |
-| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                     |
-| **Layout**     | Arrange in rows; Unlock / Lock positions, Reset positions                                                                  |
-| **Views**      | The saved views and Copy link                                                                                              |
-| **Files**      | What the two data files hold, Open YAML…, Open work items…, Recent maps                                                    |
+| Tab            | Holds                                                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Detail**     | The level of detail; Collapse all, Expand all, Shrink collapsed groups (on while Close up the gaps is); Work items on the map; the zoom thresholds of Auto |
+| **Visibility** | Focus, with the Focus / Filter switch; the four edge-kind buttons, Edges on demand; Work items shown (states, iteration)                                   |
+| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                     |
+| **Layout**     | Arrange in rows; Close up the gaps; Unlock / Lock positions, Reset positions                                                                               |
+| **Views**      | The saved views and Copy link                                                                                                                              |
+| **Files**      | What the two data files hold, Open YAML…, Open work items…, Recent maps                                                                                    |
 
 - A click on a tab shows it. A click on the tab that is shown, or **Hide**, hides the body and
   leaves the rail; **Show** or a click on any tab brings it back. The tab shown and whether the
@@ -645,6 +645,7 @@ The version of the viewer stands beside its name at the top of the control panel
 | Calm the overview                     | **Visibility → Edges on demand**                                                                       |
 | Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                             |
 | Lay out without the row bands         | **Layout → Arrange in rows**                                                                           |
+| Close up the room of closed groups    | **Layout → Close up the gaps**                                                                         |
 | Move boxes by hand                    | **Layout → Unlock positions**, drag, **Lock positions**; **Reset positions** undoes it                 |
 | Load other data                       | **Files → Open YAML…**, **Open work items…**, or drop a file on the page                               |
 | Open a map again                      | **Files → Recent maps**, **Open again** on the start page (Edge, Chrome)                               |
@@ -654,9 +655,64 @@ The version of the viewer stands beside its name at the top of the control panel
 - **Levels of detail.** Zoomed out, only domains are drawn and edges are merged per domain;
   zooming in shows components, then subcomponents with edge labels, then (**Everything**, above
   160%) the work items listed inside the boxes. At the coarser levels a badge on a box counts
-  its work items and its open bugs. Changing level never moves anything.
-- **Collapsed groups** keep their place; edges into them are re-attached to the group and
-  merged (`×3`). Select a merged edge to see its member edges.
+  its work items and its open bugs. Changing level never moves anything, unless **Close up the
+  gaps** is on.
+- **Collapsed groups** keep their place, unless **Close up the gaps** is on; edges into them
+  are re-attached to the group and merged (`×3`). Select a merged edge to see its member edges.
+- **Close up the gaps** (**Layout** tab, off by default) moves the boxes that are drawn closer
+  together whenever groups are closed — by hand, by **Collapse all**, by a pinned level, or in
+  Auto by the zoom — and apart again when they open.
+  - _What moves:_ a closed group is drawn shrunk and takes only the room of its small box; an
+    open group closes up around what is drawn inside it and shrinks to it; a leaf keeps its
+    size. With rows, the items of each band are placed again from their new sizes, in the same
+    order, the bands are as tall as what they now hold, and a closed group that spans rows keeps
+    its column over them.
+  - _What stays:_ among the boxes of one group, and among the domains, a box that is left or
+    right of another box stays on that side, and so does one above or below it; the space
+    between two such boxes is never less than on the full map — or, where it is wider there,
+    than the usual spacing, so a wide gap may close down to that — and the map never becomes
+    wider or taller than the full one. One exception: a box of the Unassigned area follows its
+    connections, as on the full map — it stays right of the row bands, but may come to stand
+    beside a box in the bands that it stood above or below.
+    The map is still laid out only once, fully expanded, and closing up only moves its boxes,
+    so it happens at once, and the same groups closed at the same level always give the same
+    map: zooming across a level and back shows the map as it was. With every group open at
+    Subcomponents or Everything the map is the full one.
+  - _What changes it:_ a group opened or closed, **Collapse all** / **Expand all**, pinning a
+    level or going back to Auto, switching the option, a closed group gaining or losing its
+    work-item badge, and in Auto a zoom that crosses a level. Panning, zooming within a level,
+    selecting, the lenses and the edge kinds do not.
+  - _What keeps its place:_ a group opened or closed with its chevron (or by double-clicking
+    it) stays where it is on the screen — its top left corner, with the header and the chevron
+    — and the rest closes up or opens out around it. For every other change the box in the
+    middle of the canvas stays where it is, at the same zoom.
+  - _Auto:_ the level follows the zoom once the view has come to rest (0.2 s after it last
+    moved, and not while a finger is on the screen or the canvas is being dragged), not in the
+    middle of a zoom. Until then the **Detail** tab shows the level that is still drawn, the
+    button of the level to come has a dashed outline there, and so has the level shown on the
+    rail; the work-item lists of Everything come and go with their level, when the view rests.
+    Going to a search result, a link in the detail panel, a work item or a saved view first
+    closes up the map for the level the move ends on, then moves there.
+  - _Shrink collapsed groups_ is implied: while the option is on, closed groups are drawn shrunk
+    whatever that setting says, and its checkbox shows checked and disabled. Switching the
+    option off brings that setting back as it was.
+  - _Fit view_ fits the map as it is closed up at the level the fit ends on. In Auto it tries
+    every level and takes, of the fits whose zoom draws that very level, the one zoomed in
+    furthest; the level then stays, the fit is the same whatever level it is pressed at, and
+    pressing **Fit view** again changes nothing. With a pinned level the map closed up for that
+    level is fitted. The fit button among the zoom buttons at the bottom left of the map fits
+    the map as **Fit view** on the rail does, with the option on or off.
+  - _With the other controls:_ **Arrange in rows** and **Filter** work as without the option (a
+    filtered map closes up around its own closed groups); leaving Filter puts the box that was
+    in the middle back in the middle. The minimap shows the map as it is drawn, closed up.
+  - _Limits:_ without rows, keeping the boxes on their sides of each other costs room — a gap
+    stays open where a box further along still needs it — so the map closes up less than it
+    could; with rows this costs less, but a box also stays right of the boxes of other rows
+    that it was right of, so a gap can stay open in a row. Hand-moved positions belong to one
+    arrangement: each set of closed groups has its own, so a box dragged while some groups are
+    closed is back in its place when others are, and where it was dropped when the same ones
+    are closed again; positions moved on the full map show only with the option off, or while
+    the map drawn is the full one (every group open at Subcomponents or Everything).
 - **Edge legend** (top left of the map): a sample of the line of each edge kind with its name,
   there whichever tab is shown; a kind that is hidden is struck through. It is a key only — the
   kinds are switched under **Visibility → Edges**.
@@ -712,28 +768,43 @@ The version of the viewer stands beside its name at the top of the control panel
   legend. Attribute colours are given in the order the values first appear; from the ninth
   value on everything is "Other". A metric is drawn light (its smallest value) to dark (its
   largest).
-- **Edges on demand** hides the edges at the Domains and Components levels, except at the box
-  under the pointer, at the selected box and those of the focus. Finer levels show every edge.
+- **Edges on demand** hides the edges, at every level of detail, except at the box under the
+  pointer, at the selected box or edge, and those of the focus. Pointing at the frame of an open
+  group shows the edges at the group and at everything drawn inside it; pointing at a box inside
+  the group shows only that box's edges. Selecting a box works the same way — also one gone to
+  from the search or a link in a panel, without the pointer — and a selected work item shows
+  the edges of the boxes that list it. Moving the pointer from a box onto one of its edges
+  keeps them shown, so the edge can be followed and clicked; a hidden edge cannot be clicked.
 - **Views** (the **Views** tab) keep an arrangement under a name: collapsed groups, hidden edge
-  kinds, level of detail, focus, colouring, story mode and where the view is (the point in the
-  middle, so it fits any window). Saved views stay in this browser, per structure. **Copy
-  link** puts a link on the clipboard that carries the view itself (`viewer.html#view=…`), so it
-  can be sent to anyone who has the same folder; the link is put in the address bar as well,
-  for where the clipboard is not available. The page applies the view of a link when it opens
-  with it, and again when it is reloaded with the link still in the address.
+  kinds, level of detail, focus, colouring, story mode, whether the map is closed up (**Close
+  up the gaps**) and where the view is (the point in the middle, so it fits any window). Saved
+  views stay in this browser, per structure. **Copy link** puts a link on the clipboard that
+  carries the view itself (`viewer.html#view=…`), so it can be sent to anyone who has the same
+  folder; the link is put in the address bar as well, for where the clipboard is not available.
+  The page applies the view of a link when it opens with it, and again when it is reloaded with
+  the link still in the address.
   - A view saved, or a link copied, while the map is filtered to its focus keeps **Filter**
     too: applied, it shows that filtered map again, at the same place. A view with a focus that
     was saved on the whole map shows it in Focus mode and sets the switch to Focus; a view
     without a focus leaves the switch alone.
   - When the focus of such a view cannot be filtered with the data that is loaded, the whole
     map is shown, fitted.
+  - Applying a view switches **Close up the gaps** on or off as it was when the view was
+    saved, and puts the same point in the middle. A view saved without the option, or before
+    it existed, is one of the full map and switches it off.
   - Views and links saved with version 0.1.1 or earlier open as before. A link copied on a
     filtered map needs version 0.2.0 or later: an older one shows the focus in Focus mode,
-    with the view at the wrong place.
+    with the view at the wrong place. A link copied with the map closed up needs a viewer newer
+    than 0.2.0: an older one shows the full map, with the view at the wrong place.
 - **Remembered in the browser** (`localStorage`): collapsed groups, the view of the whole map,
-  hidden edge kinds, hand-moved positions and saved views per structure; once for the viewer
-  the settings — the Focus / Filter switch among them — and the tab and the hidden or shown
-  body of the control panel. The focus and the selection are not remembered.
+  hidden edge kinds, hand-moved positions (per arrangement: rows on or off, each story mode,
+  each filtered map and each closed-up arrangement have their own) and saved views per
+  structure; once for the viewer the settings — the Focus / Filter switch and Close up the gaps
+  among them — and the tab and the hidden or shown body of the control panel. The focus, the
+  selection and a pinned level of detail are not remembered: a reload comes back in Auto, and
+  where the map is then drawn otherwise (closed up for another level, or without the work-item
+  lists) the view shows the same place — the box that was in the middle of the canvas is in the
+  middle again, at the same zoom.
   The recent maps are kept as references to their files (IndexedDB; Edge and Chrome), not as
   copies. Nothing is sent anywhere — the viewer makes no network request except fetching the
   data files when it is served over HTTP.

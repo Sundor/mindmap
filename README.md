@@ -60,10 +60,12 @@ or Chrome and drives it with real mouse and keyboard input through the DevTools 
 selection and dimming (including a click on the line of every single edge and merged edge), the
 detail panel and its links, search, the control panel (its tabs, hiding its body, the search
 while it is hidden), aggregate → member edge, going to a long edge in a small window, the
-edge-kind filter, the focus in both of its modes (Focus and Filter), the work items (loaded,
-diagnosed, room reserved per story mode) and persistence across a reload. It uses Node
-built-ins only (Node 22+), finds the browser in its usual install location (set `BROWSER` to
-the executable to override), and closes the browser when done. The browser profile is one directory in the temp directory,
+edge-kind filter, the focus in both of its modes (Focus and Filter), edges on demand, the map
+closed up around its closed groups (what keeps its place, the level of detail, fitting), the
+work items (loaded, diagnosed, room reserved per story mode) and persistence across a reload.
+It uses Node built-ins only (Node 22+), finds the browser in its usual install location (set
+`BROWSER` to the executable to override), and closes the browser when done. The browser
+profile is one directory in the temp directory,
 `arch-map-smoke-profile`, emptied before and after each run and removed when the system allows
 it: security software may keep other programs out of a browser profile even after the browser
 has exited, and then the directory stays and the next run uses it again (the run clears the
@@ -366,7 +368,8 @@ items.
   like two edges attached to it. The shipped example has none beyond one clipped corner.
 - **Groups** (domains and components with children) collapse and expand with the **chevron** in
   their header, or by **double-clicking** the group. A collapsed group keeps its place and size —
-  nothing else on the map moves — and shows what it contains ("3 components · 7 subcomponents").
+  nothing else on the map moves, unless **Layout → Close up the gaps** is on (see below) — and
+  shows what it contains ("3 components · 7 subcomponents").
   Edges to or from anything inside it are re-attached to the group; several edges of the same
   kind and direction between the same two boxes merge into one heavier line labelled with their
   number (`×3`), and edges entirely inside the group disappear. Parallel edges (same `from`,
@@ -378,12 +381,79 @@ items.
   remembered in the browser.
 - **Rows** can be switched off with **Layout → Arrange in rows**: the map is then laid out
   without row bands, the nodes arranged by their connections alone.
+- **Closing up the gaps**: **Layout → Close up the gaps** (off by default) moves the boxes that
+  are drawn closer together whenever groups are closed — by hand, by **Collapse all**, by a
+  pinned level, or in Auto by the zoom — and apart again when they open.
+  - **What moves.** A closed group is drawn shrunk (as **Detail → Shrink collapsed groups**
+    draws it) and takes only the room of its small box; an open group closes up around what is
+    drawn inside it and shrinks to it; a leaf keeps its size. The row bands and the Unassigned
+    area close up too: with rows, the items of each band are placed again from their new sizes,
+    in the same order, each band is as tall as what it now holds, and a closed group that spans
+    rows keeps its column over those rows.
+  - **What stays.** The order, among the boxes of one group and among the domains: a box that
+    is left or right of another box stays on that side, and so does one above or below it. The
+    space between two such boxes is never less than on the full map — or, where it is wider
+    there, than the usual spacing (48 px side by side, 32 px between the items of the row
+    bands, 24 px one above the other): a wide gap may close down to that. One exception: a
+    box of the Unassigned area follows its connections, as it does on the full map — it stays
+    right of the row bands and above or below the other boxes of the area, but it may come to
+    stand beside a box in the bands that it stood above or below. The map never becomes wider
+    or taller than the full one. Nothing is laid out again — the map is still laid out once,
+    fully expanded, and closing up only moves those boxes — so it happens at once, and the same
+    groups closed at the same level give the same map: zooming across a level and back shows
+    the map as it was. With every group open at the Subcomponents or Everything level the map
+    is the full one.
+  - **What changes it.** A group opened or closed by hand, **Collapse all** and **Expand all**,
+    pinning a level (or going back to Auto), switching the option, a work-item badge appearing
+    on or leaving a closed group (another story mode or work-item filter), and in Auto a zoom
+    that crosses a level. Pan, zoom within a level, selection, the lenses, the edge kinds and
+    dragging a box do not.
+  - **What keeps its place.** When a group is opened or closed with its chevron or by
+    double-clicking it, that group stays where it is on the screen — its top left corner, with
+    the header and the chevron — and the rest of the map closes up or opens out around it. For
+    every other change the box in the middle of the canvas stays where it is, at the same zoom
+    (the innermost box drawn there both before and after: a subcomponent that is no longer
+    drawn hands over to its component; with no box in the middle, the nearest one keeps its
+    distance to it). The map and the view change in the same frame.
+  - **Auto.** With the option on, the level follows the zoom once the view has come to rest —
+    0.2 s after it last moved, and not while a finger is on the screen or the canvas is being
+    dragged — not in the middle of a zoom; the **Detail** tab shows the level that is drawn.
+    While the zoom has passed a threshold and the view has not come to rest yet, the button of
+    the level to come has a dashed outline, and so has the level shown on the rail (its tooltip
+    names the level to come). The work-item lists of the Everything level come and go with that
+    level, when the view rests.
+    Going somewhere — a search result, a link in the detail panel, a work item, a saved view —
+    first closes up the map for the level the move ends on, then moves the view.
+  - **Shrink collapsed groups** is implied: while the option is on, closed groups are drawn
+    shrunk whatever that setting says, and its checkbox on the **Detail** tab shows checked and
+    disabled, with "(on with Layout → Close up the gaps)". The setting itself is kept and
+    applies again when the option is switched off.
+  - **Positions moved by hand** belong to one arrangement, and each closed-up arrangement has
+    its own: a box dragged while the map is closed up for one set of closed groups is back in its
+    place when another set is drawn, and where it was dropped when that set is drawn again.
+    Positions moved on the full map are not carried into the closed-up arrangements; they show
+    again with the option off, or whenever the map drawn is the full one (every group open at
+    the Subcomponents or Everything level). **Reset positions** undoes the moves of the
+    arrangement on screen.
+  - **Limits.** Without rows, keeping the boxes on their sides of each other costs room: a gap
+    stays open where a box further along still needs it, so the map closes up less than it
+    could if boxes were allowed to pass each other. With rows the items of each band are packed
+    again, which costs less; but an item also stays right of the items of other rows that it
+    was right of, so a gap can stay open in one row where a box of another row needs it.
+    Positions moved by hand do not carry over from one arrangement to another (see above). The
+    shipped example without work items (map size in canvas pixels):
+
+    | Rows | Full map  | Closed up at Domains | Closed up at Components |
+    | ---- | --------- | -------------------- | ----------------------- |
+    | on   | 2484×1120 | 1608×378             | 2352×778                |
+    | off  | 4020×1092 | 1923×290             | 3377×656                |
+
 - **Moving things by hand**: click **Unlock positions** on the **Layout** tab, then drag a group
   or a node inside a group. A node stays inside its group, a group takes its contents along, and
   nothing else moves; edges are redrawn when you drop. The positions are remembered in the
-  browser for that arrangement (rows on or off, each story mode and each map filtered to a focus
-  have their own). **Reset positions** undoes all moves of the arrangement on screen; **Lock
-  positions** makes dragging pan the view again.
+  browser for that arrangement (rows on or off, each story mode, each map filtered to a focus and
+  each arrangement closed up by **Close up the gaps** have their own). **Reset positions** undoes
+  all moves of the arrangement on screen; **Lock positions** makes dragging pan the view again.
 - **Level of detail** is chosen with the buttons at the top of the **Detail** tab. **Auto** (the
   default) follows the zoom; **Domains**, **Components**, **Subcomponents** and **Everything**
   pin that level whatever the zoom. The filled button is the mode you picked; in Auto the level
@@ -415,17 +485,31 @@ items.
   | above 160%  | `detail`        | everything: the work items are listed inside the boxes                                    |
 
   A level only changes once the zoom is 5% past a threshold (up past 42% / 105% / 168%, down
-  below 38% / 95% / 152%), so it does not flicker at a boundary. Changing level never moves anything: boxes
-  keep the position and size of the one layout, and the row bands and the Unassigned area are
-  always shown. A group **collapsed by hand stays collapsed** at every zoom. A group closed only
-  by the level of detail has a disabled chevron — zoom in to open it. At the `domains` level the
-  domain and row titles are drawn larger so they stay readable. The thresholds are the
-  `LOD_CONFIG` object in `src/core/lod.ts`.
+  below 38% / 95% / 152%), so it does not flicker at a boundary. Changing level never moves
+  anything: boxes keep the position and size of the one layout, and the row bands and the
+  Unassigned area are always shown. (With **Layout → Close up the gaps** a change of level does
+  move boxes, as described above.) A group **collapsed by hand stays collapsed** at every zoom.
+  A group closed only by the level of detail has a disabled chevron — zoom in to open it. At
+  the `domains` level the domain and row titles are drawn larger so they stay readable. The
+  thresholds are the `LOD_CONFIG` object in `src/core/lod.ts`.
 
   A view that starts fitted — on load when no viewport is remembered, and a map that has just
   been filtered to a focus — is judged by the plain thresholds of the table. **Fit view** on the
   rail glides to the fitted view, and the level follows the zoom on the way as with any other
-  zoom: a fit that ends within 5% of a threshold keeps the level it came from.
+  zoom: a fit that ends within 5% of a threshold keeps the level it came from. Pressed at the
+  Everything level, the fit takes the zoom out of that level: the map is laid out again without
+  the work-item lists and fitted once more, so that one press gives the fitted view.
+
+  With **Layout → Close up the gaps** on, the map that is fitted is the one drawn at the level
+  the fit ends on, closed up. In Auto that level depends on the zoom of the fit, so the fit is
+  worked out for each level, and of the fits whose zoom draws that very level — by the plain
+  thresholds of the table, whatever level the view comes from — the one zoomed in furthest is
+  taken: the map is closed up for that level and the view then goes there. The level does not
+  change after the fit, the fit is the same wherever it is pressed, and pressing **Fit view**
+  again leaves the view as it is; where no level qualifies (thresholds moved to the edge of the
+  zoom range), the map on screen is fitted as with the option off. A map fitted when it is
+  drawn (on load, or filtered to a focus) is fitted the same way. With a pinned level the
+  closed-up map of that level is fitted. The measurements below are with the option off.
 
   How far a fit zooms depends on the canvas: the page less the rail of the control panel
   (56 px) and, from a width of 1400 px, less its open body (280 px). In a narrower page the
@@ -454,22 +538,24 @@ items.
   fitted load shows `components` and **Fit view** pressed at the `domains` level stays in
   `domains`.
 
-- **Minimap** (bottom right): always the whole map at the same scale, with the part the canvas
-  shows as a rectangle. When the view is panned partly or wholly off the map, the rectangle is
-  cut off at the edge of the minimap; the minimap itself does not shrink. Press anywhere in it to
-  put that point in the middle of the canvas, keep the button down and drag to move the view
-  along with the pointer; the mouse wheel over it zooms the canvas about its middle.
+- **Minimap** (bottom right): always the whole map, at a scale that the size of the map alone
+  gives it — never the view —, with the part the canvas shows as a rectangle. When the view is
+  panned partly or wholly off the map, the rectangle is cut off at the edge of the minimap; the
+  minimap itself does not shrink. Press anywhere in it to put that point in the middle of the
+  canvas, keep the button down and drag to move the view along with the pointer; the mouse
+  wheel over it zooms the canvas about its middle. With **Layout → Close up the gaps** it shows
+  the map as it is drawn, closed up, and takes a new scale when the map closes up or opens out.
 
 - **Work items** are listed inside the boxes at the `detail` level and counted in a badge
   elsewhere — see [Work items on the map](#work-items-on-the-map).
 
 - The layout is computed once per loaded file (and again when the story mode, the work-item
-  filter or the work items change, and for a map filtered to a focus) and never changes on pan,
-  zoom or collapse; nodes can be dragged only after **Layout → Unlock positions**. **Fit view**
-  on the rail of the control panel shows the whole map; a small map is not magnified beyond
-  125%. The fit button among the zoom controls at the bottom left is the canvas library's own:
-  it fits the map into the whole canvas, without that limit and without leaving room for the
-  open body of the control panel or for the minimap.
+  filter or the work items change, and for a map filtered to a focus) and is never computed
+  again on pan, zoom or collapse; with **Layout → Close up the gaps** on, the boxes of that one
+  layout close up instead. Nodes can be dragged only after **Layout → Unlock positions**.
+  **Fit view** on the rail of the control panel shows the whole map; a small map is not
+  magnified beyond 125%. The fit button among the zoom controls at the bottom left fits the map
+  the same way.
 
 ## Using the map
 
@@ -493,6 +579,7 @@ items.
 | Calm the overview                       | **Visibility → Edges on demand**                                                           |
 | Keep or share an arrangement            | **Views** tab: save under a name, apply, delete, **Copy link**                             |
 | Lay out without the row bands           | **Layout → Arrange in rows**                                                               |
+| Close up the room of closed groups      | **Layout → Close up the gaps**                                                             |
 | Move boxes by hand                      | **Layout → Unlock positions**, drag, **Lock positions**; **Reset positions** undoes it     |
 | Load other data, or a map opened before | **Files** tab: **Open YAML…**, **Open work items…**, **Recent maps**; or drop a file       |
 | Read the files of the map again         | **Reload** on the rail (maps opened from disk in Edge and Chrome)                          |
@@ -510,14 +597,14 @@ at its foot **Reload** (while the map shown is one the browser can read again fr
 the names of the structure file and the work-items file, below them the search box, and then
 the tab that is chosen:
 
-| Tab            | Holds                                                                                                                                                       |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Detail**     | The level of detail; **Groups**: Collapse all, Expand all, Shrink collapsed groups; **Work items on the map**: the story mode; **Auto: zoom thresholds**    |
-| **Visibility** | **Focus**: the chooser and the Focus / Filter switch; **Edges**: the four kind buttons, Edges on demand; **Work items shown**: the states and the iteration |
-| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                      |
-| **Layout**     | **Rows**: Arrange in rows; **Positions**: Unlock / Lock positions, Reset positions                                                                          |
-| **Views**      | The saved views: save under a name, apply, delete; Copy link, of the current arrangement or of a saved view                                                 |
-| **Files**      | **Structure** and **Work items**: what each file holds, with Open YAML… and Open work items…; **Recent maps**                                               |
+| Tab            | Holds                                                                                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Detail**     | The level of detail; **Groups**: Collapse all, Expand all, Shrink collapsed groups (on while Close up the gaps is); **Work items on the map**: the story mode; **Auto: zoom thresholds** |
+| **Visibility** | **Focus**: the chooser and the Focus / Filter switch; **Edges**: the four kind buttons, Edges on demand; **Work items shown**: the states and the iteration                              |
+| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                                                   |
+| **Layout**     | **Rows**: Arrange in rows; **Closed groups**: Close up the gaps; **Positions**: Unlock / Lock positions, Reset positions                                                                 |
+| **Views**      | The saved views: save under a name, apply, delete; Copy link, of the current arrangement or of a saved view                                                                              |
+| **Files**      | **Structure** and **Work items**: what each file holds, with Open YAML… and Open work items…; **Recent maps**                                                                            |
 
 The **Detail** tab is headed "Level of detail" in the body, so that it is not taken for the
 detail panel at the right. A control is offered when it has something to act on: the story
@@ -530,8 +617,8 @@ with the map.
 
 The tabs say on the rail what is behind them: **Detail** the level being drawn, **Visibility**
 a dot while something is hidden, paled or filtered (an edge kind hidden, a focus set, Edges on
-demand holding edges back at the Domains or Components level, work items hidden by the
-work-item filter), **Views** the number of saved views. The tooltips say it in full ("Level of
+demand holding edges back, work items hidden by the work-item filter), **Views** the number of
+saved views. The tooltips say it in full ("Level of
 detail: Components — follows the zoom"), and that of **Files** names the files in use.
 
 - **Showing and hiding.** A click on a tab shows it. A click on the tab that is shown hides the
@@ -756,16 +843,25 @@ switched on the **Visibility** tab. The legend of **Colour by** sits below it.
   metric (light = smallest, dark = largest); its legend sits at the top left of the canvas,
   below the edge legend. The node panel shows the attributes (saying where an inherited one
   comes from), the metrics and the links.
-- **Edges on demand** (**Visibility** tab): at the Domains and Components levels the edges are
-  hidden except at the box under the pointer, at the selected box or edge, and those of the
-  focus.
+- **Edges on demand** (**Visibility** tab): at every level of detail the edges are hidden
+  except at the box under the pointer, at the selected box (or the boxes that list the selected
+  work item), the selected edge, and those of the focus. A box is what is drawn of it: a leaf
+  or a closed group itself, an open group its frame and everything inside it — so the frame of
+  an open group shows the edges at all it contains, and a box inside it only its own. The edges
+  stay while the pointer moves from the box onto one of them, so it can be followed and
+  clicked; an edge that is hidden cannot be pointed at or clicked. The pointer is not needed: a
+  box gone to from the search or from a link in a panel is selected, and shows its edges.
 - **Views** (**Views** tab): the current arrangement — collapsed groups, hidden edge kinds,
   level of detail, focus (and that the map is filtered to it, when it is), colouring, story
-  mode and the point in the middle of the view with the zoom — saved under a name, per
-  structure, in the browser; applied or deleted from the list. **Copy link** puts
-  `viewer.html#view=…` on the clipboard and in the address bar: the link carries the view
-  itself and is applied when the page opens with it. The tab shows the number of saved views
-  on the rail.
+  mode, whether the map is closed up (**Layout → Close up the gaps**) and the point in the
+  middle of the view with the zoom — saved under a name, per structure, in the browser; applied
+  or deleted from the list. **Copy link** puts `viewer.html#view=…` on the clipboard and in the
+  address bar: the link carries the view itself and is applied when the page opens with it. The
+  tab shows the number of saved views on the rail. Applying a view switches **Close up the
+  gaps** on or off as it was when the view was saved, and puts the same point in the middle; a
+  view saved before the option existed is one of the full map and switches it off. A link
+  copied with the map closed up needs a viewer that has the option: an older one (0.2.0 or
+  before) shows the full map, with the view at the wrong place.
 - **Hints** at the end of the Diagnostics panel say what an author could add: nodes without a
   description or without any connection, domains without work items, no flows. They are
   neither errors nor warnings.
@@ -784,8 +880,9 @@ drawn", and the line under the switch counts what is left out ("Not drawn: 31 of
 - **The layout.** What is kept is laid out again, so it moves together. Every node stays in
   the row it has on the whole map — one that is placed by its connections there keeps that row
   and its dashed border — and a row left without a node is dropped, so the bands close up;
-  when no kept node has a row there are no bands. **Layout → Arrange in rows** applies as on
-  the whole map.
+  when no kept node has a row there are no bands. **Layout → Arrange in rows** and **Layout →
+  Close up the gaps** apply as on the whole map: closed up, it is the filtered map that closes
+  up around its closed groups.
 - **The view.** A filtered map arrives fitted: when the switch is set to Filter with a focus
   chosen, and when a focus, or another one, is chosen while it stands on Filter. Choosing a
   flow then does not move the view first. A flow that cannot be filtered (see the next point)
@@ -793,7 +890,8 @@ drawn", and the line under the switch counts what is left out ("Not drawn: 31 of
   once the whole map is back. Leaving the filtered map — the switch back to Focus,
   **Clear focus**, or going to something that is left out — brings the whole map back in the
   view it had before, at the same zoom; if the whole map was laid out anew in between (another
-  story mode, for example), the place that was in the middle is in the middle again. Where
+  story mode, for example), or comes back closed up differently, the place that was in the
+  middle is in the middle again. Where
   the whole map had not come to rest on screen before (a link that opens filtered), it is shown
   at its remembered viewport, or fitted.
 - **Nothing to leave out.** Without a focus the switch only waits: the line under it ends
@@ -826,7 +924,8 @@ drawn", and the line under the switch counts what is left out ("Not drawn: 31 of
   edge there is one of the focus.
 - **Positions moved by hand.** Each filtered map has positions of its own
   (**Layout → Unlock positions**): they are kept in the browser and come back with that map,
-  the whole map keeps its own, and **Reset positions** undoes those of the map on screen.
+  the whole map keeps its own, and **Reset positions** undoes those of the map on screen. With
+  **Close up the gaps**, each closed-up arrangement of a filtered map has its own too.
 - **Work items and lenses** say about a box what they say on the whole map: it lists and
   counts the same work items, the badge of a closed group counts everything inside it, heat is
   measured against the hottest box of its level on the whole map, and progress and colours are
@@ -857,14 +956,20 @@ Per structure (identified by its domain IDs), in the browser's `localStorage`:
   fitting the view, as long as it is valid and still shows a useful part of the map on the
   canvas as it is now (at least about 48 px of it in each direction; otherwise the view is
   fitted); **Fit view** gets you back to the whole map. It is not updated while the map is
-  filtered to a focus,
+  filtered to a focus. It is kept together with what it was taken on (the arrangement drawn, the
+  size of the canvas and the boxes around its middle): a pinned level is not remembered, so the
+  next load is in Auto and may draw the map otherwise — at another level with **Close up the
+  gaps** on, or without the work-item lists — and the view then shows the same place, the box
+  that was in the middle of the canvas in the middle again at the same zoom, instead of the
+  same numbers,
 - which edge kinds are hidden.
 
-Per structure as well: the saved views. Per arrangement: the positions moved by hand. Once for
-the viewer (not per structure): the display settings — the thresholds, "Shrink collapsed
-groups", "Arrange in rows", the story mode, the work-item filter, the lenses (heat, progress,
-edges on demand, colour by) and the Focus / Filter switch — and the control panel: the tab
-shown and whether its body is hidden.
+Per structure as well: the saved views. Per arrangement: the positions moved by hand (each
+layout, and each arrangement of it closed up by "Close up the gaps", has its own). Once for the
+viewer (not per structure): the display settings — the thresholds, "Shrink collapsed groups",
+"Arrange in rows", "Close up the gaps", the story mode, the work-item filter, the lenses (heat,
+progress, edges on demand, colour by) and the Focus / Filter switch — and the control panel:
+the tab shown and whether its body is hidden.
 
 In IndexedDB, once for the viewer: the recent maps — references to the files of the last 8 maps
 opened from disk (Edge and Chrome), not their content.

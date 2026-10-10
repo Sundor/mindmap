@@ -5,6 +5,46 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## Unreleased
+
+- **Changed behaviour — Edges on demand holds at every level of detail.** It used to hide the
+  edges only at the Domains and Components levels and show every edge at the finer ones; now
+  the Subcomponents and Everything levels hide them too, with the same exceptions: the edges at
+  the box under the pointer or selected, the selected edge, and those of the focus (a map
+  filtered to its focus still shows all its edges). The frame of an open group shows the edges
+  at the group and at everything drawn inside it; a box inside the group shows its own. The
+  edges of a box now stay while the pointer moves onto one of them, so it can be clicked, and a
+  click no longer picks a hidden edge that runs close to the one shown.
+- **Layout → Close up the gaps** (off by default). When groups are closed — by hand, by
+  Collapse all, by a pinned level or in Auto by the zoom — the boxes that are drawn move closer
+  together, and apart again when the groups open: a closed group is drawn shrunk and takes only
+  the room of its small box, an open group shrinks to what it shows, and with rows the bands
+  close up too. Among the boxes of one group, and among the domains, every box keeps its side
+  of the others — left or right, above or below — and the map never becomes wider or taller
+  than the full one; it is not laid out again, so it happens at once and the same groups closed
+  at the same level always give the same map. A group opened or closed with its chevron, or by
+  a double-click, stays where it is on the screen; for any other change the box in the middle
+  of the canvas stays where it is. While the option is on, closed groups are always drawn
+  shrunk (**Shrink collapsed groups** shows checked and disabled), and in Auto the level follows
+  the zoom once the view has come to rest rather than in the middle of a zoom — until then the
+  level to come has a dashed outline on the **Detail** tab and on the rail. **Fit view**
+  fits the map as it is closed up at the level the fit ends on. Hand-moved positions are kept
+  per closed-up arrangement. The option is remembered with the other settings, and saved views
+  and links remember whether the map was closed up; a view saved before switches it off. A link
+  copied with the map closed up needs this version: an older viewer shows the full map, with the
+  view at the wrong place.
+- **A view at the Everything level comes back where it was.** A reload, a saved view and a
+  link that were taken at the Everything level showed another part of the map the first time
+  (the map is laid out again there, with the work-item lists); they now show the place they
+  were taken at. The remembered viewport is kept with what it was taken on, so a reload also
+  shows the same place when it draws the map otherwise: a pinned level is not remembered, and
+  with **Close up the gaps** on the level of the zoom is another arrangement.
+- **Fit view pressed at the Everything level** gives the fitted view at the first press; it
+  used to stop short of it, and a second press was needed.
+- **The fit button among the zoom controls** at the bottom left of the canvas now fits the map
+  as **Fit view** on the rail does — clear of the open body of the control panel and of the
+  minimap, and not beyond 125% — instead of into the whole canvas.
+
 ## 0.2.0 — 2026-10-08
 
 - **Changed behaviour — the controls are in a panel at the left.** The toolbar at the top and

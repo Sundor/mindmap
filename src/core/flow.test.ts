@@ -1,10 +1,16 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import exampleYaml from '../../examples/architecture.yaml?raw';
+import fixtureJson from '../../fixtures/workitems.json?raw';
 import {
   bandNodeId,
   buildFlow,
+  closedGroupBadge,
+  closedGroupSize,
+  COMPACT_GROUP,
+  compactGroupBox,
   curvePath,
   curvePoint,
+  drawnNodeRects,
   distanceToCurve,
   EDGE_INTERACTION_WIDTH,
   edgeCurve,
@@ -30,6 +36,7 @@ import {
   type FlowView,
   type Side,
 } from './flow';
+import { arrangedLayout } from './arrange';
 import {
   clearLayoutCache,
   computeLayout,
@@ -39,6 +46,10 @@ import {
 import { layoutViolations, overlaps, parseOk } from './layout/test-helpers';
 import type { Rect } from './layout/types';
 import type { ArchitectureModel } from './model';
+import { miniMapNodes } from './minimap';
+import { groupIds, visibleNodes } from './visibility';
+import { buildWorkItemOverlay, subtreeWorkItemCounts } from './workItemOverlay';
+import { parseWorkItems } from './workitems';
 
 const rect = (x: number, y: number, width = 100, height = 50): Rect => ({ x, y, width, height });
 
@@ -385,6 +396,15 @@ edges:
     expect(nearestEdgeAt(on, [first, twin])?.id).toBe('twin');
     expect(nearestEdgeAt(on, [twin, first])?.id).toBe(first.id);
   });
+
+  it('passes over a line that edges on demand keeps out of sight', () => {
+    const [first] = flow.edges;
+    if (!first) throw new Error('no edge');
+    const hidden = { ...first, id: 'hidden', data: { ...first.data, quiet: true } };
+    const on = curvePoint(first.data.curve, 0.5);
+    expect(nearestEdgeAt(on, [first, hidden])?.id).toBe(first.id);
+    expect(nearestEdgeAt(on, [hidden])).toBeUndefined();
+  });
 });
 
 describe('buildFlow: edges between a node and its own ancestor or descendant', () => {
@@ -724,5 +744,159 @@ describe('buildFlow: routes are kept across rebuilds of the same layout', () => 
     for (const view of views) {
       expect(buildFlow(model, layout, view)).toEqual(buildFlow(model, fresh(), view));
     }
+  });
+});
+
+describe('closedGroupSize', () => {
+  let model: ArchitectureModel;
+  let layout: LayoutResult;
+  beforeAll(async () => {
+    model = parseOk(exampleYaml);
+    layout = await computeLayoutUncached(model);
+  });
+  const overlay = () => buildWorkItemOverlay(model, parseWorkItems(fixtureJson).items);
+
+  it('gives a closed group the badge line when stories are hidden inside it', () => {
+    const workItems = { overlay: overlay(), mode: 'stories' as const };
+    const none = { overlay: buildWorkItemOverlay(model, []), mode: 'stories' as const };
+    for (const id of groupIds(model)) {
+      const stories = subtreeWorkItemCounts(workItems.overlay, id).stories > 0;
+      expect(closedGroupBadge(workItems, id)).toBe(stories);
+      expect(closedGroupBadge({ ...workItems, mode: 'tasks' }, id)).toBe(stories);
+      expect(closedGroupBadge({ ...workItems, mode: 'off' }, id)).toBe(false);
+      expect(closedGroupBadge(undefined, id)).toBe(false);
+      expect(closedGroupBadge(none, id)).toBe(false);
+    }
+    expect(groupIds(model).some((id) => closedGroupBadge(workItems, id))).toBe(true);
+  });
+
+  it('is the size buildFlow draws every closed group at', () => {
+    const [first] = model.rootIds;
+    const whole = first === undefined ? undefined : layout.absolute.get(first);
+    if (first === undefined || !whole) throw new Error('no root');
+    // The first domain squeezed too small to list a single child: drawn at its full box.
+    const tiny = { ...whole, width: 120, height: 40 };
+    const squeezed: LayoutResult = {
+      ...layout,
+      rects: new Map(layout.rects).set(first, tiny),
+      absolute: new Map(layout.absolute).set(first, tiny),
+    };
+    const workItems = { overlay: overlay(), mode: 'stories' as const };
+    const collapsedSets = [new Set(model.rootIds), new Set(groupIds(model))];
+    let checked = 0;
+    let badged = 0;
+    for (const compactCollapsed of [true, false]) {
+      for (const items of [undefined, workItems]) {
+        for (const base of [layout, squeezed]) {
+          for (const collapsedIds of collapsedSets) {
+            const view: FlowView = {
+              collapsedIds,
+              compactCollapsed,
+              lodLevel: 'subcomponents',
+              ...(items ? { workItems: items } : {}),
+            };
+            for (const node of archNodes(buildFlow(model, base, view))) {
+              const arch = model.nodes.get(node.id);
+              const full = base.absolute.get(node.id);
+              if (!arch || !full || !node.data.collapsed) continue;
+              expect(closedGroupSize(model, arch, full, view)).toEqual({
+                width: node.width,
+                height: node.height,
+              });
+              checked += 1;
+              if (node.data.badge && node.data.compact) badged += 1;
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(40);
+    expect(badged).toBeGreaterThan(0);
+  });
+
+  it('is the full size with groups not drawn shrunk', () => {
+    for (const id of groupIds(model)) {
+      const node = model.nodes.get(id);
+      const full = layout.absolute.get(id);
+      if (!node || !full) throw new Error(id);
+      expect(closedGroupSize(model, node, full, {})).toEqual({
+        width: full.width,
+        height: full.height,
+      });
+    }
+  });
+
+  it('gives a box of the shrunk size that very size again', () => {
+    const items = overlay();
+    let shrunk = 0;
+    for (const id of groupIds(model)) {
+      const node = model.nodes.get(id);
+      const full = layout.absolute.get(id);
+      if (!node || !full) throw new Error(id);
+      const names = node.childIds.map((child) => model.nodes.get(child)?.name ?? child);
+      for (const workItems of [undefined, { overlay: items, mode: 'stories' as const }]) {
+        const view = { compactCollapsed: true, ...(workItems ? { workItems } : {}) };
+        const size = closedGroupSize(model, node, full, view);
+        const at = { x: 17, y: 230, ...size };
+        expect(closedGroupSize(model, node, at, view)).toEqual(size);
+        if (size.width < full.width || size.height < full.height) shrunk += 1;
+        // The box drawn inside a rectangle of that size is that rectangle.
+        for (const extra of [0, COMPACT_GROUP.badgeLine]) {
+          const box = compactGroupBox(full, node.name, names, extra).rect;
+          const again = compactGroupBox({ ...box, x: 3, y: 5 }, node.name, names, extra).rect;
+          expect(again).toEqual({ ...box, x: 3, y: 5 });
+        }
+      }
+    }
+    expect(shrunk).toBeGreaterThan(10);
+  });
+});
+
+describe('drawnNodeRects', () => {
+  it('gives every box where buildFlow draws it, a closed group that spans rows shrunk in its column', async () => {
+    const model = parseOk(exampleYaml);
+    const reference = await computeLayoutUncached(model);
+    const workItems = {
+      overlay: buildWorkItemOverlay(model, parseWorkItems(fixtureJson).items),
+      mode: 'stories' as const,
+    };
+    let inColumn = 0;
+    for (const lodLevel of ['domains', 'components', 'subcomponents', 'detail'] as const) {
+      for (const collapsedIds of [new Set<string>(), new Set(['data.analytics', 'storefront'])]) {
+        for (const view of [
+          { collapsedIds, lodLevel },
+          { collapsedIds, lodLevel, compactCollapsed: true },
+          { collapsedIds, lodLevel, compactCollapsed: true, workItems },
+        ]) {
+          // The layout as it is, and closed up around what is drawn.
+          const closedUp = arrangedLayout(model, reference, {
+            visible: visibleNodes(model, collapsedIds, lodLevel),
+            closedSize: (node, full) => closedGroupSize(model, node, full, view),
+          });
+          for (const layout of [reference, closedUp]) {
+            const drawn = new Map(
+              miniMapNodes(buildFlow(model, layout, view).nodes)
+                .filter((node) => node.type !== 'band')
+                .map((node) => [node.id, node.rect]),
+            );
+            const rects = drawnNodeRects(model, layout, view);
+            expect([...rects.keys()]).toEqual([...drawn.keys()]);
+            for (const [id, rect] of rects) {
+              const at = drawn.get(id);
+              expect(at, id).toBeDefined();
+              if (!at) continue;
+              expect(rect.x, id).toBeCloseTo(at.x, 6);
+              expect(rect.y, id).toBeCloseTo(at.y, 6);
+              expect(rect.width, id).toBeCloseTo(at.width, 6);
+              expect(rect.height, id).toBeCloseTo(at.height, 6);
+              const full = layout.absolute.get(id);
+              if (layout === closedUp && full && rect.height < full.height - 1) inColumn += 1;
+            }
+          }
+        }
+      }
+    }
+    // Closed up, a closed group that spans rows is smaller than the column the layout gives it.
+    expect(inColumn).toBeGreaterThan(0);
   });
 });

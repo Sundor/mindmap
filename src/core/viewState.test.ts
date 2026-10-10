@@ -7,8 +7,10 @@ import {
   hiddenKindsStorageKey,
   parseHiddenKinds,
   parseViewport,
+  parseViewportPlace,
   readHiddenKinds,
   readViewport,
+  readViewportPlace,
   serializeHiddenKinds,
   serializeViewport,
   viewportStorageKey,
@@ -58,6 +60,59 @@ describe('viewport persistence', () => {
     const storage = memoryStorage();
     expect(writeViewport(storage, model, { x: -12.3456, y: 78.91, zoom: 0.734567 })).toBe(true);
     expect(readViewport(storage, model)).toEqual({ x: -12.3, y: 78.9, zoom: 0.7346 });
+  });
+
+  it('round-trips what the viewport was taken on, and reads the viewport alone as before', () => {
+    const storage = memoryStorage();
+    const place = {
+      key: 'layout~arrangement',
+      size: { width: 1500.04, height: 900 },
+      rects: new Map([
+        ['a', { x: 16, y: 16.04, width: 400, height: 300 }],
+        ['a.x', { x: 32.26, y: 64, width: 212, height: 52 }],
+      ]),
+    };
+    expect(writeViewport(storage, model, { x: -12.3456, y: 78.91, zoom: 0.734567 }, place)).toBe(
+      true,
+    );
+    expect(readViewport(storage, model)).toEqual({ x: -12.3, y: 78.9, zoom: 0.7346 });
+    expect(readViewportPlace(storage, model)).toEqual({
+      key: 'layout~arrangement',
+      size: { width: 1500, height: 900 },
+      rects: new Map([
+        ['a', { x: 16, y: 16, width: 400, height: 300 }],
+        ['a.x', { x: 32.3, y: 64, width: 212, height: 52 }],
+      ]),
+    });
+    // Stored without: nothing to keep the place by.
+    writeViewport(storage, model, { x: 1, y: 2, zoom: 1 });
+    expect(readViewportPlace(storage, model)).toBeUndefined();
+    expect(readViewportPlace(storage, other)).toBeUndefined();
+  });
+
+  it('ignores what a viewport was taken on when the entry is not as it is written', () => {
+    const view = '"x":1,"y":2,"zoom":1';
+    for (const on of [
+      'null',
+      '"layout"',
+      '{}',
+      '{"key":7,"size":[10,10],"rects":{}}',
+      '{"key":"k","size":[10],"rects":{}}',
+      '{"key":"k","size":[10,"10"],"rects":{}}',
+      '{"key":"k","size":[10,10],"rects":null}',
+      '{"key":"k","size":[10,10],"rects":{"a":[1,2,3]}}',
+      '{"key":"k","size":[10,10],"rects":{"a":[1,2,3,null]}}',
+    ]) {
+      const text = `{${view},"on":${on}}`;
+      expect(parseViewportPlace(text)).toBeUndefined();
+      expect(parseViewport(text)).toEqual({ x: 1, y: 2, zoom: 1 });
+    }
+    expect(parseViewportPlace('not json')).toBeUndefined();
+    expect(parseViewportPlace(`{${view},"on":{"key":"k","size":[10,20],"rects":{}}}`)).toEqual({
+      key: 'k',
+      size: { width: 10, height: 20 },
+      rects: new Map(),
+    });
   });
 
   it('is keyed by the structure: another file does not inherit it', () => {

@@ -46,9 +46,18 @@ const TAB_HINTS: Readonly<Record<ControlTab, string>> = {
 
 /** What the tabs say on the rail about the controls behind them. */
 export interface ControlTabMarks {
-  /** Detail: the level being drawn — its name, the short form shown — and whether it is pinned. */
+  /**
+   * Detail: the level being drawn — its name, the short form shown —, whether it is pinned, and
+   * the name of the level that is drawn once the view rests, when that is another one.
+   */
   readonly level?:
-    { readonly text: string; readonly name: string; readonly pinned: boolean } | undefined;
+    | {
+        readonly text: string;
+        readonly name: string;
+        readonly pinned: boolean;
+        readonly pending?: string | undefined;
+      }
+    | undefined;
   /** Visibility: something is hidden, paled or filtered. */
   readonly hiding?: boolean | undefined;
   /** Views: the number of saved views. */
@@ -88,7 +97,10 @@ function tabHint(id: ControlTab, marks: ControlTabMarks): string {
   switch (id) {
     case 'detail':
       if (!marks.level) return hint;
-      return `${hint}: ${marks.level.name} — ${marks.level.pinned ? 'pinned' : 'follows the zoom'}`;
+      if (marks.level.pinned) return `${hint}: ${marks.level.name} — pinned`;
+      return marks.level.pending === undefined
+        ? `${hint}: ${marks.level.name} — follows the zoom`
+        : `${hint}: ${marks.level.name} — ${marks.level.pending} once the view rests`;
     case 'visibility':
       return marks.hiding ? `${hint} — something is hidden, paled or filtered` : hint;
     case 'views':
@@ -104,8 +116,9 @@ function tabHint(id: ControlTab, marks: ControlTabMarks): string {
 function TabMark({ id, marks }: { readonly id: ControlTab; readonly marks: ControlTabMarks }) {
   if (id === 'detail' && marks.level) {
     const pinned = marks.level.pinned ? ' cp-tab-mark-pinned' : '';
+    const pending = marks.level.pending === undefined ? '' : ' cp-tab-mark-pending';
     return (
-      <span className={`cp-tab-mark cp-tab-mark-level${pinned}`} aria-hidden="true">
+      <span className={`cp-tab-mark cp-tab-mark-level${pinned}${pending}`} aria-hidden="true">
         {marks.level.text}
       </span>
     );

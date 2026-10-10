@@ -2,7 +2,7 @@
 // reserved, or the badge with the counts where the lines are not drawn. What is listed and how
 // much room it has both come from src/core/workItemContent.ts; nothing is measured here.
 
-import { useContext, type CSSProperties, type MouseEvent } from 'react';
+import { memo, useContext, type CSSProperties, type MouseEvent } from 'react';
 import {
   DIMMED_CLASS,
   isOpenState,
@@ -175,8 +175,9 @@ export function WorkItemBlock({ data }: { data: ArchNodeData }) {
  * its list must not — an edge across a line would hide the text and take the click. Each list
  * is placed in canvas coordinates where the layout reserved it (`data.workItems.above`), at the
  * height of the leaves, on a background of its own. A click beside the lines selects the group.
+ * Rendered again only for other nodes: a flow that differs in its edges alone leaves the lists.
  */
-export function GroupWorkItemLists({
+export const GroupWorkItemLists = memo(function GroupWorkItemLists({
   nodes,
   onSelectNode,
 }: {
@@ -201,4 +202,4 @@ export function GroupWorkItemLists({
       </ul>
     );
   });
-}
+});

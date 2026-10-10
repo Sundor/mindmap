@@ -4,7 +4,14 @@
 // Pure: no React, no browser APIs.
 
 import type { LayoutResult, Rect, Size } from './layout/types';
-import { LOD_CONFIG, lodModeToReveal, lodThreshold, type LodConfig, type LodMode } from './lod';
+import {
+  LOD_CONFIG,
+  lodForZoom,
+  lodModeToReveal,
+  lodThreshold,
+  type LodConfig,
+  type LodMode,
+} from './lod';
 import type { ArchEdge, ArchitectureModel, ArchNode, EdgeKind } from './model';
 import { LOD_LEVELS, LOD_MAX_LEVEL, type LodLevel } from './visibility';
 
@@ -249,6 +256,52 @@ export function isValidViewport(value: Viewport, range: ZoomRange = ZOOM_RANGE):
   );
 }
 
+/**
+ * The highest zoom at which a level-of-detail tracker that last showed `from` shows `level`
+ * (`lodForZoom(zoom, from, config) === level`). For `detail`, the top of `range`; else just
+ * below the threshold above `level` when coming down from a finer level (past its dead band),
+ * the top of that dead band when coming from `level` or a coarser one, and the threshold itself
+ * without a `from` (just below it for `domains`, whose threshold belongs to the level above).
+ */
+export function lodFitCeiling(
+  level: LodLevel,
+  from: LodLevel | undefined,
+  config: LodConfig = LOD_CONFIG,
+  range: ZoomRange = ZOOM_RANGE,
+): number {
+  const index = LOD_LEVELS.indexOf(level);
+  const next = LOD_LEVELS[index + 1];
+  if (next === undefined) return range.max;
+  const threshold = lodThreshold(next, config);
+  const below = 1 - 1e-9;
+  if (from === undefined) return level === 'domains' ? threshold * below : threshold;
+  return LOD_LEVELS.indexOf(from) > index
+    ? threshold * (1 - config.hysteresis) * below
+    : threshold * (1 + config.hysteresis);
+}
+
+/**
+ * Fit of a map whose arrangement depends on the level its zoom selects. `fitOf(level, maxZoom)`
+ * is the viewport that fits the arrangement of `level` without zooming in beyond `maxZoom`
+ * (undefined: nothing to fit); it is asked for every level, with the {@link lodFitCeiling} of
+ * that level. Of the answers whose zoom shows that very level, the one zoomed in furthest;
+ * undefined when none does. `from` is the level the zoom shows now: the tracker keeps it, so a
+ * zoom inside the dead band of a threshold shows the level it came from.
+ */
+export function fitAmongLevels<V extends { readonly zoom: number }>(
+  fitOf: (level: LodLevel, maxZoom: number) => V | undefined,
+  from: LodLevel | undefined,
+  config: LodConfig = LOD_CONFIG,
+): { level: LodLevel; viewport: V } | undefined {
+  let best: { level: LodLevel; viewport: V } | undefined;
+  for (const level of LOD_LEVELS) {
+    const viewport = fitOf(level, lodFitCeiling(level, from, config));
+    if (!viewport || lodForZoom(viewport.zoom, from, config) !== level) continue;
+    if (!best || viewport.zoom > best.viewport.zoom) best = { level, viewport };
+  }
+  return best;
+}
+
 /** The smallest rectangle containing all of `rects`; undefined for none. */
 export function unionRect(rects: readonly Rect[]): Rect | undefined {
   const [first] = rects;
@@ -448,21 +501,39 @@ export function rowInfoText(info: NodeRowInfo): string {
  * The viewport that shows, in another layout of the same model, the place `current` shows now
  * (the layout changed because the work-item content did — another story mode, filter or file —
  * or because the map was reduced to a focus or made whole again, so one may lack nodes of the
- * other). The zoom is kept. The anchor is the innermost node under the middle of the screen:
+ * other; or another arrangement of the map closed up around what is drawn, `arrangeLayout`).
+ * The zoom is kept. The anchor is the innermost node under the middle of the screen:
  * the point of that node that is in the middle now (as a fraction of its box) is in the middle
  * afterwards. With no node under the middle, the nearest node keeps its distance to the middle.
  * Returns `current` itself when there is nothing to hold on to (no node in both layouts, no
  * screen).
  *
- * `before` and `after` are the absolute rectangles of the two layouts (`LayoutResult.absolute`).
+ * With an `anchor` that both layouts have, that node is held on to instead, wherever it is: its
+ * top-left corner, where its header and chevron are, keeps its place on the screen (a group
+ * opened or closed by its chevron stays under the pointer).
+ *
+ * `before` and `after` are the absolute rectangles of the two layouts (`LayoutResult.absolute`,
+ * or the rectangles of what is drawn of them).
  */
 export function viewportKeepingPlace(
   current: Viewport,
   size: Size,
   before: ReadonlyMap<string, Rect>,
   after: ReadonlyMap<string, Rect>,
+  anchor?: string,
 ): Viewport {
-  if (!(size.width > 0 && size.height > 0) || !(current.zoom > 0)) return current;
+  if (!(current.zoom > 0)) return current;
+  const held = anchor === undefined ? undefined : before.get(anchor);
+  const heldAfter = anchor === undefined ? undefined : after.get(anchor);
+  if (held && heldAfter) {
+    const next = {
+      x: current.x + (held.x - heldAfter.x) * current.zoom,
+      y: current.y + (held.y - heldAfter.y) * current.zoom,
+      zoom: current.zoom,
+    };
+    return sameViewport(next, current) ? current : next;
+  }
+  if (!(size.width > 0 && size.height > 0)) return current;
   const cx = (size.width / 2 - current.x) / current.zoom;
   const cy = (size.height / 2 - current.y) / current.zoom;
   let inside: { from: Rect; to: Rect } | undefined;
@@ -498,7 +569,41 @@ export function viewportKeepingPlace(
     y: size.height / 2 - ty * current.zoom,
     zoom: current.zoom,
   };
-  return Math.abs(next.x - current.x) < 1e-6 && Math.abs(next.y - current.y) < 1e-6
-    ? current
-    : next;
+  return sameViewport(next, current) ? current : next;
+}
+
+/**
+ * Of `rects`, those {@link viewportKeepingPlace} can hold on to for `current` on a screen of
+ * `size`: every rectangle around the middle of the screen, or without one the nearest. They are
+ * enough to keep the place later, when the others are no longer at hand (a view kept in the
+ * browser, with what it was taken on): given as `before`, they lead to the same viewport as all
+ * of `rects` wherever the layout after has them. None without a screen or a zoom.
+ */
+export function heldRects(
+  current: Viewport,
+  size: Size,
+  rects: ReadonlyMap<string, Rect>,
+): Map<string, Rect> {
+  const held = new Map<string, Rect>();
+  if (!(current.zoom > 0) || !(size.width > 0 && size.height > 0)) return held;
+  const cx = (size.width / 2 - current.x) / current.zoom;
+  const cy = (size.height / 2 - current.y) / current.zoom;
+  let nearest: { id: string; rect: Rect; distance: number } | undefined;
+  for (const [id, rect] of rects) {
+    if (!(rect.width > 0 && rect.height > 0)) continue;
+    const dx = Math.max(rect.x - cx, 0, cx - (rect.x + rect.width));
+    const dy = Math.max(rect.y - cy, 0, cy - (rect.y + rect.height));
+    if (dx === 0 && dy === 0) held.set(id, rect);
+    else {
+      const distance = Math.hypot(dx, dy);
+      if (!nearest || distance < nearest.distance) nearest = { id, rect, distance };
+    }
+  }
+  if (held.size === 0 && nearest) held.set(nearest.id, nearest.rect);
+  return held;
+}
+
+/** Whether two viewports of the same zoom show the same place, to a millionth of a pixel. */
+function sameViewport(a: Viewport, b: Viewport): boolean {
+  return Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
 }

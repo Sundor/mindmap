@@ -2,7 +2,8 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import exampleYaml from '../../examples/architecture.yaml?raw';
-import { buildFlow } from './flow';
+import { arrangeLayout, visibleRects } from './arrange';
+import { buildFlow, closedGroupSize } from './flow';
 import { focusSet } from './focus';
 import { filterToFocus } from './focusFilter';
 import { computeLayoutUncached, type LayoutResult } from './layout';
@@ -13,9 +14,11 @@ import {
   ancestorsOf,
   expandToReveal,
   filterEdgesByKind,
+  fitAmongLevels,
   isFullyOnScreen,
   isSelfOrDescendant,
   isValidViewport,
+  lodFitCeiling,
   lodModeToDraw,
   lodRevealZoom,
   minLodForNode,
@@ -28,6 +31,7 @@ import {
   toggleEdgeKind,
   toScreen,
   unionRect,
+  heldRects,
   viewportKeepingPlace,
   viewportToReveal,
   withoutEdgeKinds,
@@ -37,7 +41,7 @@ import {
 import type { Rect, Size } from './layout/types';
 import type { Viewport } from './navigate';
 import { rollupEdges } from './rollup';
-import { LOD_LEVELS, LOD_MAX_LEVEL, visibleNodes } from './visibility';
+import { LOD_LEVELS, LOD_MAX_LEVEL, visibleNodes, type LodLevel } from './visibility';
 
 const model = parseOk(`
 version: 1
@@ -597,6 +601,40 @@ describe('viewportKeepingPlace between layouts of different sets of nodes', () =
     expect(viewportKeepingPlace(current, size, other, part)).toBe(current);
   });
 
+  it('needs no more of the layout before than the rectangles it holds on to', () => {
+    /** Every box of `whole`, moved and resized. */
+    const moved = new Map(
+      [...whole].map(([id, r]) => [id, rect(r.x * 0.5 + 40, r.y * 0.8 + 25, r.width * 0.6, 90)]),
+    );
+    const views = [
+      lookingAt(120, 110, 2), // on a.x, inside a
+      lookingAt(300, 250, 0.7), // on a alone
+      lookingAt(700, 150, 1), // on b
+      lookingAt(520, 150, 1.3), // between a and b, nearer to b
+      lookingAt(1500, 900, 0.4), // off the map
+    ];
+    const held = views.map((view) => [...heldRects(view, size, whole).keys()]);
+    expect(held).toEqual([['a', 'a.x'], ['a'], ['b'], ['b'], ['c']]);
+    for (const view of views) {
+      expect(viewportKeepingPlace(view, size, heldRects(view, size, whole), moved)).toEqual(
+        viewportKeepingPlace(view, size, whole, moved),
+      );
+    }
+    // A layout after that lacks the innermost box holds on to the one around it.
+    const on = lookingAt(120, 110, 2);
+    expect(
+      viewportKeepingPlace(
+        on,
+        size,
+        heldRects(on, size, whole),
+        new Map([['a', rect(0, 0, 260, 200)]]),
+      ),
+    ).toEqual(viewportKeepingPlace(on, size, whole, new Map([['a', rect(0, 0, 260, 200)]])));
+    expect(heldRects(on, { width: 0, height: 600 }, whole).size).toBe(0);
+    expect(heldRects({ ...on, zoom: 0 }, size, whole).size).toBe(0);
+    expect(heldRects(on, size, new Map()).size).toBe(0);
+  });
+
   it('keeps a node of the example in view when the map is reduced to a flow, and back', async () => {
     const example = parseOk(exampleYaml);
     const set = focusSet(example, { type: 'flow', id: 'rule-release' });
@@ -615,6 +653,185 @@ describe('viewportKeepingPlace between layouts of different sets of nodes', () =
     const back = viewportKeepingPlace(next, size, after, before);
     expect(centre(back).x).toBeCloseTo(from.x + from.width / 2, 6);
     expect(centre(back).y).toBeCloseTo(from.y + from.height / 2, 6);
+  });
+});
+
+describe('viewportKeepingPlace with an anchor', () => {
+  const size = { width: 1000, height: 600 };
+  const before = new Map([
+    ['a', { x: 0, y: 0, width: 400, height: 300 }],
+    ['b', { x: 600, y: 0, width: 200, height: 300 }],
+  ]);
+  const after = new Map([
+    ['a', { x: 0, y: 0, width: 260, height: 200 }],
+    ['b', { x: 330, y: 40, width: 120, height: 90 }],
+  ]);
+  const onScreen = (viewport: Viewport, x: number, y: number) => ({
+    x: x * viewport.zoom + viewport.x,
+    y: y * viewport.zoom + viewport.y,
+  });
+
+  it('keeps the top-left corner of the anchor where it is on the screen', () => {
+    const current = { x: -150, y: 80, zoom: 1.5 };
+    const next = viewportKeepingPlace(current, size, before, after, 'b');
+    expect(next.zoom).toBe(1.5);
+    expect(onScreen(next, 330, 40)).toEqual(onScreen(current, 600, 0));
+    // Back again.
+    const back = viewportKeepingPlace(next, size, after, before, 'b');
+    expect(back.x).toBeCloseTo(current.x, 9);
+    expect(back.y).toBeCloseTo(current.y, 9);
+  });
+
+  it('holds on to the anchor even far from the middle, and without a screen size', () => {
+    // The middle of the screen is on `a`, which the anchor overrules.
+    const current = { x: 300, y: 150, zoom: 1 };
+    const next = viewportKeepingPlace(current, { width: 0, height: 0 }, before, after, 'b');
+    expect(next).toEqual({ x: 570, y: 110, zoom: 1 });
+    expect(viewportKeepingPlace(current, size, before, after, 'b')).toEqual(next);
+    expect(viewportKeepingPlace(current, size, before, after)).not.toEqual(next);
+  });
+
+  it('returns the given viewport when the anchor stays put', () => {
+    const current = { x: 10, y: 20, zoom: 2 };
+    expect(viewportKeepingPlace(current, size, before, after, 'a')).toBe(current);
+  });
+
+  it('holds on to the node under the middle when one of the layouts lacks the anchor', () => {
+    const current = { x: -200, y: 100, zoom: 1 };
+    const partial = new Map([['a', { x: 0, y: 0, width: 260, height: 200 }]]);
+    for (const anchor of ['b', 'gone']) {
+      expect(viewportKeepingPlace(current, size, before, partial, anchor)).toEqual(
+        viewportKeepingPlace(current, size, before, partial),
+      );
+    }
+  });
+
+  it('keeps a component of the example in the middle when the closed-up map loses a level', async () => {
+    const example = parseOk(exampleYaml);
+    const reference = await computeLayoutUncached(example);
+    const drawn = (level: LodLevel) => {
+      const visible = visibleNodes(example, new Set(), level);
+      const layout = arrangeLayout(example, reference, {
+        visible,
+        closedSize: (node, full) =>
+          closedGroupSize(example, node, full, { compactCollapsed: true }),
+      });
+      return visibleRects(layout, visible);
+    };
+    const subcomponents = drawn('subcomponents');
+    const components = drawn('components');
+    const component = [...example.nodes.values()].find(
+      (node) => node.level === 1 && node.childIds.length > 0,
+    );
+    const from = component && subcomponents.get(component.id);
+    const to = component && components.get(component.id);
+    if (!component || !from || !to) throw new Error('no component');
+    expect(to).not.toEqual(from);
+    // A point in the header of the component, which no subcomponent covers.
+    const point = { x: from.x + from.width / 2, y: from.y + 10 };
+    const zoom = 0.8;
+    const current = {
+      x: size.width / 2 - point.x * zoom,
+      y: size.height / 2 - point.y * zoom,
+      zoom,
+    };
+    const next = viewportKeepingPlace(current, size, subcomponents, components);
+    const middle = {
+      x: (size.width / 2 - next.x) / next.zoom,
+      y: (size.height / 2 - next.y) / next.zoom,
+    };
+    expect(middle.x).toBeCloseTo(to.x + to.width / 2, 6);
+    expect(middle.y).toBeCloseTo(to.y + (10 / from.height) * to.height, 6);
+    // Held on to by name instead: its corner stays where it is on the screen.
+    const named = viewportKeepingPlace(current, size, subcomponents, components, component.id);
+    expect(onScreen(named, to.x, to.y).x).toBeCloseTo(onScreen(current, from.x, from.y).x, 9);
+    expect(onScreen(named, to.x, to.y).y).toBeCloseTo(onScreen(current, from.x, from.y).y, 9);
+  });
+});
+
+describe('lodFitCeiling', () => {
+  const froms: (LodLevel | undefined)[] = [undefined, ...LOD_LEVELS];
+
+  it('is the highest zoom that shows the level, coming from any level', () => {
+    for (const level of LOD_LEVELS) {
+      for (const from of froms) {
+        const ceiling = lodFitCeiling(level, from);
+        expect(lodForZoom(ceiling, from, LOD_CONFIG), `${level} from ${from}`).toBe(level);
+        if (level !== 'detail') {
+          expect(lodForZoom(ceiling * 1.001, from, LOD_CONFIG)).not.toBe(level);
+        }
+      }
+    }
+  });
+
+  it('is the top of the zoom range for detail, and the edge of the dead band for the others', () => {
+    for (const from of froms) expect(lodFitCeiling('detail', from)).toBe(ZOOM_RANGE.max);
+    expect(lodFitCeiling('detail', 'domains', LOD_CONFIG, { min: 0.1, max: 2 })).toBe(2);
+    expect(lodFitCeiling('domains', 'domains')).toBeCloseTo(0.42, 12);
+    expect(lodFitCeiling('domains', 'components')).toBeLessThan(0.38);
+    expect(lodFitCeiling('domains', 'components')).toBeCloseTo(0.38, 6);
+    expect(lodFitCeiling('components', 'domains')).toBeCloseTo(1.05, 12);
+    expect(lodFitCeiling('components', undefined)).toBe(1);
+    expect(lodFitCeiling('domains', undefined)).toBeLessThan(0.4);
+  });
+
+  it('follows the thresholds of the configuration', () => {
+    const config = { ...LOD_CONFIG, subcomponentsZoom: 2, detailZoom: 3 };
+    expect(lodFitCeiling('components', 'components', config)).toBeCloseTo(2.1, 12);
+    expect(lodForZoom(lodFitCeiling('subcomponents', 'detail', config), 'detail', config)).toBe(
+      'subcomponents',
+    );
+  });
+});
+
+describe('fitAmongLevels', () => {
+  /** A fit that would like the zoom `natural` gives its level, held to the ceiling it is given. */
+  const fitting =
+    (natural: Partial<Record<LodLevel, number>>) =>
+    (level: LodLevel, maxZoom: number): { zoom: number; level: LodLevel } | undefined => {
+      const zoom = natural[level];
+      return zoom === undefined ? undefined : { zoom: Math.min(zoom, maxZoom), level };
+    };
+
+  it('picks the fit zoomed in furthest among those that show their own level', () => {
+    // Domains is held to 0.42; Subcomponents and Everything at their zoom show another level.
+    const fitOf = fitting({ domains: 0.9, components: 0.6, subcomponents: 0.5, detail: 0.3 });
+    expect(fitAmongLevels(fitOf, 'domains')).toEqual({
+      level: 'components',
+      viewport: { zoom: 0.6, level: 'components' },
+    });
+    expect(fitAmongLevels(fitting({ domains: 0.9, components: 2 }), 'domains')).toEqual({
+      level: 'components',
+      viewport: { zoom: lodFitCeiling('components', 'domains'), level: 'components' },
+    });
+    expect(fitAmongLevels(fitting({ domains: 0.2, detail: 3 }), 'components')?.level).toBe(
+      'detail',
+    );
+  });
+
+  it('asks every level with its ceiling', () => {
+    const asked: [LodLevel, number][] = [];
+    fitAmongLevels((level, maxZoom) => {
+      asked.push([level, maxZoom]);
+      return undefined;
+    }, 'subcomponents');
+    expect(asked).toEqual(
+      LOD_LEVELS.map((level) => [level, lodFitCeiling(level, 'subcomponents')]),
+    );
+  });
+
+  it('judges a zoom in the dead band of a threshold by the level it comes from', () => {
+    const fitOf = fitting({ components: 0.41 });
+    expect(fitAmongLevels(fitOf, 'domains')).toBeUndefined();
+    expect(fitAmongLevels(fitOf, 'subcomponents')).toEqual({
+      level: 'components',
+      viewport: { zoom: 0.41, level: 'components' },
+    });
+  });
+
+  it('is undefined when there is nothing to fit', () => {
+    expect(fitAmongLevels(() => undefined, undefined)).toBeUndefined();
+    expect(fitAmongLevels(() => undefined, 'detail')).toBeUndefined();
   });
 });
 

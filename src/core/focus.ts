@@ -194,37 +194,6 @@ export function focusFlow(
   return { nodes, edges };
 }
 
-/** Class of an edge that "edges on demand" keeps out of sight. */
-export const QUIET_CLASS = 'arch-quiet';
-
-/**
- * Edges on demand: at the coarse levels of detail the edges are the main clutter, so `flow` is
- * returned with every rendered edge hidden (class {@link QUIET_CLASS}) except those that touch
- * `nodeIds` (the hovered or selected drawn nodes), the rendered edge `edgeId` (the selected one)
- * and those the focus involves. Nothing is removed, so the layout and the hit-testing of what is
- * shown do not change.
- */
-export function quietEdges(
-  flow: FlowGraph,
-  nodeIds: ReadonlySet<string>,
-  set: FocusSet | undefined,
-  edgeId?: string,
-): FlowGraph {
-  let changed = false;
-  const edges = flow.edges.map((edge): FlowEdge => {
-    if (edge.id === edgeId) return edge;
-    if (nodeIds.has(edge.source) || nodeIds.has(edge.target)) return edge;
-    if (set && edge.data.memberEdgeIds.some((id) => set.edges.has(id))) return edge;
-    changed = true;
-    return {
-      ...edge,
-      className: withClass(edge.className, QUIET_CLASS),
-      data: { ...edge.data, quiet: true },
-    };
-  });
-  return changed ? { nodes: flow.nodes, edges } : flow;
-}
-
 /** The flows of the model that involve node `id` (named, or as an end of one of their edges). */
 export function flowsOfNode(model: ArchitectureModel, id: string): ArchitectureModel['flows'] {
   const ends = new Map<string, string[]>();

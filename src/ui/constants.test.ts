@@ -10,7 +10,14 @@ import {
   type MiniMapSourceNode,
   type Size,
 } from '../core';
-import { FIT_VIEW_OPTIONS, fitOptions, fitRoom, fitWithRoom, type MapFit } from './constants';
+import {
+  FIT_VIEW_OPTIONS,
+  fitOptions,
+  fittedViewport,
+  fitRoom,
+  fitWithRoom,
+  type MapFit,
+} from './constants';
 
 /** A map of `size` from the origin: a row band over all of it, a box in its bottom right corner. */
 function mapWithCornerBox(size: Size): MiniMapSourceNode[] {
@@ -138,5 +145,61 @@ describe('fitRoom', () => {
     const room = fitRoom(inset, nodes, canvas);
     expect(room).not.toBe('none');
     expect(covered(fitWithRoom(inset, room), nodes, map, canvas)).toBe(false);
+  });
+});
+
+describe('fittedViewport', () => {
+  const canvas = { width: 1100, height: 820 };
+
+  it('is the fit React Flow gives the bounds of the nodes, with the room for the minimap', () => {
+    for (const map of [
+      { width: 2400, height: 600 },
+      { width: 800, height: 560 },
+    ]) {
+      const nodes = mapWithCornerBox(map);
+      for (const plain of [FIT_VIEW_OPTIONS, fitOptions(280)]) {
+        const fit = fitWithRoom(plain, fitRoom(plain, nodes, canvas));
+        expect(fittedViewport(plain, nodes, canvas), JSON.stringify(map)).toEqual(
+          getViewportForBounds(
+            { x: 0, y: 0, ...map },
+            canvas.width,
+            canvas.height,
+            ZOOM_RANGE.min,
+            fit.maxZoom,
+            fit.padding,
+          ),
+        );
+      }
+    }
+  });
+
+  it('takes the nodes where they are drawn, inside their parents', () => {
+    const nodes: MiniMapSourceNode[] = [
+      { id: 'group', type: 'group', position: { x: 100, y: 50 }, width: 400, height: 300 },
+      {
+        id: 'leaf',
+        type: 'leaf',
+        parentId: 'group',
+        position: { x: 350, y: 250 },
+        width: 200,
+        height: 100,
+      },
+    ];
+    expect(fittedViewport(FIT_VIEW_OPTIONS, nodes, canvas)).toEqual(
+      getViewportForBounds(
+        { x: 100, y: 50, width: 550, height: 350 },
+        canvas.width,
+        canvas.height,
+        ZOOM_RANGE.min,
+        FIT_MAX_ZOOM,
+        fitWithRoom(FIT_VIEW_OPTIONS, fitRoom(FIT_VIEW_OPTIONS, nodes, canvas)).padding,
+      ),
+    );
+  });
+
+  it('is undefined without nodes or without a canvas size', () => {
+    expect(fittedViewport(FIT_VIEW_OPTIONS, [], canvas)).toBeUndefined();
+    const nodes = mapWithCornerBox({ width: 800, height: 560 });
+    expect(fittedViewport(FIT_VIEW_OPTIONS, nodes, { width: 0, height: 0 })).toBeUndefined();
   });
 });

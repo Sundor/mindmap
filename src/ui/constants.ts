@@ -11,6 +11,7 @@ import {
   type MiniMapRoom,
   type MiniMapSourceNode,
   type Size,
+  type Viewport,
 } from '../core';
 
 /** Width of the detail panel in pixels; allowed for when something is brought on screen. */
@@ -86,5 +87,28 @@ export function fitRoom(fit: MapFit, nodes: readonly MiniMapSourceNode[], size: 
       fit.maxZoom,
       fitWithRoom(fit, room).padding,
     ),
+  );
+}
+
+/**
+ * The viewport that fits the map drawn by `nodes` into a canvas of `size` with `plain` and the
+ * room the minimap needs (`fitRoom`): what React Flow's `fitView` with those options gives for
+ * those nodes. Undefined for no nodes or a canvas without a size.
+ */
+export function fittedViewport(
+  plain: MapFit,
+  nodes: readonly MiniMapSourceNode[],
+  size: Size,
+): Viewport | undefined {
+  const bounds = unionRect(miniMapNodes(nodes).map((node) => node.rect));
+  if (!bounds || !(size.width > 0 && size.height > 0)) return undefined;
+  const fit = fitWithRoom(plain, fitRoom(plain, nodes, size));
+  return getViewportForBounds(
+    bounds,
+    size.width,
+    size.height,
+    ZOOM_RANGE.min,
+    fit.maxZoom,
+    fit.padding,
   );
 }

@@ -492,6 +492,234 @@ const PAGE_HELPERS = `
       const c = canvas.getBoundingClientRect();
       return r.left >= c.left - 1 && r.right <= c.right + 1 && r.top >= c.top - 1 && r.bottom <= c.bottom + 1;
     },
+    // What is on screen in one frame: the arrangement and level drawn, the zoom, the middle of
+    // the canvas, and the box of every node (left, top, width, height).
+    frame: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const boxes = {};
+      for (const el of document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')) {
+        const r = el.getBoundingClientRect();
+        boxes[el.dataset.id] = [r.left, r.top, r.width, r.height];
+      }
+      return {
+        arrangement: window.__smoke.attr('data-arrangement'),
+        lod: window.__smoke.attr('data-lod'),
+        zoom: window.__smoke.viewport()?.zoom ?? null,
+        mid: { x: c.left + c.width / 2, y: c.top + c.height / 2 },
+        boxes,
+      };
+    },
+    // Records, frame by frame, each change of the arrangement: the last frame before it and up
+    // to 40 frames after it, until arrangementChanges() is asked. The first frame before is the
+    // one at the call, so a change that comes before the next frame is not missed.
+    watchArrangement: () => {
+      const watch = { changes: [], stopped: false };
+      window.__smokeArrangement = watch;
+      let last = window.__smoke.frame();
+      const step = () => {
+        if (watch.stopped) return;
+        const now = window.__smoke.frame();
+        const current = watch.changes[watch.changes.length - 1];
+        if (now.arrangement !== last.arrangement) watch.changes.push({ before: last, after: [now] });
+        else if (current && current.after.length < 40) current.after.push(now);
+        last = now;
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+      return true;
+    },
+    arrangementChanges: () => {
+      const watch = window.__smokeArrangement;
+      if (!watch) return [];
+      watch.stopped = true;
+      window.__smokeArrangement = null;
+      return watch.changes;
+    },
+    // The box of every node drawn in the coordinates of the canvas, from its own transform:
+    // the same whatever the view.
+    canvasBoxes: () =>
+      Object.fromEntries(
+        [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => {
+          const m = /translate\\(([-\\d.e]+)px,\\s*([-\\d.e]+)px\\)/.exec(el.style.transform);
+          return [el.dataset.id, m ? [Number(m[1]), Number(m[2]), el.offsetWidth, el.offsetHeight] : null];
+        }),
+      ),
+    // The boxes drawn that overlap a box neither inside nor around them, or that stick out of
+    // the group they are in (an ID names its group: "a.b" lies in "a").
+    layoutProblems: () => {
+      const boxes = [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => {
+        const r = el.getBoundingClientRect();
+        return { id: el.dataset.id, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      });
+      const byId = new Map(boxes.map((box) => [box.id, box]));
+      const problems = [];
+      for (const box of boxes) {
+        const parent = byId.get(box.id.split('.').slice(0, -1).join('.'));
+        if (parent && (box.left < parent.left - 0.5 || box.right > parent.right + 0.5 || box.top < parent.top - 0.5 || box.bottom > parent.bottom + 0.5)) {
+          problems.push(box.id + ' outside ' + parent.id);
+        }
+      }
+      const nested = (a, b) => a.id.startsWith(b.id + '.') || b.id.startsWith(a.id + '.');
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          if (nested(a, b)) continue;
+          const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (w > 0.5 && h > 0.5) problems.push(a.id + ' overlaps ' + b.id);
+        }
+      }
+      return problems;
+    },
+    // The groups drawn open whose chevron can be clicked: their box on screen, whether all of
+    // it is on the canvas, and how far its middle is from the middle of the canvas.
+    openGroups: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      return [...document.querySelectorAll('.react-flow__node-group')]
+        .filter((el) => el.querySelector('.arch-chevron[aria-expanded="true"]:not(:disabled)'))
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            id: el.dataset.id,
+            left: r.left,
+            onCanvas: r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom,
+            // Nothing (a legend, a panel) lies over its chevron.
+            clickable: window.__smoke.clickPoint('.react-flow__node[data-id="' + el.dataset.id + '"] .arch-chevron') !== null,
+            distance: Math.hypot(r.left + r.width / 2 - (c.left + c.width / 2), r.top + r.height / 2 - (c.top + c.height / 2)),
+            canvasWidth: c.width,
+          };
+        });
+    },
+    // Clicks the element at the very moment another canvas has been put into the page; whether
+    // that has happened is said by newCanvasClicked().
+    clickOnNewCanvas: (selector) => {
+      const old = document.querySelector('#map-canvas');
+      window.__smokeNewCanvas = false;
+      const seen = new MutationObserver(() => {
+        const now = document.querySelector('#map-canvas');
+        if (!now || now === old) return;
+        seen.disconnect();
+        document.querySelector(selector)?.click();
+        window.__smokeNewCanvas = true;
+      });
+      seen.observe(document.querySelector('.app'), { childList: true, subtree: true });
+      return true;
+    },
+    newCanvasClicked: () => window.__smokeNewCanvas === true,
+    // The boxes drawn that are no open group: leaves and closed groups.
+    closedBoxes: () =>
+      [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')]
+        .filter((el) => !el.querySelector('.arch-chevron[aria-expanded="true"]'))
+        .map((el) => el.dataset.id),
+    // Every end of every edge that can be pointed at: the box it is attached to, the points of a
+    // walk out of that box onto the line in steps of a pixel — from "inside" pixels inside the
+    // box, at right angles to the side the line is attached to, to "outside" pixels along the
+    // line, never past its middle — and what lies under each of them: "box", "edge", "list" (the
+    // work-item list of an open group, drawn over the edges), the ID of another box, "pane" (the
+    // empty canvas) or "covered" (something lies over the canvas there).
+    edgeEnds: (inside, outside) => {
+      const ends = [];
+      for (const el of document.querySelectorAll('.react-flow__edge')) {
+        const path = el.querySelector('.react-flow__edge-path');
+        if (!path || getComputedStyle(el).pointerEvents === 'none') continue;
+        const [from, rest] = el.dataset.id.split('>');
+        const to = rest.split(':')[0];
+        const m = path.getScreenCTM();
+        const at = (length) => {
+          const p = path.getPointAtLength(length);
+          return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
+        };
+        const total = path.getTotalLength();
+        const scale = Math.hypot(m.a, m.b);
+        for (const [box, start, sign] of [[from, 0, 1], [to, total, -1]]) {
+          const rect = document.querySelector('.react-flow__node[data-id="' + box + '"]')?.getBoundingClientRect();
+          if (!rect) continue;
+          const end = at(start);
+          // The side the line is attached to: the nearest one, with its direction out of the box.
+          const [, nx, ny] = [
+            [end.x - rect.left, -1, 0],
+            [rect.right - end.x, 1, 0],
+            [end.y - rect.top, 0, -1],
+            [rect.bottom - end.y, 0, 1],
+          ].reduce((a, b) => (Math.abs(b[0]) < Math.abs(a[0]) ? b : a));
+          const points = [];
+          const under = [];
+          for (let t = -inside; t <= Math.min(outside, (total * scale) / 2); t++) {
+            const on = t > 0 ? at(start + (sign * t) / scale) : { x: end.x + nx * t, y: end.y + ny * t };
+            const x = Math.round(on.x);
+            const y = Math.round(on.y);
+            const hit = document.elementFromPoint(x, y);
+            const node = hit?.closest('.react-flow__node:not(.react-flow__node-band)');
+            points.push({ x, y });
+            if (hit?.closest('.react-flow__edge')) under.push('edge');
+            else if (node) under.push(node.dataset.id === box ? 'box' : node.dataset.id);
+            else if (hit?.closest('.arch-workitems-above')) under.push('list');
+            else under.push(hit?.classList.contains('react-flow__pane') ? 'pane' : 'covered');
+          }
+          ends.push({ edge: el.dataset.id, box, points, under });
+        }
+      }
+      return ends;
+    },
+    // A drag of the empty canvas that moves the view by (dx, dy), or as far that way as the
+    // canvas allows: where to press and where to let go.
+    panPlan: (dx, dy) => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+      let best = null;
+      for (let fy = 0.02; fy < 1; fy += 0.04) {
+        for (let fx = 0.02; fx < 1; fx += 0.04) {
+          const from = { x: c.left + c.width * fx, y: c.top + c.height * fy };
+          if (!document.elementFromPoint(from.x, from.y)?.classList.contains('react-flow__pane')) continue;
+          const to = { x: clamp(from.x + dx, c.left + 4, c.right - 4), y: clamp(from.y + dy, c.top + 4, c.bottom - 4) };
+          const reach = Math.hypot(to.x - from.x, to.y - from.y);
+          if (!best || reach > best.reach) best = { from, to, reach };
+          if (to.x === from.x + dx && to.y === from.y + dy) return best;
+        }
+      }
+      return best;
+    },
+    // The middle of the canvas, and whether the canvas is what lies there (not a panel).
+    canvasMiddle: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const x = c.left + c.width / 2;
+      const y = c.top + c.height / 2;
+      return { x, y, onCanvas: !!document.elementFromPoint(x, y)?.closest('.react-flow') };
+    },
+    // The level drawn and whether it is settled, in every frame for "ms" milliseconds.
+    levelsDuring: async (ms) => {
+      const seen = new Set();
+      const end = performance.now() + ms;
+      do {
+        seen.add(window.__smoke.attr('data-lod') + ' ' + window.__smoke.attr('data-level-settled'));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      } while (performance.now() < end);
+      return [...seen];
+    },
+    // Resolves after two frames: what an input has changed is rendered by then.
+    frames: () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))),
+    // Marks the element of the canvas, to tell later whether it is still the same one.
+    markCanvas: () => {
+      const mark = Math.random().toString(36).slice(2);
+      document.querySelector('.react-flow').__smokeMark = mark;
+      return mark;
+    },
+    canvasMark: () => document.querySelector('.react-flow')?.__smokeMark ?? null,
+    // How wide the map drawn is on screen, and the width of the canvas that nothing covers.
+    mapSpread: () => {
+      const c = document.querySelector('.react-flow').getBoundingClientRect();
+      const panels = document.querySelector('.cp-panels');
+      const covered = panels && panels.getClientRects().length > 0 ? Math.max(0, panels.getBoundingClientRect().right - c.left) : 0;
+      const rects = [...document.querySelectorAll('.react-flow__node:not(.react-flow__node-band)')].map((el) => el.getBoundingClientRect());
+      const width = rects.length === 0 ? 0 : Math.max(...rects.map((r) => r.right)) - Math.min(...rects.map((r) => r.left));
+      return { width, free: c.width - covered };
+    },
+    // Shrink collapsed groups as the checkbox shows it, and the setting stored.
+    shrinkControl: () => {
+      const box = document.querySelector('#compact-collapsed');
+      return { checked: box?.checked ?? null, disabled: box?.disabled ?? null, stored: window.__smoke.attr('data-compact-collapsed') };
+    },
   };
   true
 `;
@@ -689,6 +917,12 @@ async function run(viewerPath, browserPath) {
         });
       }
     };
+    /** Whether the expression comes to hold in the page: false when it does not in time. */
+    const eventually = (/** @type {string} */ expression, /** @type {string} */ what) =>
+      until(expression, what).then(
+        () => true,
+        () => false,
+      );
     /** @param {{ x: number, y: number } | null} point @param {string} what */
     const clickAt = async (point, what) => {
       if (!point) throw new Error(`nothing to click for ${what}`);
@@ -1705,6 +1939,37 @@ async function run(viewerPath, browserPath) {
       (await evaluate(`window.__smoke.onScreen('.arch-workitem[data-workitem-id="1010"]')`)) ===
         true,
       await evaluate(`window.__smoke.viewport()`),
+    );
+    // Fit view at the Everything level takes the lists away: the map is laid out without them
+    // and another canvas takes the place of the one on screen. A story gone to at the very
+    // moment that canvas appears — it has not started yet — is gone to all the same.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await openSearch();
+    await client.send('Input.insertText', { text: '#1010' });
+    await until(
+      `window.__smoke.count('#search-results [data-workitem-id="1010"]') === 1`,
+      'the story among the search results again',
+    );
+    await evaluate(`window.__smoke.clickOnNewCanvas('#search-results [data-workitem-id="1010"]')`);
+    await evaluate(`document.querySelector('#fit-view').click()`);
+    const goneToOnNewCanvas =
+      (await eventually(`window.__smoke.newCanvasClicked()`, 'the canvas without the lists')) &&
+      (await eventually(
+        `window.__smoke.attr('data-selection') === 'workitem:1010' && window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.count('.arch-workitem-selected[data-workitem-id="1010"]') === 1`,
+        'the line of the story after the fit',
+      ));
+    await settled();
+    check(
+      'a story gone to at the moment Fit view has another canvas mounted is still gone to: its line ends drawn and on screen',
+      goneToOnNewCanvas &&
+        (await evaluate(`window.__smoke.onScreen('.arch-workitem[data-workitem-id="1010"]')`)) ===
+          true,
+      {
+        goneToOnNewCanvas,
+        lod: await evaluate(`window.__smoke.attr('data-lod')`),
+        view: await evaluate(`window.__smoke.viewport()`),
+      },
     );
     check(
       'a selected work item dims the nodes that do not show it',
@@ -3801,12 +4066,18 @@ async function run(viewerPath, browserPath) {
     await chooseOption('#color-by', 'none');
     await until(`window.__smoke.attr('data-color-by') === 'none'`, 'colour by nothing');
     check('colour by nothing tints nothing', (await countOf('.arch-tinted')) === 0);
-    // Edges on demand at the coarse levels.
+    // Edges on demand, at every level of detail.
     await setSetting('edges-on-demand', true);
-    await until(`window.__smoke.attr('data-edges-quiet') === 'true'`, 'edges on demand');
+    await until(`window.__smoke.attr('data-edges-held-back') === 'true'`, 'edges on demand');
+    /** Whether every edge drawn comes to be hidden: false when that does not come in time. */
+    const everyEdgeHidden = () =>
+      eventually(
+        `window.__smoke.count('.react-flow__edge') > 0 && window.__smoke.count('.react-flow__edge:not(.arch-quiet)') === 0`,
+        'every edge hidden',
+      );
     // The pointer rests on the last box clicked, whose edges would stay: park it.
     await park();
-    await sleep(300);
+    await everyEdgeHidden();
     const edgesAll = await countOf('.react-flow__edge');
     check(
       'edges on demand hides every edge at the Components level while nothing is selected',
@@ -3814,23 +4085,282 @@ async function run(viewerPath, browserPath) {
     );
     await click('.react-flow__node[data-id="data.event-store"]');
     await untilSelection('node:data.event-store');
-    await sleep(200);
-    const loud = await evaluate(
-      `[...document.querySelectorAll('.react-flow__edge:not(.arch-quiet)')].map((e) => e.dataset.id)`,
+    /** The rendered edges shown, by their IDs (`source>target:kind`). */
+    const loudEdges = async () =>
+      /** @type {string[]} */ (
+        await evaluate(
+          `[...document.querySelectorAll('.react-flow__edge:not(.arch-quiet)')].map((e) => e.dataset.id)`,
+        )
+      );
+    /** Whether an end of the rendered edge `id` is one of `ids`. */
+    const edgeAt = (/** @type {string} */ id, /** @type {string[]} */ ids) =>
+      (id.split(':')[0] ?? '').split('>').some((end) => ids.includes(end));
+    await eventually(
+      `window.__smoke.count('.react-flow__edge:not(.arch-quiet)') > 0`,
+      'the edges of the selected box',
     );
+    const loud = await loudEdges();
     check(
       'the selected box brings its own edges back',
-      loud.length > 0 && loud.every((/** @type {string} */ id) => id.includes('data.event-store')),
+      loud.length > 0 && loud.every((id) => edgeAt(id, ['data.event-store'])),
       loud,
     );
     await press('Escape', { keyCode: 27 });
     await untilSelection(null);
-    await pinLod('subcomponents');
+    /** Moves the pointer onto the element: real input, so that React Flow sees it enter. */
+    const hover = async (/** @type {string} */ selector) => {
+      const point = await until(
+        `window.__smoke.clickPoint(${JSON.stringify(selector)})`,
+        `a point of ${selector}`,
+      );
+      await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    };
+    /**
+     * Hovers the element and waits until the edges shown are some, all at `ids`: those, or null
+     * when that does not come.
+     * @param {string} selector @param {string[]} ids @param {string} what
+     */
+    const hoverShows = async (selector, ids, what) => {
+      await hover(selector);
+      return waitFor(async () => {
+        const shown = await loudEdges();
+        return shown.length > 0 && shown.every((id) => edgeAt(id, ids)) ? shown : null;
+      }, what).catch(() => null);
+    };
+    const storeBox = '.react-flow__node[data-id="data.event-store"]';
+    const ingest = ['data.ingest', 'data.ingest.broker', 'data.ingest.normalizer'];
+    for (const [level, name] of /** @type {[string, string][]} */ ([
+      ['subcomponents', 'Subcomponents'],
+      ['detail', 'Everything'],
+    ])) {
+      await pinLod(level);
+      await click('#fit-view');
+      await settled();
+      await park();
+      await everyEdgeHidden();
+      const all = await countOf('.react-flow__edge');
+      check(
+        `edges on demand also hides every edge at the ${name} level`,
+        (await attr('data-edges-held-back')) === 'true' &&
+          all > 0 &&
+          (await countOf('.react-flow__edge.arch-quiet')) === all,
+        { all },
+      );
+      // A box under the pointer: its edges show, and the others stay hidden.
+      const leaf = await hoverShows(storeBox, ['data.event-store'], `the edges of the box`);
+      check(
+        `at the ${name} level the box under the pointer shows its own edges, and only those`,
+        leaf !== null && (await countOf('.react-flow__edge.arch-quiet')) > 0,
+        leaf,
+      );
+      // The frame of an open group shows the edges of all it draws; a box inside it its own.
+      const frame = await hoverShows(
+        '.react-flow__node[data-id="data.ingest"]',
+        ingest,
+        'the edges of the open group',
+      );
+      check(
+        `at the ${name} level the frame of an open group shows the edges at it and inside it`,
+        frame !== null &&
+          frame.some((id) => edgeAt(id, ['data.ingest.broker'])) &&
+          frame.some((id) => edgeAt(id, ['data.ingest.normalizer'])),
+        frame,
+      );
+      const inner = await hoverShows(
+        '.react-flow__node[data-id="data.ingest.broker"]',
+        ['data.ingest.broker'],
+        'the edges of the box inside the group',
+      );
+      check(
+        `at the ${name} level a box inside an open group shows only its own edges`,
+        inner !== null && inner.length < (frame?.length ?? 0),
+        inner,
+      );
+      if (level === 'subcomponents') {
+        // The pointer can follow a shown edge from its box, and click it.
+        const followed = inner?.[0];
+        const edge = `.react-flow__edge[data-id="${followed}"]`;
+        /** @type {{ x: number, y: number } | null} */
+        const onEdge =
+          followed === undefined
+            ? null
+            : await evaluate(`window.__smoke.clickPoint(${JSON.stringify(edge)})`);
+        if (onEdge) {
+          await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...onEdge });
+          // Once the pointer is on the edge, the edge must still be shown a moment later.
+          const reached = await eventually(
+            `window.__smoke.count(${JSON.stringify(`${edge}:hover`)}) === 1`,
+            'the pointer on the edge',
+          );
+          await sleep(300);
+          const stays = (await countOf(`${edge}.arch-quiet`)) === 0;
+          await clickAt(onEdge, edge);
+          const clicked = await eventually(
+            `window.__smoke.count(${JSON.stringify(`${edge}.selected`)}) === 1`,
+            'the edge selected',
+          );
+          const selected = await attr('data-selection');
+          check(
+            'a shown edge stays while the pointer follows it from its box, and can be clicked',
+            reached && stays && clicked && (await countOf(`${edge}.selected`)) === 1,
+            { followed, reached, stays, selected },
+          );
+          await press('Escape', { keyCode: 27 });
+          await untilSelection(null);
+        } else {
+          check('a shown edge of the box can be reached by the pointer', false, { followed });
+        }
+      }
+      // The focus overrides: its edges show without the pointer; a box adds its own.
+      await chooseOption('#focus-select', 'flow:telemetry-to-dashboards');
+      await until(
+        `window.__smoke.attr('data-focus') === 'flow:telemetry-to-dashboards'`,
+        'the focus on the flow',
+      );
+      await park();
+      const focusShown = await eventually(
+        `window.__smoke.count('.react-flow__edge:not(.arch-faded)') > 0 && window.__smoke.count('.react-flow__edge:not(.arch-faded).arch-quiet') === 0 && window.__smoke.count('.react-flow__edge.arch-faded:not(.arch-quiet)') === 0`,
+        'the edges of the focus alone',
+      );
+      check(
+        `at the ${name} level every edge of the focus shows, and no other`,
+        focusShown &&
+          (await countOf('.react-flow__edge:not(.arch-faded)')) > 0 &&
+          (await countOf('.react-flow__edge:not(.arch-faded).arch-quiet')) === 0 &&
+          (await countOf('.react-flow__edge.arch-faded:not(.arch-quiet)')) === 0,
+      );
+      await hover(storeBox);
+      /** @type {string[]} */
+      const added = await waitFor(async () => {
+        /** @type {string[]} */
+        const ids = await evaluate(
+          `[...document.querySelectorAll('.react-flow__edge.arch-faded:not(.arch-quiet)')].map((e) => e.dataset.id)`,
+        );
+        return ids.length > 0 ? ids : null;
+      }, 'the edges of the box beside those of the focus').catch(() => []);
+      check(
+        `at the ${name} level the box under the pointer adds its edges to those of the focus`,
+        added.length > 0 &&
+          added.every((id) => edgeAt(id, ['data.event-store'])) &&
+          (await countOf('.react-flow__edge:not(.arch-faded).arch-quiet')) === 0,
+        added,
+      );
+      await click('#focus-clear');
+      await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+      // Switched off, every edge shows.
+      await setSetting('edges-on-demand', false);
+      check(
+        `with edges on demand off every edge shows at the ${name} level`,
+        (await attr('data-edges-held-back')) === 'false' &&
+          (await countOf('.react-flow__edge.arch-quiet')) === 0,
+      );
+      await setSetting('edges-on-demand', true);
+      await until(`window.__smoke.attr('data-edges-held-back') === 'true'`, 'edges on demand');
+    }
+    await setSetting('edges-on-demand', false);
+    // The hit area of an edge reaches into the boxes at its ends: on the way out of a box along
+    // one of its edges the pointer is never on the group around the box, or on the empty canvas.
+    // First by what lies under each point of that way, with every edge shown.
+    /** @typedef {{ edge: string, box: string, points: { x: number, y: number }[], under: string[] }} EdgeEnd */
+    const edgeEnds = (/** @type {number} */ inside, /** @type {number} */ outside) =>
+      /** @type {Promise<EdgeEnd[]>} */ (
+        evaluate(`window.__smoke.edgeEnds(${inside}, ${outside})`)
+      );
+    /** What the way out of the box comes on that is not on it: a group around the box, or "pane". */
+    const offTheWay = (/** @type {EdgeEnd} */ end) =>
+      end.under.find((what) => what === 'pane' || end.box.startsWith(`${what}.`));
+    // Nothing selected: the bar of a focus or the detail panel would lie over part of the canvas.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    /** @type {string[]} */
+    const gaps = [];
+    const waysOut = { ends: 0, fromTheBox: 0 };
+    for (const level of ['domains', 'components', 'subcomponents']) {
+      await pinLod(level);
+      await click('#fit-view');
+      await settled();
+      await park();
+      for (const end of await edgeEnds(4, 10)) {
+        // Not where a legend or the controls lie over the canvas.
+        if (end.under.includes('covered')) continue;
+        waysOut.ends += 1;
+        if (end.under[0] === 'box') waysOut.fromTheBox += 1;
+        const off = offTheWay(end);
+        if (off !== undefined) gaps.push(`${level}: ${end.edge} at ${end.box} on ${off}`);
+      }
+    }
     check(
-      'at the finer levels every edge is drawn again',
-      (await evaluate(`window.__smoke.attr('data-edges-quiet')`)) === 'false' &&
-        (await countOf('.react-flow__edge.arch-quiet')) === 0,
+      'between a box and an edge attached to it nothing else lies under the pointer, at the Domains, Components and Subcomponents levels',
+      waysOut.ends > 100 && waysOut.fromTheBox > 0.8 * waysOut.ends && gaps.length === 0,
+      { ...waysOut, gaps: gaps.slice(0, 6) },
     );
+    // Then with the pointer itself and edges on demand, where a point off the box and the line
+    // would show other edges, or none: out of every domain at the Domains level, where what lies
+    // around a box is the empty canvas, and out of the components of two domains at the
+    // Components level, where it is the domain.
+    await setSetting('edges-on-demand', true);
+    await until(`window.__smoke.attr('data-edges-held-back') === 'true'`, 'edges on demand');
+    /** @type {string[]} */
+    const strayed = [];
+    let walked = 0;
+    for (const [level, inDomains] of /** @type {[string, string[]][]} */ ([
+      ['domains', []],
+      ['components', ['storefront', 'data']],
+    ])) {
+      await pinLod(level);
+      await click('#fit-view');
+      await settled();
+      /** @type {string[]} */
+      const closed = await evaluate(`window.__smoke.closedBoxes()`);
+      /** @type {string[]} */
+      const drawnEdges = await evaluate(`window.__smoke.edgeIds()`);
+      const boxes = closed.filter(
+        (box) =>
+          (level === 'domains' || inDomains.some((domain) => box.startsWith(`${domain}.`))) &&
+          drawnEdges.some((id) => edgeAt(id, [box])),
+      );
+      for (const box of boxes) {
+        const selector = `.react-flow__node[data-id="${box}"]`;
+        const own = await hoverShows(selector, [box], `the edges of ${box}`);
+        if (own === null) {
+          strayed.push(`${level}: ${box} shows no edges of its own`);
+          continue;
+        }
+        const shownAtBox = [...own].sort().join();
+        for (const end of await edgeEnds(3, 6)) {
+          // Only a way that stays on the box and its line: another box in the way takes over.
+          if (end.box !== box || !own.includes(end.edge)) continue;
+          if (
+            end.under.some(
+              (what) => !['box', 'edge', 'pane'].includes(what) && !box.startsWith(`${what}.`),
+            )
+          )
+            continue;
+          if ((await hoverShows(selector, [box], `the edges of ${box} again`)) === null) {
+            strayed.push(`${level}: the edges of ${box} did not come back`);
+            continue;
+          }
+          for (const point of end.points) {
+            await client.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+          }
+          await evaluate(`window.__smoke.frames()`);
+          const shown = (await loudEdges()).sort().join();
+          const onTheLine = (await countOf('.react-flow__edge:hover')) > 0;
+          walked += 1;
+          if (!onTheLine || shown !== shownAtBox) {
+            strayed.push(
+              `${level}: ${end.edge} out of ${box}: ${own.length} edges, then ${shown === '' ? 0 : shown.split(',').length}${onTheLine ? '' : ', off the line'}`,
+            );
+          }
+        }
+      }
+    }
+    check(
+      'edges on demand: the pointer moved out of a box along one of its edges, pixel by pixel, keeps the edges of that box shown',
+      walked > 40 && strayed.length === 0,
+      { walked, strayed: strayed.slice(0, 6) },
+    );
+    await park();
     await setSetting('edges-on-demand', false);
     await pinLod('components');
     // Saved views: save, change the map, come back; a link carries the view.
@@ -3874,6 +4404,1375 @@ async function run(viewerPath, browserPath) {
     // Leave no trace for the checks that follow: the fragment would apply the view on every load.
     await reloadWith('');
     await sleep(300);
+
+    // --- Close up the gaps: closed groups shrunk, the boxes drawn moved together --------------
+    /**
+     * What is on screen in one frame (`window.__smoke.frame()`).
+     * @typedef {object} Frame
+     * @property {string | null} arrangement
+     * @property {string | null} lod
+     * @property {number | null} zoom
+     * @property {{ x: number, y: number }} mid
+     * @property {Record<string, [number, number, number, number]>} boxes left, top, width, height
+     */
+    /** @typedef {{ before: Frame, after: Frame[] }} Change */
+    /** @typedef {{ id: string | null, dx: number, dy: number, shift: number }} Shift */
+
+    /** Errors the page reports from here on; none is expected. @type {string[]} */
+    const pageErrors = [];
+    client.on('Runtime.exceptionThrown', (params) => {
+      pageErrors.push(
+        params.exceptionDetails?.exception?.description ?? params.exceptionDetails?.text ?? '?',
+      );
+    });
+    client.on('Runtime.consoleAPICalled', (params) => {
+      if (params.type === 'error') {
+        pageErrors.push(String(params.args?.[0]?.value ?? params.args?.[0]?.description ?? '?'));
+      }
+    });
+    const LEVELS = ['domains', 'components', 'subcomponents', 'detail'];
+    /** The example's groups that span rows. */
+    const SPANNING = ['operations', 'data', 'data.analytics'];
+    const START_VIEW = 'Before closing up';
+    const closeUpStart = {
+      tab: await attr('data-panel-tab'),
+      panelCollapsed: await attr('data-panel-collapsed'),
+      rows: await attr('data-show-rows'),
+      shrink: await attr('data-compact-collapsed'),
+      focusMode: await attr('data-focus-mode'),
+      lodMode: await attr('data-lod-mode'),
+      collapsed: await attr('data-collapsed-count'),
+    };
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await saveView(START_VIEW);
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${START_VIEW}"]') === 1`,
+      'the view to come back to',
+    );
+    // The body of the control panel open on the Layout tab: the canvas keeps its width from here.
+    await showControl('#close-gaps');
+
+    const frame = () => /** @type {Promise<Frame>} */ (evaluate(`window.__smoke.frame()`));
+    const watchArrangement = () => evaluate(`window.__smoke.watchArrangement()`);
+    const arrangementChanges = () =>
+      /** @type {Promise<Change[]>} */ (evaluate(`window.__smoke.arrangementChanges()`));
+    const canvasBoxes = () =>
+      /** @type {Promise<Record<string, number[] | null>>} */ (
+        evaluate(`window.__smoke.canvasBoxes()`)
+      );
+    const layoutProblems = () =>
+      /** @type {Promise<string[]>} */ (evaluate(`window.__smoke.layoutProblems()`));
+    const markCanvas = () =>
+      /** @type {Promise<string>} */ (evaluate(`window.__smoke.markCanvas()`));
+    const sameCanvas = async (/** @type {string} */ mark) =>
+      (await evaluate(`window.__smoke.canvasMark()`)) === mark;
+    const levelsDuring = (/** @type {number} */ ms) =>
+      /** @type {Promise<string[]>} */ (evaluate(`window.__smoke.levelsDuring(${ms})`));
+    const shrinkControl = () => evaluate(`window.__smoke.shrinkControl()`);
+    /** Whether two boxes are the same, within half a pixel. */
+    const sameBox = (
+      /** @type {number[] | null | undefined} */ a,
+      /** @type {number[] | null | undefined} */ b,
+    ) =>
+      !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - (b[i] ?? NaN)) <= 0.5);
+    /** The boxes drawn that are not where `reference` has them. */
+    const movedFrom = async (/** @type {Record<string, number[] | null>} */ reference) =>
+      Object.entries(await canvasBoxes())
+        .filter(([id, box]) => !sameBox(box, reference[id]))
+        .map(([id]) => id);
+    /** The area of a `data-layout-size`. */
+    const areaOf = (/** @type {string | null} */ size) => {
+      const [width, height] = String(size).split('x').map(Number);
+      return (width ?? NaN) * (height ?? NaN);
+    };
+    /** Switches Close up the gaps with a click on it and waits until the map follows. */
+    const closeUp = async (/** @type {boolean} */ on) => {
+      if ((await attr('data-close-gaps')) !== String(on)) await click('#close-gaps');
+      await until(
+        `window.__smoke.attr('data-close-gaps') === '${on}'`,
+        `Close up the gaps ${on ? 'on' : 'off'}`,
+      );
+      await settled();
+    };
+    /** Switches Arrange in rows with a click on it and waits for the map laid out for it. */
+    const showRows = async (/** @type {boolean} */ on) => {
+      if ((await attr('data-show-rows')) !== String(on)) await click('#show-rows');
+      await until(
+        `window.__smoke.attr('data-show-rows') === '${on}' && window.__smoke.attr('data-layout-pending') === 'false' && window.__smoke.attr('data-lines-laid-out') === 'true' && (window.__smoke.count('.react-flow__node-band') > 0) === ${on}`,
+        `the map ${on ? 'in rows' : 'without rows'}`,
+      );
+      await settled();
+    };
+    const fit = async () => {
+      await click('#fit-view');
+      await settled();
+    };
+    /**
+     * Collapses the groups by their chevrons, one after the other, each brought to the middle
+     * of the canvas first (on the fitted map a legend may lie over a chevron).
+     */
+    const closeByHand = async (/** @type {string[]} */ ids) => {
+      const before = Number(await attr('data-collapsed-count'));
+      for (const [i, id] of ids.entries()) {
+        await centreOn(id);
+        await click(`.react-flow__node[data-id="${id}"] .arch-chevron`);
+        await until(
+          `window.__smoke.attr('data-collapsed-count') === '${before + i + 1}'`,
+          `${id} closed`,
+        );
+      }
+      await settled();
+    };
+    const expandAll = async () => {
+      await click('#expand-all');
+      await until(`window.__smoke.attr('data-collapsed-count') === '0'`, 'everything expanded');
+      await settled();
+    };
+    /**
+     * Pans the canvas with the mouse until the middle of the node `id` is in the middle of the
+     * canvas (within 3 px).
+     * @param {string} id
+     */
+    const centreOn = async (id) => {
+      const selector = JSON.stringify(`.react-flow__node[data-id="${id}"]`);
+      for (let turn = 0; turn < 4; turn++) {
+        const offset = await evaluate(`window.__smoke.centreOffset(${selector})`);
+        if (offset === null) break;
+        if (Math.abs(offset.dx) <= 3 && Math.abs(offset.dy) <= 3) return;
+        const plan = await evaluate(`window.__smoke.panPlan(${-offset.dx}, ${-offset.dy})`);
+        if (plan === null) break;
+        await drag(plan.from, plan.to);
+        await settled();
+      }
+      throw new Error(`cannot bring ${id} to the middle of the canvas`);
+    };
+    /**
+     * Turns the mouse wheel over the middle of the canvas until the zoom selects `level` (Auto),
+     * then waits until that level is drawn and settled and the view is at rest.
+     * @param {string} level
+     */
+    const zoomToLevel = async (level) => {
+      const middle = await evaluate(`window.__smoke.canvasMiddle()`);
+      if (!middle.onCanvas) throw new Error('something lies over the middle of the canvas');
+      for (let turn = 0; turn < 24; turn++) {
+        const now = await attr('data-zoom-lod');
+        if (now === level) break;
+        const finer = LEVELS.indexOf(level) > LEVELS.indexOf(now);
+        const { zoom } = await viewNow();
+        await client.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: middle.x,
+          y: middle.y,
+          deltaX: 0,
+          deltaY: finer ? -200 : 200,
+        });
+        await until(
+          `window.__smoke.viewport().zoom ${finer ? '>' : '<'} ${zoom}`,
+          'the zoom after a wheel turn',
+        );
+      }
+      await until(
+        `window.__smoke.attr('data-zoom-lod') === '${level}' && window.__smoke.attr('data-lod') === '${level}' && window.__smoke.attr('data-level-settled') === 'true' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        `the ${level} level by zoom, drawn`,
+      );
+      await settled();
+    };
+    /**
+     * How far the place in the middle of the canvas moved from `before` to `after`. The anchor
+     * is the innermost box under the middle in `before` that `rest` (the frame the view came to
+     * rest in) draws too; the point of it that was in the middle is measured against the middle
+     * of `after`. With no box under the middle, the nearest box keeps its distance to it.
+     * @param {Frame} before @param {Frame} after @param {Frame} [rest]
+     * @returns {Shift}
+     */
+    const placeShift = (before, after, rest = after) => {
+      const { x: cx, y: cy } = before.mid;
+      /** @type {{ id: string, area: number } | undefined} */
+      let inside;
+      /** @type {{ id: string, distance: number } | undefined} */
+      let nearest;
+      for (const [id, [x, y, width, height]] of Object.entries(before.boxes)) {
+        if (rest.boxes[id] === undefined || !(width > 0 && height > 0)) continue;
+        const dx = Math.max(x - cx, 0, cx - (x + width));
+        const dy = Math.max(y - cy, 0, cy - (y + height));
+        if (dx === 0 && dy === 0) {
+          if (!inside || width * height < inside.area) inside = { id, area: width * height };
+        } else {
+          const distance = Math.hypot(dx, dy);
+          if (!nearest || distance < nearest.distance) nearest = { id, distance };
+        }
+      }
+      const id = inside?.id ?? nearest?.id;
+      const from = id === undefined ? undefined : before.boxes[id];
+      const to = id === undefined ? undefined : after.boxes[id];
+      if (id === undefined || !from || !to) {
+        return { id: id ?? null, dx: NaN, dy: NaN, shift: Infinity };
+      }
+      const [fx, fy, fw, fh] = from;
+      const [tx, ty, tw, th] = to;
+      const point = inside
+        ? { x: tx + ((cx - fx) / fw) * tw, y: ty + ((cy - fy) / fh) * th }
+        : { x: tx + tw / 2 + (cx - (fx + fw / 2)), y: ty + th / 2 + (cy - (fy + fh / 2)) };
+      const dx = point.x - after.mid.x;
+      const dy = point.y - after.mid.y;
+      return { id, dx, dy, shift: Math.max(Math.abs(dx), Math.abs(dy)) };
+    };
+    /**
+     * How far the top left corner of the box `id` moved on screen from `before` to `after`.
+     * @param {Frame} before @param {Frame} after @param {string} id
+     * @returns {Shift}
+     */
+    const cornerShift = (before, after, id) => {
+      const from = before.boxes[id];
+      const to = after.boxes[id];
+      if (!from || !to) return { id, dx: NaN, dy: NaN, shift: Infinity };
+      const dx = to[0] - from[0];
+      const dy = to[1] - from[1];
+      return { id, dx, dy, shift: Math.max(Math.abs(dx), Math.abs(dy)) };
+    };
+    /**
+     * The largest shift of an anchor between the frame before a change and each frame after it,
+     * the frame the view rested in included; `frame` is its index (the last one: at rest).
+     * @param {Change | undefined} change @param {Frame} rest
+     * @param {(before: Frame, after: Frame) => Shift} measure
+     */
+    const worstShift = (change, rest, measure) => {
+      if (!change) return { id: null, dx: NaN, dy: NaN, shift: Infinity, frame: -1, frames: 0 };
+      const frames = [...change.after, rest];
+      let worst = { ...measure(change.before, rest), frame: frames.length - 1 };
+      frames.forEach((after, index) => {
+        const shift = measure(change.before, after);
+        if (!(shift.shift <= worst.shift)) worst = { ...shift, frame: index };
+      });
+      return { ...worst, frames: frames.length };
+    };
+    /** Whether the zoom is the same in every frame after the change as before it. */
+    const zoomKept = (/** @type {Change | undefined} */ change) =>
+      !!change &&
+      change.after.every(
+        (after) => Math.abs((after.zoom ?? NaN) - (change.before.zoom ?? NaN)) < 1e-6,
+      );
+    /** The boxes, other than `id` and those in it or around it, that moved more than 4 px on screen. */
+    const othersMoved = (/** @type {Frame} */ before, /** @type {Frame} */ after, id = '') =>
+      Object.keys(before.boxes).filter((other) => {
+        if (other === id || other.startsWith(`${id}.`) || id.startsWith(`${other}.`)) return false;
+        const { shift } = cornerShift(before, after, other);
+        return Number.isFinite(shift) && shift > 4;
+      });
+    /**
+     * Runs `act`, which changes the arrangement, and waits until `done` holds in the page and the
+     * view is at rest. Returns the one change seen (undefined unless there was exactly one), the
+     * frame at rest, and whether the canvas is still the same element.
+     * @param {() => Promise<unknown>} act @param {string} done @param {string} what
+     */
+    const watched = async (act, done, what) => {
+      const mark = await markCanvas();
+      await watchArrangement();
+      await act();
+      await until(done, what);
+      await settled();
+      const rest = await frame();
+      const changes = await arrangementChanges();
+      return {
+        change: changes.length === 1 ? changes[0] : undefined,
+        changes: changes.length,
+        rest,
+        sameCanvas: await sameCanvas(mark),
+      };
+    };
+
+    // With the option off, the map is the full layout: every box drawn where the expanded map
+    // has it, at every level and with groups closed by hand. With it on, no box overlaps another
+    // and every box lies inside its group, at every level; with every group open the expanded
+    // levels draw the full map.
+    await setSetting('compact-collapsed', false);
+    await until(`window.__smoke.attr('data-compact-collapsed') === 'false'`, 'Shrink off');
+    await expandAll();
+    for (const rows of [true, false]) {
+      const rowsName = rows ? 'with rows' : 'without rows';
+      await showRows(rows);
+      await closeUp(false);
+      await pinLod('subcomponents');
+      const reference = await canvasBoxes();
+      /** @type {string[]} */
+      const offMoved = [];
+      /** @type {Record<string, string | null>} */
+      const offArrangements = {};
+      for (const level of ['domains', 'components']) {
+        await pinLod(level);
+        offArrangements[level] = await attr('data-arrangement');
+        offMoved.push(...(await movedFrom(reference)).map((id) => `${level}: ${id}`));
+      }
+      await pinLod('subcomponents');
+      await closeByHand(['storefront.gateway', 'backoffice']);
+      offArrangements.byHand = await attr('data-arrangement');
+      offMoved.push(...(await movedFrom(reference)).map((id) => `by hand: ${id}`));
+      await expandAll();
+      check(
+        `with Close up the gaps off, ${rowsName}, every box is drawn where the expanded map has it, at every level and with groups closed by hand`,
+        Object.keys(reference).length > 0 &&
+          offMoved.length === 0 &&
+          Object.values(offArrangements).every((arrangement) => arrangement === 'full'),
+        { offMoved: offMoved.slice(0, 8), offArrangements },
+      );
+      await closeUp(true);
+      const identity = {
+        arrangement: await attr('data-arrangement'),
+        moved: await movedFrom(reference),
+      };
+      /** @type {string[]} */
+      const onProblems = [];
+      /** @type {Record<string, string | null>} */
+      const onArrangements = {};
+      for (const level of LEVELS) {
+        await pinLod(level);
+        onArrangements[level] = await attr('data-arrangement');
+        onProblems.push(...(await layoutProblems()).map((problem) => `${level}: ${problem}`));
+      }
+      await pinLod('subcomponents');
+      await closeByHand(['storefront.gateway', 'backoffice']);
+      onArrangements.byHand = await attr('data-arrangement');
+      onProblems.push(...(await layoutProblems()).map((problem) => `by hand: ${problem}`));
+      await expandAll();
+      check(
+        `closed up, ${rowsName}: no box overlaps another and every box lies inside its group, at every level and with groups closed by hand`,
+        onProblems.length === 0,
+        onProblems.slice(0, 8),
+      );
+      const closedUp = [onArrangements.domains, onArrangements.components, onArrangements.byHand];
+      check(
+        `closed up, ${rowsName}: with every group open the expanded levels draw the full map, the coarser levels and the groups closed by hand each another arrangement`,
+        identity.arrangement === 'full' &&
+          identity.moved.length === 0 &&
+          onArrangements.subcomponents === 'full' &&
+          onArrangements.detail === 'full' &&
+          closedUp.every(
+            (arrangement) => typeof arrangement === 'string' && arrangement !== 'full',
+          ) &&
+          new Set(closedUp).size === 3,
+        { identity, onArrangements },
+      );
+      await closeUp(false);
+    }
+
+    // At the Domains level, with rows: closed up, the map takes a fraction of the area, the
+    // closed groups are drawn shrunk whatever Shrink collapsed groups says, and that checkbox
+    // shows it is on. The box in the middle of the canvas stays where it is, both ways.
+    await showRows(true);
+    await pinLod('domains');
+    await fit();
+    await centreOn('storefront');
+    const sizeFull = await attr('data-layout-size');
+    /** @type {{ checked: boolean | null, disabled: boolean | null, stored: string | null }} */
+    const shrinkOff = await shrinkControl();
+    const toDomainsClosed = await watched(
+      () => closeUp(true),
+      `window.__smoke.attr('data-arrangement') !== 'full'`,
+      'the closed-up map at the Domains level',
+    );
+    const sizeClosed = await attr('data-layout-size');
+    const domainProblems = await layoutProblems();
+    const shrunkGroups = await countOf('.arch-group.arch-compact');
+    check(
+      'Close up the gaps at the Domains level: the map takes less than a third of the area of the full one, and no box overlaps another',
+      typeof sizeClosed === 'string' &&
+        areaOf(sizeClosed) <= 0.3 * areaOf(sizeFull) &&
+        toDomainsClosed.rest.arrangement !== 'full' &&
+        domainProblems.length === 0,
+      { sizeFull, sizeClosed, domainProblems },
+    );
+    // The example, laid out: a closed domain with a work-item badge is a line higher.
+    const domainsExpected = (await attr('data-story-mode')) === 'off' ? '1608x378' : '1608x430';
+    check(
+      `closed up at the Domains level the example measures ${domainsExpected}, the full map 2484x1120`,
+      sizeFull === '2484x1120' && sizeClosed === domainsExpected,
+      { sizeFull, sizeClosed },
+    );
+    const placeOn = worstShift(toDomainsClosed.change, toDomainsClosed.rest, (before, after) =>
+      placeShift(before, after, toDomainsClosed.rest),
+    );
+    check(
+      'switching Close up the gaps on keeps the box in the middle of the canvas where it was, in every frame, on the same canvas and at the same zoom',
+      placeOn.id === 'storefront' &&
+        placeOn.shift <= 2 &&
+        zoomKept(toDomainsClosed.change) &&
+        toDomainsClosed.sameCanvas,
+      { placeOn, changes: toDomainsClosed.changes, sameCanvas: toDomainsClosed.sameCanvas },
+    );
+    /** @type {typeof shrinkOff} */
+    const shrinkOn = await shrinkControl();
+    // A real click on the checkbox while it is disabled changes nothing.
+    await click('#compact-collapsed');
+    await evaluate(`window.__smoke.frames()`);
+    /** @type {typeof shrinkOff} */
+    const shrinkClicked = await shrinkControl();
+    check(
+      'while Close up the gaps is on, closed groups are drawn shrunk and Shrink collapsed groups shows checked and cannot be changed; the stored setting stays',
+      shrinkOff.checked === false &&
+        shrinkOff.disabled === false &&
+        shrinkOn.checked === true &&
+        shrinkOn.disabled === true &&
+        shrinkOn.stored === 'false' &&
+        shrinkClicked.checked === true &&
+        shrinkClicked.stored === 'false' &&
+        shrunkGroups > 0,
+      { shrinkOff, shrinkOn, shrinkClicked, shrunkGroups },
+    );
+    const toDomainsFull = await watched(
+      () => closeUp(false),
+      `window.__smoke.attr('data-arrangement') === 'full'`,
+      'the full map at the Domains level',
+    );
+    const placeOff = worstShift(toDomainsFull.change, toDomainsFull.rest, (before, after) =>
+      placeShift(before, after, toDomainsFull.rest),
+    );
+    /** @type {typeof shrinkOff} */
+    const shrinkBack = await shrinkControl();
+    check(
+      'switching Close up the gaps off draws the full map again, keeps the box in the middle where it was, and Shrink collapsed groups shows its own setting',
+      (await attr('data-layout-size')) === sizeFull &&
+        placeOff.id === 'storefront' &&
+        placeOff.shift <= 2 &&
+        toDomainsFull.sameCanvas &&
+        shrinkBack.checked === false &&
+        shrinkBack.disabled === false &&
+        (await countOf('.arch-group.arch-compact')) === 0,
+      { placeOff, shrinkBack, size: await attr('data-layout-size') },
+    );
+    // With Shrink collapsed groups stored on, it shows checked either way, and can be changed
+    // again once the option is off.
+    await setSetting('compact-collapsed', true);
+    await until(`window.__smoke.attr('data-compact-collapsed') === 'true'`, 'Shrink stored on');
+    await closeUp(true);
+    /** @type {typeof shrinkOff} */
+    const shrinkStoredOn = await shrinkControl();
+    await closeUp(false);
+    /** @type {typeof shrinkOff} */
+    const shrinkStoredBack = await shrinkControl();
+    check(
+      'Shrink collapsed groups stored on: checked and disabled while Close up the gaps is on, checked and free to change once it is off',
+      shrinkStoredOn.checked === true &&
+        shrinkStoredOn.disabled === true &&
+        shrinkStoredOn.stored === 'true' &&
+        shrinkStoredBack.checked === true &&
+        shrinkStoredBack.disabled === false &&
+        shrinkStoredBack.stored === 'true',
+      { shrinkStoredOn, shrinkStoredBack },
+    );
+    await setSetting('compact-collapsed', false);
+    await until(`window.__smoke.attr('data-compact-collapsed') === 'false'`, 'Shrink off again');
+
+    // A group opened or closed by its chevron stays where it is on screen: its top left corner,
+    // with the chevron under the pointer, in every frame; the other boxes close up around it.
+    // Taken far from the middle of the canvas, and one whose closing moves the place in the
+    // middle: keeping the middle where it is would move the group, so the two can be told apart.
+    await closeUp(true);
+    for (const rows of [false, true]) {
+      const rowsName = rows ? 'with rows' : 'without rows';
+      await showRows(rows);
+      await pinLod('subcomponents');
+      for (const nested of [false, true]) {
+        await fit();
+        /** @type {{ id: string, left: number, onCanvas: boolean, clickable: boolean, distance: number, canvasWidth: number }[]} */
+        const groups = await evaluate(`window.__smoke.openGroups()`);
+        const candidates = groups
+          .filter(
+            (candidate) =>
+              candidate.onCanvas &&
+              candidate.clickable &&
+              candidate.distance > 0.2 * candidate.canvasWidth &&
+              candidate.id.includes('.') === nested &&
+              !(rows && SPANNING.includes(candidate.id)),
+          )
+          .sort((a, b) => a.left - b.left);
+        const [nearest] = candidates;
+        if (!nearest)
+          throw new Error(`no ${nested ? 'component' : 'domain'} to close by its chevron`);
+        const what = `${rowsName}: a ${nested ? 'component' : 'domain'} far from the middle`;
+        /** The groups whose closing left the place in the middle where it was. @type {string[]} */
+        const untelling = [];
+        let group = nearest;
+        let chevron = '';
+        /** @type {Awaited<ReturnType<typeof watched>> | undefined} */
+        let closing;
+        /** @type {ReturnType<typeof worstShift> | undefined} */
+        let closingCorner;
+        /** How far the place in the middle of the canvas moved. @type {Shift | undefined} */
+        let closingMiddle;
+        for (const candidate of candidates) {
+          const id = candidate.id;
+          group = candidate;
+          chevron = `.react-flow__node[data-id="${id}"] .arch-chevron`;
+          const seen = await watched(
+            () => click(chevron),
+            `window.__smoke.attr('data-collapsed-count') === '1' && window.__smoke.attr('data-arrangement') !== 'full'`,
+            `${id} closed by its chevron`,
+          );
+          const corner = worstShift(seen.change, seen.rest, (before, after) =>
+            cornerShift(before, after, id),
+          );
+          closing = seen;
+          closingCorner = corner;
+          closingMiddle = seen.change ? placeShift(seen.change.before, seen.rest) : undefined;
+          // Where the place in the middle did not move either, the group would have stayed with
+          // the middle held as well: it is opened again, and the next one taken.
+          if (!(corner.shift <= 2) || !closingMiddle || closingMiddle.shift > 4) break;
+          untelling.push(id);
+          await click(chevron);
+          await until(
+            `window.__smoke.attr('data-collapsed-count') === '0' && window.__smoke.attr('data-arrangement') === 'full'`,
+            `${id} opened again`,
+          );
+          await fit();
+        }
+        if (!closing || !closingCorner) throw new Error('no group was closed');
+        const closingMoved = closing.change
+          ? othersMoved(closing.change.before, closing.rest, group.id)
+          : [];
+        check(
+          `closed up, ${what}, closed by its chevron, stays where it was on screen while the other boxes close up`,
+          group.distance > 0.2 * group.canvasWidth &&
+            closingCorner.shift <= 2 &&
+            closingMiddle !== undefined &&
+            Number.isFinite(closingMiddle.shift) &&
+            closingMiddle.shift > 4 &&
+            closingMoved.length > 0 &&
+            zoomKept(closing.change) &&
+            closing.sameCanvas,
+          {
+            group,
+            closingCorner,
+            closingMiddle,
+            untelling,
+            moved: closingMoved.slice(0, 6),
+            changes: closing.changes,
+          },
+        );
+        const opening = await watched(
+          () => click(chevron),
+          `window.__smoke.attr('data-collapsed-count') === '0' && window.__smoke.attr('data-arrangement') === 'full'`,
+          `${group.id} opened by its chevron`,
+        );
+        const openingCorner = worstShift(opening.change, opening.rest, (before, after) =>
+          cornerShift(before, after, group.id),
+        );
+        const openingMoved = opening.change
+          ? othersMoved(opening.change.before, opening.rest, group.id)
+          : [];
+        const openingMiddle = opening.change
+          ? placeShift(opening.change.before, opening.rest)
+          : undefined;
+        // Its corner having stayed both ways, the full map is back where it was.
+        const startCorner = closing.change
+          ? cornerShift(closing.change.before, opening.rest, group.id)
+          : undefined;
+        check(
+          `closed up, ${what}, opened again by its chevron, stays where it was on screen while the other boxes make room`,
+          openingCorner.shift <= 2 &&
+            openingMiddle !== undefined &&
+            Number.isFinite(openingMiddle.shift) &&
+            openingMiddle.shift > 4 &&
+            openingMoved.length > 0 &&
+            zoomKept(opening.change) &&
+            opening.sameCanvas &&
+            startCorner !== undefined &&
+            startCorner.shift <= 2,
+          {
+            group: group.id,
+            openingCorner,
+            openingMiddle,
+            startCorner,
+            moved: openingMoved.slice(0, 6),
+          },
+        );
+      }
+    }
+
+    // Collapse all, Expand all and a pinned level keep the box in the middle where it is: the
+    // innermost box under the middle that is drawn before and after (a box that disappears hands
+    // over to its group), in every frame, on the same canvas.
+    await pinLod('subcomponents');
+    await fit();
+    await centreOn('storefront.payment');
+    for (const [name, act, done] of /** @type {[string, () => Promise<void>, string][]} */ ([
+      [
+        'Collapse all',
+        () => click('#collapse-all'),
+        `window.__smoke.attr('data-collapsed-count') !== '0' && window.__smoke.attr('data-arrangement') !== 'full'`,
+      ],
+      [
+        'Expand all',
+        () => click('#expand-all'),
+        `window.__smoke.attr('data-collapsed-count') === '0' && window.__smoke.attr('data-arrangement') === 'full'`,
+      ],
+      [
+        'a pinned level',
+        () => pinLod('components'),
+        `window.__smoke.attr('data-lod') === 'components' && window.__smoke.attr('data-arrangement') !== 'full'`,
+      ],
+    ])) {
+      const seen = await watched(act, done, `the map after ${name}`);
+      const place = worstShift(seen.change, seen.rest, (before, after) =>
+        placeShift(before, after, seen.rest),
+      );
+      check(
+        `closed up: ${name} keeps the box in the middle of the canvas where it was, in every frame, on the same canvas`,
+        place.shift <= 2 && zoomKept(seen.change) && seen.sameCanvas,
+        { place, changes: seen.changes, sameCanvas: seen.sameCanvas },
+      );
+    }
+
+    // Auto: a zoom across a level arranges the map for the new level once the view rests, and
+    // the box under the middle stays where it was, from the frame of the change on; zooming
+    // back brings back the very same arrangement.
+    await pinLod('components');
+    await fit();
+    await centreOn('data.event-store');
+    await pinLod('auto', await attr('data-zoom-lod'));
+    await zoomToLevel('components');
+    await centreOn('data.event-store');
+    const atComponents = {
+      arrangement: await attr('data-arrangement'),
+      boxes: await canvasBoxes(),
+    };
+    const zoomedIn = await watched(
+      () => zoomToLevel('subcomponents'),
+      `window.__smoke.attr('data-lod') === 'subcomponents'`,
+      'the Subcomponents level drawn',
+    );
+    const placeIn = worstShift(zoomedIn.change, zoomedIn.rest, (before, after) =>
+      placeShift(before, after, zoomedIn.rest),
+    );
+    check(
+      'closed up in Auto: zooming in across a level arranges the map anew once the view rests, the box under the middle staying where it was from the frame of the change on',
+      atComponents.arrangement !== 'full' &&
+        zoomedIn.change?.after[0]?.arrangement === 'full' &&
+        placeIn.id === 'data.event-store' &&
+        placeIn.shift <= 2 &&
+        zoomKept(zoomedIn.change) &&
+        zoomedIn.sameCanvas &&
+        (await attr('data-level-settled')) === 'true',
+      { placeIn, changes: zoomedIn.changes, arrangement: atComponents.arrangement },
+    );
+    const zoomedOut = await watched(
+      () => zoomToLevel('components'),
+      `window.__smoke.attr('data-lod') === 'components'`,
+      'the Components level drawn again',
+    );
+    const placeOut = worstShift(zoomedOut.change, zoomedOut.rest, (before, after) =>
+      placeShift(before, after, zoomedOut.rest),
+    );
+    const movedBack = await movedFrom(atComponents.boxes);
+    check(
+      'closed up in Auto: zooming back out keeps the box under the middle where it was and brings back the same arrangement, every box where it was',
+      placeOut.shift <= 2 &&
+        zoomKept(zoomedOut.change) &&
+        (await attr('data-arrangement')) === atComponents.arrangement &&
+        movedBack.length === 0 &&
+        Object.keys(await canvasBoxes()).length === Object.keys(atComponents.boxes).length,
+      { placeOut, movedBack: movedBack.slice(0, 6) },
+    );
+
+    // Fit view in Auto fits the map as it is drawn at the level the fit ends on: the level is
+    // settled and stays, the map fills the canvas, a second fit changes nothing, and the fit
+    // button on the canvas does the same. A fresh load without a stored view does so too.
+    await showRows(false);
+    await zoomToLevel('subcomponents');
+    await click('#fit-view');
+    const fitSettled = await eventually(
+      `window.__smoke.attr('data-level-settled') === 'true'`,
+      'the level after the fit',
+    );
+    await settled();
+    const fittedView = await viewNow();
+    const fittedLevels = await levelsDuring(500);
+    /** @type {string[]} */
+    const fittedOff = await evaluate(`window.__smoke.offCanvas()`);
+    /** @type {{ width: number, free: number }} */
+    const fittedSpread = await evaluate(`window.__smoke.mapSpread()`);
+    check(
+      'Fit view in Auto, closed up: the level is settled and stays, and the whole map is on the canvas, filling it',
+      fitSettled &&
+        fittedLevels.length === 1 &&
+        fittedLevels[0]?.endsWith(' true') &&
+        fittedOff.length === 0 &&
+        fittedSpread.width >= 0.4 * fittedSpread.free,
+      { fittedLevels, fittedOff, fittedSpread, fittedView },
+    );
+    await click('#fit-view');
+    await settled();
+    const refittedView = await viewNow();
+    check(
+      'Fit view in Auto, closed up: pressing it again leaves the view as it is',
+      sameView(fittedView, refittedView),
+      { fittedView, refittedView },
+    );
+    /** Zooms to `level`, presses Fit view once, and gives the view the map then rests at. */
+    const fitFrom = async (/** @type {string} */ level) => {
+      await zoomToLevel(level);
+      await click('#fit-view');
+      await until(
+        `window.__smoke.attr('data-level-settled') === 'true' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        `the map fitted from the ${level} level`,
+      );
+      await settled();
+      return viewNow();
+    };
+    const fittedFromDomains = await fitFrom('domains');
+    const fittedFromEverything = await fitFrom('detail');
+    check(
+      'Fit view in Auto, closed up, without rows: pressed once at the Domains level or at Everything, it gives the same view as at the Subcomponents level',
+      sameView(fittedFromDomains, fittedView) && sameView(fittedFromEverything, fittedView),
+      { fittedView, fittedFromDomains, fittedFromEverything },
+    );
+    await zoomToLevel('subcomponents');
+    await click('.react-flow__controls-fitview');
+    await eventually(
+      `window.__smoke.attr('data-level-settled') === 'true'`,
+      'the level after the fit of the canvas',
+    );
+    await settled();
+    const canvasFitted = await viewNow();
+    check(
+      'the fit button on the canvas fits the closed-up map as Fit view does',
+      sameView(canvasFitted, fittedView),
+      { canvasFitted, fittedView },
+    );
+    await evaluate(
+      `Object.keys(localStorage).filter((key) => key.startsWith('architecture-map.viewport:')).forEach((key) => localStorage.removeItem(key))`,
+    );
+    await reloadWith('');
+    const loadSettled = await eventually(
+      `window.__smoke.attr('data-level-settled') === 'true'`,
+      'the level after the load',
+    );
+    await settled();
+    const loadLevels = await levelsDuring(500);
+    /** @type {string[]} */
+    const loadOff = await evaluate(`window.__smoke.offCanvas()`);
+    check(
+      'a fresh load in Auto, closed up and without a stored view, shows the whole map at a settled level that stays',
+      loadSettled &&
+        (await attr('data-close-gaps')) === 'true' &&
+        (await attr('data-lod-mode')) === 'auto' &&
+        loadLevels.length === 1 &&
+        loadOff.length === 0,
+      { loadLevels, loadOff },
+    );
+    await showRows(true);
+    const rowsFromEverything = await fitFrom('detail');
+    await click('#fit-view');
+    await settled();
+    const rowsAgain = await viewNow();
+    const rowsFromDomains = await fitFrom('domains');
+    check(
+      'Fit view in Auto, closed up, with rows: pressed once at Everything it gives the view a second press leaves, and the same as at the Domains level',
+      sameView(rowsFromEverything, rowsAgain) && sameView(rowsFromDomains, rowsAgain),
+      { rowsFromEverything, rowsAgain, rowsFromDomains },
+    );
+
+    // Going somewhere from the Domains level in Auto: the box, the edge, the work item end on
+    // screen and drawn, and the level is settled once the move is over and stays.
+    /** Waits for `drawn` after a move and the view at rest; then whether the level stays. */
+    const arrived = async (/** @type {string} */ drawn, /** @type {string} */ what) => {
+      const reached = await eventually(
+        `window.__smoke.attr('data-level-settled') === 'true' && ${drawn}`,
+        what,
+      );
+      await settled();
+      const levels = await levelsDuring(500);
+      return { reached, levels, steady: levels.length === 1 && !!levels[0]?.endsWith(' true') };
+    };
+    await zoomToLevel('domains');
+    // Ctrl+K: the focus is on a checkbox, where "/" does not reach the search box.
+    await openSearch('k');
+    await client.send('Input.insertText', { text: 'iphone' });
+    await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
+    await press('Enter', { keyCode: 13, text: '\r' });
+    await untilSelection('node:storefront.apps.ios');
+    const toNode = await arrived(
+      `window.__smoke.count('.react-flow__node[data-id="storefront.apps.ios"]') === 1`,
+      'the subcomponent drawn',
+    );
+    check(
+      'closed up in Auto at the Domains level: a subcomponent gone to from the search ends drawn and wholly on screen, at a settled level',
+      toNode.reached &&
+        toNode.steady &&
+        (await evaluate(
+          `window.__smoke.onScreen('.react-flow__node[data-id="storefront.apps.ios"]')`,
+        )) === true,
+      toNode,
+    );
+    await openSearch('k');
+    await client.send('Input.insertText', { text: 'storefront.gateway.buffer' });
+    await until(`window.__smoke.count('#search-results [role="option"]') > 0`, 'search results');
+    await press('Enter', { keyCode: 13, text: '\r' });
+    await untilSelection('node:storefront.gateway.buffer');
+    await settled();
+    await zoomToLevel('domains');
+    await click('#detail-outgoing [data-edge-id="buffer-to-broker"]');
+    await untilSelection('edge:buffer-to-broker');
+    const toEdge = await arrived(
+      `window.__smoke.count('.react-flow__node[data-id="storefront.gateway.buffer"]') === 1 && window.__smoke.count('.react-flow__node[data-id="data.ingest.broker"]') === 1 && window.__smoke.count('.react-flow__edge.selected') === 1`,
+      'the edge drawn',
+    );
+    check(
+      'closed up in Auto at the Domains level: an edge gone to from the node panel ends drawn, its source on screen, at a settled level',
+      toEdge.reached &&
+        toEdge.steady &&
+        (await evaluate(
+          `window.__smoke.onScreen('.react-flow__node[data-id="storefront.gateway.buffer"]')`,
+        )) === true,
+      toEdge,
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await zoomToLevel('domains');
+    await openSearch('k');
+    await client.send('Input.insertText', { text: '#1010' });
+    await until(
+      `window.__smoke.count('#search-results [data-workitem-id="1010"]') === 1`,
+      'the story among the search results',
+    );
+    await press('Enter', { keyCode: 13, text: '\r' });
+    await untilSelection('workitem:1010');
+    const toStory = await arrived(
+      `window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.count('.arch-workitem-selected[data-workitem-id="1010"]') === 1`,
+      'the line of the story drawn',
+    );
+    check(
+      'closed up in Auto at the Domains level: a story gone to from the search ends with the lists drawn and its line on screen, at a settled level',
+      toStory.reached &&
+        toStory.steady &&
+        (await evaluate(`window.__smoke.onScreen('.arch-workitem[data-workitem-id="1010"]')`)) ===
+          true,
+      toStory,
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+
+    // Filter, closed up, with rows and without: the filtered map arrives fitted (with every group
+    // of it open), nothing overlaps, it closes up at a coarser level, and leaving Filter comes
+    // back to the box that was in the middle.
+    for (const rows of [true, false]) {
+      const rowsName = rows ? 'with rows' : 'without rows';
+      await showRows(rows);
+      if ((await attr('data-focus-mode')) !== 'filter') {
+        await click('#focus-mode');
+        await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode');
+      }
+      await pinLod('components');
+      await fit();
+      await centreOn('data.event-store');
+      const beforeFilter = await frame();
+      await chooseOption('#focus-select', flowFocus);
+      await untilFiltered(flowFocus);
+      const filteredFit = await fitOnScreen();
+      const filteredProblems = await layoutProblems();
+      const filteredSize = await attr('data-layout-size');
+      check(
+        `closed up, ${rowsName}: the map filtered to a flow arrives fitted, with no box over another`,
+        filteredFit.fitted && filteredProblems.length === 0,
+        { ...filteredFit, filteredProblems },
+      );
+      await pinLod('components');
+      const coarser = {
+        arrangement: await attr('data-arrangement'),
+        size: await attr('data-layout-size'),
+        problems: await layoutProblems(),
+      };
+      check(
+        `closed up, ${rowsName}: the filtered map at the Components level is closed up, smaller, with no box over another`,
+        coarser.arrangement !== 'full' &&
+          areaOf(coarser.size) < areaOf(filteredSize) &&
+          coarser.problems.length === 0,
+        { ...coarser, filteredSize },
+      );
+      // The panel of the flow closed first: the canvas is as wide as before Filter.
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await click('#focus-clear');
+      await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+      await untilFiltered(null);
+      const back = placeShift(beforeFilter, await frame());
+      check(
+        `closed up, ${rowsName}: leaving Filter comes back to the box that was in the middle before`,
+        back.id === 'data.event-store' && back.shift <= 2,
+        back,
+      );
+    }
+    if ((await attr('data-focus-mode')) !== closeUpStart.focusMode) {
+      await click('#focus-mode');
+      await until(
+        `window.__smoke.attr('data-focus-mode') === '${closeUpStart.focusMode}'`,
+        'Focus mode as before',
+      );
+    }
+
+    // Positions moved by hand belong to one arrangement: a box moved on the closed-up map stays
+    // where it was dropped across a change of level and back, Reset positions puts it back, and
+    // a box moved on the full map is still moved there, whether the option is on or off.
+    await showRows(true);
+    await pinLod('components');
+    await fit();
+    const boxOf = async (/** @type {string} */ id) => (await canvasBoxes())[id];
+    /** A point of the header of the group `id` to grab it by: at its right end, clear of its name. */
+    const headerGrip = (/** @type {string} */ id) =>
+      evaluate(`(() => {
+        const r = document.querySelector('.react-flow__node[data-id="${id}"] .arch-group-header').getBoundingClientRect();
+        return { x: r.right - 12, y: r.top + r.height / 2 };
+      })()`);
+    /** Drags the group `id` by its header, and waits until it counts as moved. */
+    const dragGroup = async (/** @type {string} */ id) => {
+      const grip = await headerGrip(id);
+      await drag(grip, { x: grip.x + 90, y: grip.y + 60 });
+      await until(`window.__smoke.attr('data-moved-count') === '1'`, `${id} moved by hand`);
+      await settled();
+    };
+    const arrangedAt = await boxOf('backoffice');
+    await click('#unlock-positions');
+    await until(`window.__smoke.attr('data-positions-unlocked') === 'true'`, 'unlocked positions');
+    await dragGroup('backoffice');
+    const droppedAt = await boxOf('backoffice');
+    await pinLod('subcomponents');
+    const movedOnFull = await attr('data-moved-count');
+    await pinLod('components');
+    const comeBackAt = await boxOf('backoffice');
+    check(
+      'closed up: a box moved by hand stays where it was dropped when the level changes and comes back, and the full map does not count it',
+      !!arrangedAt &&
+        !!droppedAt &&
+        (droppedAt[0] ?? NaN) > (arrangedAt[0] ?? NaN) + 20 &&
+        sameBox(comeBackAt, droppedAt) &&
+        movedOnFull === '0' &&
+        (await attr('data-moved-count')) === '1',
+      { arrangedAt, droppedAt, comeBackAt, movedOnFull },
+    );
+    await click('#reset-positions');
+    await until(`window.__smoke.attr('data-moved-count') === '0'`, 'positions reset');
+    await settled();
+    const resetAt = await boxOf('backoffice');
+    check(
+      'closed up: Reset positions puts the box back where the closed-up map has it',
+      sameBox(resetAt, arrangedAt),
+      { resetAt, arrangedAt },
+    );
+    await pinLod('subcomponents');
+    await fit();
+    const fullAt = await boxOf('backoffice');
+    await dragGroup('backoffice');
+    const fullDropped = await boxOf('backoffice');
+    await pinLod('components');
+    const movedClosedUp = await attr('data-moved-count');
+    await pinLod('subcomponents');
+    const fullBack = await boxOf('backoffice');
+    await closeUp(false);
+    const fullOff = await boxOf('backoffice');
+    const movedOff = await attr('data-moved-count');
+    await closeUp(true);
+    check(
+      'a box moved on the full map is still moved there, with Close up the gaps on and off, and not on the closed-up map',
+      !!fullAt &&
+        !sameBox(fullDropped, fullAt) &&
+        movedClosedUp === '0' &&
+        sameBox(fullBack, fullDropped) &&
+        sameBox(fullOff, fullDropped) &&
+        movedOff === '1',
+      { fullAt, fullDropped, fullBack, fullOff, movedClosedUp, movedOff },
+    );
+    await click('#reset-positions');
+    await until(`window.__smoke.attr('data-moved-count') === '0'`, 'positions reset again');
+    await click('#unlock-positions');
+    await until(`window.__smoke.attr('data-positions-unlocked') === 'false'`, 'locked positions');
+
+    // Saved views and links remember the option, and their place is one of the closed-up map:
+    // applied with the option off, the option is on again and the same box is in the middle. A
+    // view without the flag switches it off.
+    const CLOSED_VIEW = 'Closed up';
+    await pinLod('components');
+    await fit();
+    await centreOn('data.event-store');
+    const viewFrame = await frame();
+    await saveView(CLOSED_VIEW);
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${CLOSED_VIEW}"]') === 1`,
+      'the closed-up view saved',
+    );
+    await evaluate(`document.querySelector('#copy-view-link').click()`);
+    await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
+    /** @type {string} */
+    const closedHash = await evaluate(`window.location.hash`);
+    await closeUp(false);
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${CLOSED_VIEW}"] .views-apply').click()`,
+    );
+    await until(
+      `window.__smoke.attr('data-close-gaps') === 'true' && window.__smoke.attr('data-arrangement') === ${JSON.stringify(viewFrame.arrangement)}`,
+      'the closed-up view applied',
+    );
+    await settled();
+    const appliedBack = placeShift(viewFrame, await frame());
+    check(
+      'a view saved closed up, applied with the option off, switches it on with the same box in the middle',
+      appliedBack.id === 'data.event-store' && appliedBack.shift <= 2,
+      appliedBack,
+    );
+    await closeUp(false);
+    await reloadWith(closedHash);
+    await until(
+      `window.__smoke.attr('data-close-gaps') === 'true' && window.__smoke.attr('data-arrangement') === ${JSON.stringify(viewFrame.arrangement)}`,
+      'the closed-up link applied',
+    );
+    await settled();
+    const linkBack = placeShift(viewFrame, await frame());
+    check(
+      'a link copied closed up opens the map closed up with the same box in the middle',
+      linkBack.id === 'data.event-store' && linkBack.shift <= 2,
+      linkBack,
+    );
+    const linked = JSON.parse(
+      Buffer.from(closedHash.slice('#view='.length), 'base64url').toString('utf8'),
+    );
+    const { closeGaps: linkedFlag, ...older } = linked;
+    await reloadWith(linkOf(older));
+    const olderOff = await eventually(
+      `window.__smoke.attr('data-close-gaps') === 'false' && window.__smoke.attr('data-lod-mode') === ${JSON.stringify(linked.lodMode)}`,
+      'the link without the flag applied',
+    );
+    check(
+      'a view without the flag switches Close up the gaps off',
+      linkedFlag === true && olderOff,
+      { linkedFlag, closeGaps: await attr('data-close-gaps') },
+    );
+    // Leave no trace: the fragment would apply the view on every load.
+    await reloadWith('');
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${CLOSED_VIEW}"] .views-delete').click()`,
+    );
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${CLOSED_VIEW}"]') === 0`,
+      'the closed-up view deleted',
+    );
+
+    // The Everything level in Auto with two domains closed by hand: the lists are drawn, the
+    // closed domains stay shrunk and the map closed up, nothing overlaps, and nothing failed in
+    // the page.
+    await closeUp(true);
+    await pinLod('components');
+    await fit();
+    await pinLod('auto', await attr('data-zoom-lod'));
+    await zoomToLevel('components');
+    for (const [i, id] of ['backoffice', 'platform'].entries()) {
+      await centreOn(id);
+      await click(`.react-flow__node[data-id="${id}"] .arch-chevron`);
+      await until(`window.__smoke.attr('data-collapsed-count') === '${i + 1}'`, `${id} closed`);
+      await settled();
+    }
+    await centreOn('data.event-store');
+    await zoomToLevel('detail');
+    const everything = {
+      lines: await countOf('.arch-workitem'),
+      shrunk: await countOf(
+        '.react-flow__node[data-id="backoffice"] .arch-compact, .react-flow__node[data-id="platform"] .arch-compact',
+      ),
+      arrangement: await attr('data-arrangement'),
+      problems: await layoutProblems(),
+    };
+    check(
+      'closed up at the Everything level with two domains closed by hand: the lists are drawn, the two stay shrunk, the map closed up, no box over another',
+      everything.lines > 0 &&
+        everything.shrunk === 2 &&
+        typeof everything.arrangement === 'string' &&
+        everything.arrangement !== 'full' &&
+        everything.problems.length === 0,
+      everything,
+    );
+
+    // Nothing selected from here on: the canvas keeps its width across a reload.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    /**
+     * The box drawn in both frames that moved furthest on screen, and how many boxes only one of
+     * the frames draws.
+     * @param {Frame} before @param {Frame} after
+     */
+    const largestMove = (before, after) => {
+      /** @type {{ id: string | null, shift: number }} */
+      let worst = { id: null, shift: 0 };
+      for (const id of Object.keys(before.boxes)) {
+        if (after.boxes[id] === undefined) continue;
+        const { shift } = cornerShift(before, after, id);
+        if (!(shift <= worst.shift)) worst = { id, shift };
+      }
+      const both = Object.keys(before.boxes).filter((id) => after.boxes[id] !== undefined).length;
+      return {
+        ...worst,
+        both,
+        onlyOne: Object.keys(before.boxes).length + Object.keys(after.boxes).length - 2 * both,
+      };
+    };
+
+    // Another story mode lays the map out again. With groups closed by hand at the Everything
+    // level, the box in the middle of the canvas stays where it was, there and back.
+    await pinLod('detail');
+    await fit();
+    await closeByHand(['storefront', 'data.analytics', 'operations.console']);
+    await fit();
+    await centreOn('data.analytics');
+    const storiesBefore = await attr('data-story-mode');
+    const storiesOther = storiesBefore === 'tasks' ? 'stories' : 'tasks';
+    /** Chooses the story mode and waits for the map laid out for it, at rest. */
+    const laidOutFor = async (/** @type {string} */ mode) => {
+      await chooseStories(mode);
+      await until(
+        `window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.attr('data-layout-pending') === 'false'`,
+        `the map laid out for the story mode ${mode}`,
+      );
+      await settled();
+      return frame();
+    };
+    const closedFrame = await frame();
+    const otherFrame = await laidOutFor(storiesOther);
+    const placeOther = placeShift(closedFrame, otherFrame);
+    const backFrame = await laidOutFor(String(storiesBefore));
+    const placeBack = placeShift(otherFrame, backFrame);
+    check(
+      'closed up at the Everything level with three groups closed by hand: another story mode, and the first one again, keep the box in the middle of the canvas where it was',
+      storiesBefore !== 'off' &&
+        closedFrame.arrangement !== 'full' &&
+        placeOther.id === 'data.analytics' &&
+        placeOther.shift <= 2 &&
+        placeBack.id === 'data.analytics' &&
+        placeBack.shift <= 2 &&
+        largestMove(closedFrame, backFrame).shift <= 2,
+      { placeOther, placeBack, back: largestMove(closedFrame, backFrame) },
+    );
+
+    // In Auto the level drawn waits for the view to rest. While a gesture lasts — here the
+    // canvas held with the mouse while the wheel zooms from the Domains level to Everything —
+    // the map stays as it is, on the layout without the lists, and the Detail tab and its mark
+    // on the rail show the level that is to come. Let go, that level is drawn.
+    await pinLod('auto', await attr('data-zoom-lod'));
+    await zoomToLevel('domains');
+    const heldAt = await evaluate(`window.__smoke.panPlan(8, 6)`);
+    const wheelAt = await evaluate(`window.__smoke.canvasMiddle()`);
+    if (heldAt === null) throw new Error('no empty canvas to hold');
+    const heldMark = await markCanvas();
+    const heldSize = await attr('data-layout-size');
+    await drag(heldAt.from, heldAt.to, { hold: true });
+    for (let turn = 0; turn < 24 && (await attr('data-zoom-lod')) !== 'detail'; turn++) {
+      const { zoom } = await viewNow();
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: wheelAt.x,
+        y: wheelAt.y,
+        deltaX: 0,
+        deltaY: -200,
+      });
+      await until(`window.__smoke.viewport().zoom > ${zoom}`, 'the zoom after a wheel turn');
+    }
+    const toComeShown = await eventually(
+      `window.__smoke.attr('data-zoom-lod') === 'detail' && document.querySelector('#lod-indicator')?.dataset.lodPending === 'detail' && window.__smoke.count('#lod-indicator .lod-step-pending[data-lod-option="detail"]') === 1 && window.__smoke.count('#tab-detail .cp-tab-mark-pending') === 1`,
+      'the level to come shown on the Detail tab and on the rail',
+    );
+    // Longer than the level and the lists wait for a view at rest.
+    const levelsHeld = await levelsDuring(900);
+    const held = {
+      size: await attr('data-layout-size'),
+      sameCanvas: await sameCanvas(heldMark),
+      lists: await countOf('.arch-workitem'),
+    };
+    await client.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: heldAt.to.x,
+      y: heldAt.to.y,
+      button: 'left',
+      clickCount: 1,
+    });
+    const letGo = await eventually(
+      `window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-level-settled') === 'true' && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.count('.arch-workitem') > 0`,
+      'the Everything level drawn with its lists',
+    );
+    await settled();
+    const toComeAfter =
+      (await countOf('#lod-indicator[data-lod-pending]')) +
+      (await countOf('.lod-step-pending')) +
+      (await countOf('.cp-tab-mark-pending'));
+    check(
+      'closed up in Auto: while the canvas is held and the wheel zooms from the Domains level to Everything, the map stays as it is and the Detail tab and the rail show the level to come; let go, that level is drawn with its lists',
+      toComeShown &&
+        levelsHeld.length === 1 &&
+        levelsHeld[0] === 'domains false' &&
+        held.size === heldSize &&
+        held.sameCanvas &&
+        held.lists === 0 &&
+        letGo &&
+        toComeAfter === 0,
+      { toComeShown, levelsHeld, heldSize, held, letGo, toComeAfter },
+    );
+
+    // The Everything level is laid out with the work-item lists. A view left there comes back
+    // at the very same place: after a reload, from a saved view and from a link — the first
+    // time each. And after a reload with the option off.
+    const EVERYTHING_VIEW = 'At Everything';
+    /** Waits for the Everything level drawn by the zoom, with its lists, at rest: the frame. */
+    const atEverything = async (/** @type {string} */ what) => {
+      await until(
+        `window.__smoke.attr('data-lod-mode') === 'auto' && window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-level-settled') === 'true' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        what,
+      );
+      await settled();
+      return frame();
+    };
+    await until(viewIsStored, 'the view at Everything kept in the browser');
+    const everythingFrame = await frame();
+    await reloadWith('');
+    const everythingReloaded = largestMove(
+      everythingFrame,
+      await atEverything('the Everything level after the reload'),
+    );
+    await saveView(EVERYTHING_VIEW);
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${EVERYTHING_VIEW}"]') === 1`,
+      'the view at Everything saved',
+    );
+    await evaluate(`document.querySelector('#copy-view-link').click()`);
+    await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
+    /** @type {string} */
+    const everythingHash = await evaluate(`window.location.hash`);
+    await fitFrom('detail');
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${EVERYTHING_VIEW}"] .views-apply').click()`,
+    );
+    const everythingApplied = largestMove(
+      everythingFrame,
+      await atEverything('the view at Everything applied'),
+    );
+    await fitFrom('detail');
+    await reloadWith(everythingHash);
+    const everythingLinked = largestMove(
+      everythingFrame,
+      await atEverything('the link at Everything opened'),
+    );
+    // Leave no trace: the fragment would apply the view on every load.
+    await until(viewIsStored, 'the view of the link kept in the browser');
+    await reloadWith('');
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${EVERYTHING_VIEW}"] .views-delete').click()`,
+    );
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${EVERYTHING_VIEW}"]') === 0`,
+      'the view at Everything deleted',
+    );
+    const boxesAtEverything = Object.keys(everythingFrame.boxes).length;
+    check(
+      'closed up in Auto at the Everything level: a reload, a saved view and a link each show every box where it was, the first time',
+      everythingFrame.lod === 'detail' &&
+        [everythingReloaded, everythingApplied, everythingLinked].every(
+          (moved) => moved.shift <= 2 && moved.both === boxesAtEverything && moved.onlyOne === 0,
+        ),
+      { boxes: boxesAtEverything, everythingReloaded, everythingApplied, everythingLinked },
+    );
+    await closeUp(false);
+    await atEverything('the Everything level on the full map');
+    await until(viewIsStored, 'the view at Everything on the full map kept in the browser');
+    const fullFrame = await frame();
+    await reloadWith('');
+    const fullReloaded = largestMove(
+      fullFrame,
+      await atEverything('the Everything level on the full map after the reload'),
+    );
+    check(
+      'in Auto at the Everything level with Close up the gaps off: a reload shows every box where it was',
+      fullFrame.lod === 'detail' &&
+        fullReloaded.shift <= 2 &&
+        fullReloaded.both === Object.keys(fullFrame.boxes).length &&
+        fullReloaded.onlyOne === 0,
+      fullReloaded,
+    );
+    await closeUp(true);
+
+    // A reload comes back in Auto. A view left with a level pinned and zoomed in is then drawn
+    // at the level its zoom selects — another arrangement — and shows the same place.
+    await pinLod('domains');
+    await fit();
+    const zoomAt = await evaluate(`window.__smoke.canvasMiddle()`);
+    for (let turn = 0; turn < 12 && (await attr('data-zoom-lod')) !== 'subcomponents'; turn++) {
+      const { zoom } = await viewNow();
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: zoomAt.x + 250,
+        y: zoomAt.y + 60,
+        deltaX: 0,
+        deltaY: -100,
+      });
+      await until(`window.__smoke.viewport().zoom > ${zoom}`, 'the zoom after a wheel turn');
+    }
+    await settled();
+    await until(viewIsStored, 'the view at the pinned level kept in the browser');
+    const pinnedFrame = await frame();
+    const pinnedZoomLevel = await attr('data-zoom-lod');
+    await reloadWith('');
+    await until(
+      `window.__smoke.attr('data-lod-mode') === 'auto' && window.__smoke.attr('data-level-settled') === 'true' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the level after the reload',
+    );
+    await settled();
+    const unpinnedFrame = await frame();
+    const pinnedPlace = placeShift(pinnedFrame, unpinnedFrame);
+    check(
+      'closed up, a view left zoomed in with the Domains level pinned: a reload draws the level of its zoom, and the place in the middle of the canvas is the same',
+      pinnedFrame.lod === 'domains' &&
+        pinnedZoomLevel === 'subcomponents' &&
+        unpinnedFrame.lod === 'subcomponents' &&
+        unpinnedFrame.arrangement !== pinnedFrame.arrangement &&
+        Math.abs((unpinnedFrame.zoom ?? NaN) - (pinnedFrame.zoom ?? NaN)) < 0.001 &&
+        pinnedPlace.id !== null &&
+        pinnedPlace.shift <= 2,
+      {
+        pinnedPlace,
+        pinned: [pinnedFrame.lod, pinnedFrame.arrangement, pinnedZoomLevel],
+        reloaded: [unpinnedFrame.lod, unpinnedFrame.arrangement],
+      },
+    );
+    check(
+      'nothing failed in the page while the map was closed up',
+      pageErrors.length === 0,
+      pageErrors.slice(0, 5),
+    );
+
+    // Back to the state the block started from.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await closeUp(false);
+    await setSetting('compact-collapsed', closeUpStart.shrink === 'true');
+    await showRows(closeUpStart.rows === 'true');
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${START_VIEW}"] .views-apply').click()`,
+    );
+    await until(
+      `window.__smoke.attr('data-lod-mode') === ${JSON.stringify(closeUpStart.lodMode)} && window.__smoke.attr('data-collapsed-count') === ${JSON.stringify(closeUpStart.collapsed)} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the view the block started from',
+    );
+    await settled();
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${START_VIEW}"] .views-delete').click()`,
+    );
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${START_VIEW}"]') === 0`,
+      'the view to come back to deleted',
+    );
+    if ((await attr('data-panel-tab')) !== closeUpStart.tab) {
+      await click(`#tab-${closeUpStart.tab}`);
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${closeUpStart.tab}'`,
+        'the tab shown before',
+      );
+    }
+    if ((await attr('data-panel-collapsed')) !== closeUpStart.panelCollapsed) {
+      await togglePanel(closeUpStart.panelCollapsed === 'true');
+    }
 
     // --- Edge-kind filter ---------------------------------------------------------------------
     await press('Escape', { keyCode: 27 });
