@@ -67,6 +67,12 @@
   border: 1px dashed var(--border);
   background: var(--bg);
 }
+/* The app's own element sizes itself by its frame: here the stage is the frame. */
+.tpl-stage > .app,
+.tpl-screen > .app {
+  flex: 1;
+  min-width: 0;
+}
 .tpl-stage[data-kind='block'] {
   display: block;
   padding: 0.75rem;
