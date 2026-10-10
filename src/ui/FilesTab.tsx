@@ -11,6 +11,7 @@ import {
 } from '../core';
 import type { PickKind } from '../providers/recentFiles';
 import type { WorkItemOrigin } from '../providers/workItemSource';
+import { ExportSection, type ExportSectionProps } from './ExportSection';
 import { RecentList } from './RecentList';
 
 /** The work-items file in use and what it holds. */
@@ -29,6 +30,8 @@ export interface FilesTabProps {
   readonly workItems?: LoadedWorkItems | undefined;
   /** An Open button was pressed: a map (structure, with its work items), or work items alone. */
   readonly onOpen: (kind: PickKind) => void;
+  /** The Export section and what it needs; absent while no map is drawn. */
+  readonly exportMap?: ExportSectionProps | undefined;
   readonly recents: readonly RecentMap<unknown>[];
   /** ID of the recent map that is shown now. */
   readonly currentRecent: string | undefined;
@@ -59,6 +62,7 @@ export function FilesTab({
   model,
   workItems,
   onOpen,
+  exportMap,
   recents,
   currentRecent,
   onOpenRecent,
@@ -108,6 +112,7 @@ export function FilesTab({
           Open work items…
         </button>
       </div>
+      {exportMap && <ExportSection {...exportMap} />}
       {recents.length > 0 && (
         <section className="recent" id="recent">
           <h3 className="cp-section-title">Recent maps</h3>

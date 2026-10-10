@@ -673,7 +673,7 @@ on the tab _Lenses_.
 | **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                     |
 | **Layout**     | Arrange in rows; Close up the gaps; Unlock / Lock positions (to move boxes and resize open groups), Reset positions                                        |
 | **Views**      | The saved views and Copy link                                                                                                                              |
-| **Files**      | What the two data files hold, Open YAML…, Open work items…, Recent maps                                                                                    |
+| **Files**      | What the two data files hold, Open YAML…, Open work items…, Export (PNG, SVG, HTML), Recent maps                                                           |
 
 - A click on a tab shows it. A click on the tab that is shown, or **Hide**, hides the body and
   leaves the rail; **Show** or a click on any tab brings it back. The tab shown and whether the
@@ -714,6 +714,7 @@ The version of the viewer stands beside its name at the top of the control panel
 | Colour the boxes                      | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric (legend top left)           |
 | Calm the overview                     | **Visibility → Edges on demand**                                                                       |
 | Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                             |
+| Save the map as a picture or a page   | **Files → Export**: **PNG**, **SVG** or **HTML**, of the map as it is drawn                            |
 | Lay out without the row bands         | **Layout → Arrange in rows**                                                                           |
 | Close up the room of closed groups    | **Layout → Close up the gaps**                                                                         |
 | Move and resize boxes by hand         | **Layout → Unlock positions**, drag a box or the edge of an open group; **Reset positions** undoes it  |
@@ -999,11 +1000,138 @@ The version of the viewer stands beside its name at the top of the control panel
     the name of a preset, never its colours — those come from the file of whoever opens the
     link. A link coloured by a preset or a label needs a viewer that has them: one of version
     0.2.0 or earlier shows the view uncoloured.
+- **Exporting the map.** The section **Export** on the **Files** tab — there while a map is
+  drawn — saves the map as a file with one of three buttons: **PNG**, a picture; **SVG**, a
+  vector drawing; **HTML**, a web page that needs nothing else. The file is made in the browser
+  and handed to the browser's own download.
+  - _What is in a file:_ the map as it is drawn at the moment of the click — the map, not the
+    window. That is: the level of detail that is drawn (in Auto the one the zoom selects: for
+    the whole map with the work items listed in the boxes, pin **Everything** first); closed and
+    shrunk groups, and the map closed up by **Close up the gaps**; the row bands and the
+    Unassigned area, or the map without rows; every box where it is and as large as it is drawn,
+    positions moved by hand included; a focus with the rest paled, or with **Filter** the
+    filtered map alone; the selection — the ring around the selected box, the heavier line of
+    the selected edge, the marked line of the selected work item, and the rest dimmed; the edge
+    kinds that are shown, and with **Edges on demand** only the edges shown at that moment
+    (those of the selection and of the focus: the pointer is on the button, not on a box); the
+    work items, as lines in the boxes or as badges; **Colour by**, **Heat by work** and
+    **Progress bars**. An SVG and a page keep the tooltips of the map as well: the description
+    of a node and of an edge, what a heat strip and a progress bar count, the text of a label
+    that is not drawn, and the type, ID, state and full title of a work item.
+  - _What is never in a file:_ the control panel, the detail panel and the Diagnostics panel,
+    the notices and the bar of a focus above the map, the minimap, the zoom buttons, the two
+    legends at the top left (a file has a key of its own, see below), the dotted background, the
+    "React Flow" credit, and whatever only shows under the pointer or while the positions are
+    unlocked. What is not drawn is not exported either: a hidden edge kind, what lies inside a
+    closed group, a work item that **Work items shown** hides, another level of detail than the
+    one on screen.
+  - _The three files._ **PNG** is a fixed picture, of **PNG size** pixels for each pixel of the
+    map: every program shows it, and its text is pixels. **SVG** is shapes and text, sharp at
+    any size, for documents and drawing programs: its text is found by a search, can be
+    selected, and can be edited in a drawing program. It is plain SVG — no script, no style
+    sheet, no embedded image or font — and opens in a browser; an image viewer that cannot
+    show SVG shows nothing, which is what the PNG is for. **HTML** is one page with the picture
+    in it and, below the picture, what it shows as text. The page has no script and loads
+    nothing; it opens in any browser, from disk or from a server, and it prints.
+  - _The page:_ at its top the title and the note (see below), as text; then the picture, in a
+    frame that scrolls; then **Boxes**, the boxes of the picture as a nested list, and
+    **Edges**, its edges as a table with the columns From, To, Kind and Label. **Fit the
+    width**, above the picture, is checked at first: the picture is as wide as the window.
+    Unchecked, the picture has its own size and is scrolled in its frame. A name in the list is
+    a link to its box in the picture: the browser goes there and the box is outlined. Beside
+    its name the list gives the level of a box, its description, for a closed group the names
+    of what is inside it ("closed, inside: …"), what its badge, its heat strips and its
+    progress bar count, and its work-item lines (type, ID, title and state). The table gives
+    the label of an edge at every level of detail, also where the picture draws the line
+    without it. Only what is in the picture is listed. The browser's own search finds every
+    text of the page, the picture included; printed, the page shows the whole picture at the
+    width of the paper. The page is a picture with an index, not a second viewer: nothing in it
+    pans, zooms, collapses or opens a panel.
+  - _The four choices_, under the buttons (the default in bold):
+
+    | Choice               | Values                            | Decides                                           |
+    | -------------------- | --------------------------------- | ------------------------------------------------- |
+    | **Area**             | **Whole map** · What is on screen | How much of the map is in the file                |
+    | **Colours**          | **As on screen** · Light · Dark   | The colour scheme of the file                     |
+    | **PNG size**         | 1× · **2×** · 3×                  | The pixels of a PNG for each pixel of the map     |
+    | **Title and legend** | **on** · off                      | Whether the picture has a title, a note and a key |
+
+    **Whole map** is everything that is drawn, with a margin of 24 px, wherever the view is.
+    **What is on screen** is the part of the map the canvas shows, without what the open control
+    panel lies over: a box, a line or a label that reaches into that part is in the file, cut
+    off at its edge, and the rest is left out. Whatever the area and the zoom, the picture has
+    the scale of the map at a zoom of 100%: a name set in 15 px is 15 px in an SVG and 30 px in
+    a PNG at 2×. **As on screen** is the scheme the viewer is shown in at the click, light or
+    dark as the system says; **Light** and **Dark** name one, and a light file made on a dark
+    screen changes nothing on screen. A file has one scheme and does not follow the system of
+    whoever opens it. With **Title and legend** the title and the note stand above the map and
+    the key below it, inside the picture, so that a PNG has them too; without it the file is the
+    map and its margin alone, and the page still has its title and its note as text. The four
+    choices are remembered in the browser, once for the viewer; they are not part of a saved
+    view or a link.
+
+  - _Title, note and key._ The **title** is the name of the structure file — `architecture.yaml`
+    — and, while a focus is set, " — " and the name of the focus; without a file name it is
+    "Architecture map". The **note** says what the picture shows, part by part, joined by " · ";
+    a part with nothing to say is left out: the level ("Level: Components"); a focus ("Focus:
+    the rest is paled", or "Filtered to the focus"); the lenses ("Colour by Owner", "Heat by
+    work", "Progress"); the work items ("Work items: Stories only" or "Work items: Stories +
+    Tasks", "Iteration" with the one chosen under **Work items shown**, "Work items from
+    workitems.json"); what the picture leaves out or adds ("Without config edges", with the edge
+    kinds that are hidden, "Edges on demand: only the edges shown", "With the selection", "Part
+    of the map" for **What is on screen**); and the time of the export on the clock of the
+    computer ("Exported 2026-10-10 09:30"). The **key** lists what occurs in the picture, each
+    part on a line of its own: under "Edges" a sample of the line of every edge kind that is
+    drawn, and "several edges (×n)" when a merged edge is; under the name of what **Colour by**
+    shows, the entries of the colour legend on the map with their colours, in the same order
+    (for a metric the ramp from its smallest to its largest value); with **Heat by work**,
+    "Heat: open work in the box; the taller the strip, the more"; and with **Progress bars**,
+    "Progress: completed work items of all in the box". A long key wraps at the width of the
+    picture, and a picture with a title or a key is at least 480 px wide. An SVG and a page also
+    carry the title and a description — the title, the numbers of boxes and edges, the note and
+    the version of the viewer — as their own title and description, which a screen reader reads
+    out, with **Title and legend** off as well.
+  - _The name of the file_ is that of the structure file without its folders and its extension,
+    then `-map` and the format: `architecture-map.png`, `architecture-map.svg`,
+    `architecture-map.html` for `architecture.yaml`. A character that a file name must not have
+    (`< > : " / \ | ? *`) becomes `-`, a long name is cut to 80 characters, and when nothing
+    usable is left of the name the file is called as for `architecture.yaml`. Where the file
+    goes is the browser's decision: its downloads folder, or the place it asks for. The same
+    export again has the same name, and the browser numbers the second file.
+  - _What the section says._ While a file is made the three buttons wait and the line under
+    the choices reads "Making the picture…"; they also wait while the map is being laid out
+    (their tooltip then reads "The map is still being laid out"). Afterwards the line names the
+    file — "Saved architecture-map.svg.", and for a PNG with its size, "Saved
+    architecture-map.png (6728 × 4014 px)." — until another tab is shown or the body of the
+    panel is hidden. When no file can be made, none is saved and the line says why: "Nothing is
+    drawn."; with **What is on screen**, "Nothing of the map is on screen."; "Could not make
+    the PNG: the picture is too large for this browser. SVG has no such limit."; or "Could not
+    export: " and the reason. Before the click the section says what a picture will carry:
+    "The selection is part of the picture: click the empty canvas first for one without it."
+    while something is selected, and "Edges on demand: only the edges shown now are in the
+    picture." while **Edges on demand** holds edges back.
+  - _Limits._ A PNG is at most 16 384 px a side and 64 million pixels. A larger picture is
+    saved reduced, and the line says to what: "Saved architecture-map.png (16384 × 1653 px —
+    reduced to 24 % to fit a picture; a smaller part of the map, or SVG, keeps every detail)."
+    For every detail export a smaller part — **What is on screen**, zoomed in — or SVG or
+    HTML, which have no limit. **What is on screen** keeps the scale of the map, so the picture
+    of a view zoomed far out is much larger than the window: a canvas 1800 px wide at a zoom of
+    10% gives a picture 18 000 px wide. SVG and HTML name the font of the system and carry
+    none, so another computer draws the text in its own font; each text is held to the width it
+    had where it was exported, by the spacing of its letters, which with a narrower font pulls
+    the letters of a joined script (Arabic) apart. Some things are drawn more simply than on
+    the map: the soft shadows of the boxes are left out, the glow of a heat strip is a plain
+    translucent strip, and a text may sit a pixel higher or lower. A name too long for its box
+    is cut at its end with "…", also a name written from right to left, of which the map hides
+    the beginning instead. A file has one colour scheme, the selection is in the picture, and
+    the time in the note is that of the export, not of the data.
 - **Remembered in the browser** (`localStorage`): collapsed groups, the view of the whole map,
   hidden edge kinds, hand-moved positions (per arrangement: rows on or off, each story mode,
   each filtered map and each closed-up arrangement have their own) and saved views per
   structure; once for the viewer the settings — the Focus / Filter switch and Close up the gaps
-  among them — and the tab and the hidden or shown body of the control panel. The focus, the
+  among them — and the tab and the hidden or shown body of the control panel. The four choices
+  of the export (area, colours, title and legend, PNG size) are remembered once for the viewer
+  too, not per structure. The focus, the
   selection and a pinned level of detail are not remembered: a reload comes back in Auto, and
   where the map is then drawn otherwise (closed up for another level, or without the work-item
   lists) the view shows the same place — the box that was in the middle of the canvas is in the
@@ -1033,6 +1161,14 @@ The viewer works on a computer or a network without internet access. What that r
   viewer remembers is kept in this browser: settings and views in `localStorage`, the recent
   maps as references to their files — never the content of a file — in IndexedDB. **Copy link** writes to the
   clipboard, only when clicked.
+- **A file is written only when you export.** The viewer saves nothing by itself. A click on
+  **PNG**, **SVG** or **HTML** under **Files → Export** makes the file in the browser and hands
+  it to the browser's own download; nothing is sent anywhere, and the policy of the viewer is
+  the same with the export as without it. An exported page carries a policy of its own —
+  `default-src 'none'; style-src 'unsafe-inline'; img-src data:` — so it runs no script and
+  loads nothing, wherever it is opened; an exported SVG holds shapes and text only, no script,
+  no style sheet and no link. A file says what the map says — names, descriptions, edge labels,
+  the titles of work items — so pass it on as you would pass on the data files.
 - **A link cannot bring in a foreign map.** `?data=` and `?workitems=` only name files on the
   server the page came from; on `file://` they name nothing. Whoever sends a link to the viewer
   cannot make it load, or show, content from somewhere else.
@@ -1080,3 +1216,6 @@ The viewer works on a computer or a network without internet access. What that r
 | Work items missing when served over HTTP                   | `workitems.json` took longer than 4 seconds: reload, or open it with **Open work items…**                                                               |
 | "…reads data files only from the place it was opened from" | `?data=` / `?workitems=` names a file on another server. Save it and open it, or put it next to the viewer                                              |
 | An empty page after `viewer.html` was edited               | The browser only runs the code the viewer was built with. Take the original file again                                                                  |
+| The exported PNG is small or blurred                       | A picture too large for a PNG is saved reduced; the line under **Export** says to what. Export a smaller part (**What is on screen**, zoomed in) or SVG |
+| The browser asks whether to download several files         | Its rule for a page that saves another file a while after the click, as a large PNG does. Allow it: an export saves one file, and only when you click   |
+| The exported PNG is blank or speckled                      | The browser keeps pages from reading what they drew (Firefox with `privacy.resistFingerprinting`, some extensions). Allow it, or export SVG or HTML     |

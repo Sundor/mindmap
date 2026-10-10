@@ -33,3 +33,7 @@ export * from './hints';
 export * from './savedViews';
 export * from './recentMaps';
 export * from './template';
+export * from './pictureKit';
+export * from './mapPicture';
+export * from './mapPage';
+export * from './exportChoices';

@@ -905,6 +905,467 @@ const PAGE_HELPERS = `
   true
 `;
 
+/** The policy an exported page declares (`EXPORT_PAGE_POLICY` in src/core/mapPage.ts). */
+const EXPORT_PAGE_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+
+/**
+ * Functions evaluated in the page for the checks of the exported files; kept as source text. It
+ * is an expression: the object, made on its first use in a page. They compare nothing: each
+ * returns what a file says and what the canvas shows, side by side. The SVG asked about is the
+ * one last given to `load`.
+ */
+const EXPORT_HELPERS = `(window.__smokeExport ??= {
+  doc: null,
+  text: '',
+  pictures: {},
+  hidden: [],
+  // A rectangle of the screen in pixels of the map: less the corner of the canvas, through the
+  // inverse of the viewport.
+  toMap: (r) => {
+    const c = document.querySelector('.react-flow').getBoundingClientRect();
+    const v = window.__smoke.viewport();
+    return { x: (r.left - c.left - v.x) / v.zoom, y: (r.top - c.top - v.y) / v.zoom, width: r.width / v.zoom, height: r.height / v.zoom };
+  },
+  // The two numbers of "translate(x y)".
+  shift: (transform) => {
+    const text = transform ?? 'translate(NaN NaN)';
+    return text.slice(text.indexOf('(') + 1, text.indexOf(')')).split(' ').map(Number);
+  },
+  // The numbers of the "d" of a path.
+  numbers: (d) => (d ?? '').replace(/[MCLHVQZ,]/g, ' ').split(' ').filter(Boolean).map(Number),
+  // A colour as a file writes it ("#rrggbb"), and as the browser computes one: "rgb(…)",
+  // "rgba(…)" or "color(srgb …)". Channels 0–255, alpha 0–1.
+  hex: (text) => ({ r: parseInt(text.slice(1, 3), 16), g: parseInt(text.slice(3, 5), 16), b: parseInt(text.slice(5, 7), 16), a: 1 }),
+  rgba: (text) => {
+    const parts = text.slice(text.indexOf('(') + 1, text.lastIndexOf(')')).replace('srgb', ' ').replace('/', ' ').split(/[ ,]+/).filter(Boolean).map(Number);
+    const scale = text.startsWith('color(') ? 255 : 1;
+    return { r: parts[0] * scale, g: parts[1] * scale, b: parts[2] * scale, a: parts[3] ?? 1 };
+  },
+  // The colour an element of a file is filled or drawn with, with its opacity.
+  paint: (el, name) => {
+    const colour = el?.getAttribute(name);
+    return colour ? { ...window.__smokeExport.hex(colour), a: Number(el.getAttribute(name + '-opacity') ?? 1) } : null;
+  },
+  // Custom properties of the page as colours, as the browser computes them at this moment.
+  palette: (names) => {
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    const colours = Object.fromEntries(names.map((name) => {
+      probe.style.color = 'var(' + name + ')';
+      return [name, window.__smokeExport.rgba(getComputedStyle(probe).color)];
+    }));
+    probe.remove();
+    return colours;
+  },
+  // Reads an exported SVG and keeps it for the questions below.
+  load: (text) => {
+    const E = window.__smokeExport;
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const root = doc.documentElement;
+    const ids = (name) => [...doc.querySelectorAll('g[' + name + ']')].map((g) => g.getAttribute(name));
+    E.doc = doc;
+    E.text = text;
+    return {
+      error: doc.querySelector('parsererror')?.textContent ?? null,
+      root: root.localName,
+      width: Number(root.getAttribute('width')),
+      height: Number(root.getAttribute('height')),
+      role: root.getAttribute('role'),
+      title: doc.querySelector('svg > title')?.textContent ?? null,
+      desc: doc.querySelector('svg > desc')?.textContent ?? null,
+      background: E.paint(doc.querySelector('rect[data-part="background"]'), 'fill'),
+      shift: E.shift(doc.querySelector('g[data-part="map"]')?.getAttribute('transform')),
+      nodes: ids('data-node'),
+      edges: ids('data-edge'),
+      texts: [...doc.querySelectorAll('text')].map((el) => el.textContent),
+      names: [...doc.querySelectorAll('g[data-node]')].map((g) => g.querySelector('text')?.textContent ?? ''),
+    };
+  },
+  // The size the SVG has as an image.
+  image: async () => {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('the SVG is no image'));
+      image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(window.__smokeExport.text);
+    });
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  },
+  // What the SVG holds and what the canvas draws: boxes, shown edges, labels and row bands by
+  // their IDs, the first text of every box beside its name, the parts of every edge, the words
+  // of every label.
+  contents: () => {
+    const { doc } = window.__smokeExport;
+    const newline = String.fromCharCode(10);
+    const written = (name) => [...doc.querySelectorAll('g[' + name + ']')].map((g) => g.getAttribute(name));
+    const drawn = (selector, read) => [...document.querySelectorAll(selector)].map(read);
+    return {
+      boxes: { picture: written('data-node'), canvas: drawn('.react-flow__node:not(.react-flow__node-band)', (el) => el.dataset.id) },
+      edges: { picture: written('data-edge'), canvas: drawn('.react-flow__edge:not(.arch-quiet)', (el) => el.dataset.id) },
+      labels: { picture: written('data-edge-label'), canvas: drawn('.arch-edge-label[data-edge-id]:not(.arch-quiet)', (el) => el.dataset.edgeId) },
+      bands: { picture: written('data-band').length, canvas: document.querySelectorAll('.react-flow__node-band').length },
+      names: [...doc.querySelectorAll('g[data-node]')].map((g) => {
+        const id = g.getAttribute('data-node');
+        return { id, first: g.querySelector('text')?.textContent ?? '', name: document.querySelector('.react-flow__node[data-id="' + id + '"] .arch-node-name')?.textContent ?? null };
+      }),
+      parts: [...doc.querySelectorAll('g[data-edge]')].map((g) => ({ id: g.getAttribute('data-edge'), lines: g.querySelectorAll('[data-part="line"]').length, heads: g.querySelectorAll('[data-part="head"]').length })),
+      words: [...doc.querySelectorAll('g[data-edge-label]')].map((g) => {
+        const id = g.getAttribute('data-edge-label');
+        return { id, picture: [...g.querySelectorAll('text')].map((el) => el.textContent).join(newline), canvas: document.querySelector('.arch-edge-label[data-edge-id="' + id + '"]')?.textContent ?? null };
+      }),
+    };
+  },
+  // Where the SVG has its boxes, lines and labels, and where the canvas has them, in pixels of
+  // the map: a box as x, y, width, height (and the two ends of its header), a line as the
+  // numbers of its path, a label as the middle of its box and its size.
+  places: () => {
+    const E = window.__smokeExport;
+    return {
+      boxes: [...E.doc.querySelectorAll('g[data-node]')].map((g) => {
+        const id = g.getAttribute('data-node');
+        const rect = g.querySelector('rect[data-part="box"]');
+        const el = document.querySelector('.react-flow__node[data-id="' + id + '"]');
+        const at = el ? E.toMap(el.getBoundingClientRect()) : null;
+        const header = E.numbers(g.querySelector('[data-part="header"]')?.getAttribute('d'));
+        return {
+          id,
+          picture: [...E.shift(g.getAttribute('transform')), Number(rect?.getAttribute('width')), Number(rect?.getAttribute('height'))],
+          canvas: at ? [at.x, at.y, at.width, at.height] : null,
+          // Its path goes up its left end, along the top and down its right end: 13 numbers.
+          header: header.length === 13 ? [header[0], header[10]] : null,
+        };
+      }),
+      edges: [...E.doc.querySelectorAll('g[data-edge]')].map((g) => {
+        const id = g.getAttribute('data-edge');
+        const path = document.querySelector('.react-flow__edge[data-id="' + id + '"] .react-flow__edge-path');
+        return { id, picture: E.numbers(g.querySelector('[data-part="line"]')?.getAttribute('d')), canvas: path ? E.numbers(path.getAttribute('d')) : null };
+      }),
+      labels: [...E.doc.querySelectorAll('g[data-edge-label]')].map((g) => {
+        const id = g.getAttribute('data-edge-label');
+        const [x, y] = E.shift(g.getAttribute('transform'));
+        const rect = g.querySelector('rect[data-part="label-box"]');
+        const width = Number(rect?.getAttribute('width')) + 1;
+        const height = Number(rect?.getAttribute('height')) + 1;
+        const el = document.querySelector('.arch-edge-label[data-edge-id="' + id + '"]');
+        const at = el ? E.toMap(el.getBoundingClientRect()) : null;
+        return { id, picture: [x + width / 2, y + height / 2, width, height], canvas: at ? [at.x + at.width / 2, at.y + at.height / 2, at.width, at.height] : null };
+      }),
+    };
+  },
+  // The colours of the SVG beside the ones the browser computes on the canvas: per box its
+  // background, its header and its name, per edge its line.
+  colours: () => {
+    const E = window.__smokeExport;
+    const dashes = (text) => (text && text !== 'none' ? text.split(/[ ,]+/).filter(Boolean).map(parseFloat) : []);
+    return {
+      boxes: [...E.doc.querySelectorAll('g[data-node]')].map((g) => {
+        const id = g.getAttribute('data-node');
+        const node = document.querySelector('.react-flow__node[data-id="' + id + '"] .arch-node');
+        const header = node?.querySelector('.arch-group-header');
+        const name = node?.querySelector('.arch-node-name');
+        const level = [...(node?.classList ?? [])].find((name) => name.startsWith('arch-level-'))?.slice(11);
+        const shape = !node ? 'missing' : node.classList.contains('arch-leaf') ? 'leaf' : node.classList.contains('arch-collapsed') ? 'closed group' : 'open ' + level;
+        return {
+          id,
+          kind: (node?.classList.contains('arch-tinted') ? 'tinted ' : '') + shape,
+          box: [E.paint(g.querySelector('rect[data-part="box"]'), 'fill'), node ? E.rgba(getComputedStyle(node).backgroundColor) : null],
+          header: header ? [E.paint(g.querySelector('[data-part="header"]'), 'fill'), E.rgba(getComputedStyle(header).backgroundColor)] : null,
+          name: name ? [E.paint(g.querySelector('text'), 'fill'), E.rgba(getComputedStyle(name).color)] : null,
+        };
+      }),
+      edges: [...E.doc.querySelectorAll('g[data-edge]')].map((g) => {
+        const id = g.getAttribute('data-edge');
+        const line = g.querySelector('[data-part="line"]');
+        const path = document.querySelector('.react-flow__edge[data-id="' + id + '"] .react-flow__edge-path');
+        const style = path ? getComputedStyle(path) : null;
+        return {
+          id,
+          kind: g.getAttribute('data-kind'),
+          stroke: [E.paint(line, 'stroke'), style ? E.rgba(style.stroke) : null],
+          width: [Number(line?.getAttribute('stroke-width')), style ? parseFloat(style.strokeWidth) : null],
+          dash: [dashes(line?.getAttribute('stroke-dasharray')), style ? dashes(style.strokeDasharray) : null],
+        };
+      }),
+    };
+  },
+  // The name of every box that is no shrunk group (those wrap their name): what the canvas
+  // holds and whether it cuts it, the room it has, and what the SVG writes — its length, and
+  // the middle of its line (the baseline less 0.36 of the size) — beside the text as the canvas
+  // lays it out (a range over it: for a cut name the uncut text).
+  names: () => {
+    const E = window.__smokeExport;
+    return [...E.doc.querySelectorAll('g[data-node]')].flatMap((g) => {
+      const id = g.getAttribute('data-node');
+      const el = document.querySelector('.react-flow__node[data-id="' + id + '"] .arch-node-name');
+      if (!el || el.closest('.arch-compact')) return [];
+      const text = g.querySelector('text');
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const drawn = E.toMap(range.getBoundingClientRect());
+      const size = Number(text?.getAttribute('font-size'));
+      return [{
+        id,
+        name: el.textContent,
+        cut: el.scrollWidth > el.clientWidth,
+        room: el.clientWidth,
+        picture: text?.textContent ?? null,
+        length: Number(text?.getAttribute('textLength')),
+        middle: E.shift(g.getAttribute('transform'))[1] + Number(text?.getAttribute('y')) - 0.36 * size,
+        range: { width: drawn.width, middle: drawn.y + drawn.height / 2 },
+      }];
+    });
+  },
+  // The list of every shrunk group: the text on the canvas and on how many lines it stands, and
+  // the lines of the SVG.
+  shrunk: () =>
+    [...document.querySelectorAll('.arch-group.arch-compact')].map((box) => {
+      const id = box.closest('.react-flow__node').dataset.id;
+      const text = box.querySelector('.arch-collapsed-text');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const g = window.__smokeExport.doc.querySelector('g[data-node="' + id + '"]');
+      return {
+        id,
+        canvas: text.textContent,
+        canvasLines: new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size,
+        lines: g ? [...g.children].filter((el) => el.localName === 'text' && el.getAttribute('text-anchor') === 'middle').map((el) => el.textContent) : null,
+      };
+    }),
+  // Points of the map where a picture and the screen show a flat colour: 6 px inside the left
+  // edge of every leaf at half its height, and of every group at half the height of its header;
+  // 3 px inside the left end of every header; the middle of the lower quarter of every row
+  // gutter. "clear" where that point is on the canvas with the thing itself on top (a row band
+  // takes no pointer: the empty pane) and no edge label over it.
+  probes: () => {
+    const E = window.__smokeExport;
+    const c = document.querySelector('.react-flow').getBoundingClientRect();
+    const v = window.__smoke.viewport();
+    const labels = [...document.querySelectorAll('.arch-edge-label:not(.arch-quiet)')].map((el) => el.getBoundingClientRect());
+    const at = (x, y, owns) => {
+      const sx = c.left + v.x + x * v.zoom;
+      const sy = c.top + v.y + y * v.zoom;
+      const top = sx >= c.left && sx < c.right && sy >= c.top && sy < c.bottom ? document.elementFromPoint(sx, sy) : null;
+      const labelled = labels.some((r) => sx >= r.left - 2 && sx <= r.right + 2 && sy >= r.top - 2 && sy <= r.bottom + 2);
+      return { x, y, screen: [sx - c.left, sy - c.top], clear: top !== null && owns(top) && !labelled };
+    };
+    const points = [];
+    for (const el of document.querySelectorAll('.react-flow__node-leaf')) {
+      const r = E.toMap(el.getBoundingClientRect());
+      points.push({ id: el.dataset.id, kind: 'leaf', ...at(r.x + 6, r.y + r.height / 2, (top) => el.contains(top)) });
+    }
+    for (const el of document.querySelectorAll('.react-flow__node-group')) {
+      const header = el.querySelector('.arch-group-header');
+      const r = E.toMap(el.getBoundingClientRect());
+      const h = E.toMap(header.getBoundingClientRect());
+      const level = el.querySelector('.arch-level-domain') ? 'domain' : 'group';
+      points.push({ id: el.dataset.id, kind: 'group', ...at(r.x + 6, h.y + h.height / 2, (top) => header.contains(top)) });
+      points.push({ id: el.dataset.id, kind: level + ' header', ...at(h.x + 3, h.y + h.height / 2, (top) => header.contains(top)) });
+    }
+    for (const el of document.querySelectorAll('.react-flow__node-band .arch-band-gutter')) {
+      const g = E.toMap(el.getBoundingClientRect());
+      points.push({
+        id: el.closest('.react-flow__node').dataset.id,
+        kind: 'gutter',
+        band: el.closest('.arch-band-odd') ? 'odd' : 'even',
+        ...at(g.x + g.width / 2, g.y + g.height * 0.875, (top) => top.classList.contains('react-flow__pane')),
+      });
+    }
+    return points;
+  },
+  // Puts a PNG back into the page, on a canvas kept under a name, and reads pixels of it.
+  picture: async (name, base64) => {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error('the PNG is no image'));
+      image.src = 'data:image/png;base64,' + base64;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+    window.__smokeExport.pictures[name] = context;
+    return { width: canvas.width, height: canvas.height };
+  },
+  pixels: (name, points) => points.map(([x, y]) => [...window.__smokeExport.pictures[name].getImageData(x, y, 1, 1).data]),
+  // Lets go of the pixels of the pictures kept.
+  forget: () => {
+    for (const context of Object.values(window.__smokeExport.pictures)) context.canvas.width = context.canvas.height = 0;
+    window.__smokeExport.pictures = {};
+    return true;
+  },
+  // What lies on the canvas and is in no file — the dots of the background, the panels of the
+  // canvas (minimap, zoom buttons, attribution) and the legends — hidden for a screenshot, and
+  // shown again.
+  hideOverlays: () => {
+    const E = window.__smokeExport;
+    E.hidden = [...document.querySelectorAll('.react-flow__background, .react-flow__panel, .map-legends')].map((el) => [el, el.style.visibility]);
+    for (const [el] of E.hidden) el.style.visibility = 'hidden';
+    return E.hidden.length;
+  },
+  showOverlays: () => {
+    const E = window.__smokeExport;
+    for (const [el, visibility] of E.hidden) el.style.visibility = visibility;
+    E.hidden = [];
+    return true;
+  },
+  // The canvas on screen: its rectangle, its size, how many pixels at its left the body of the
+  // control panel lies over, and the pixels of the screen per pixel of the page.
+  canvas: () => {
+    const el = document.querySelector('.react-flow');
+    const r = el.getBoundingClientRect();
+    const panels = document.querySelector('.cp-panels');
+    const column = document.querySelector('.app-column');
+    const covered = panels && column && panels.getClientRects().length > 0 ? Math.max(0, panels.getBoundingClientRect().right - column.getBoundingClientRect().left) : 0;
+    return { x: r.left, y: r.top, width: el.clientWidth, height: el.clientHeight, covered, ratio: window.devicePixelRatio };
+  },
+  // How much of the map — boxes, row bands, lines, labels, lists — is within "margin" pixels of
+  // the canvas.
+  inView: (margin) => {
+    const c = document.querySelector('.react-flow').getBoundingClientRect();
+    return [...document.querySelectorAll('.react-flow__node, .react-flow__edge-path, .arch-edge-label, .arch-workitems-above')].filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.left < c.right + margin && r.right > c.left - margin && r.top < c.bottom + margin && r.bottom > c.top - margin;
+    }).length;
+  },
+  // The domain that reaches furthest to the right, and the one that reaches furthest down.
+  outermost: () => {
+    const domains = [...document.querySelectorAll('.react-flow__node-group')].filter((el) => !el.dataset.id.includes('.')).map((el) => ({ id: el.dataset.id, name: el.querySelector('.arch-node-name')?.textContent ?? '', r: el.getBoundingClientRect() }));
+    const pick = (edge) => {
+      const found = domains.reduce((best, domain) => (best === null || domain.r[edge] > best.r[edge] ? domain : best), null);
+      return found ? { id: found.id, name: found.name } : null;
+    };
+    return { right: pick('left'), bottom: pick('bottom') };
+  },
+  // How far the box is from having left the canvas at its right edge, in pixels of the screen
+  // (nothing left to go at 0 or below), with what a box may paint outside itself.
+  toLeaveRight: (id) => {
+    const c = document.querySelector('.react-flow').getBoundingClientRect();
+    const r = document.querySelector('.react-flow__node[data-id="' + id + '"]').getBoundingClientRect();
+    return c.right - r.left + 16 * window.__smoke.viewport().zoom;
+  },
+  // The heading and the key of the SVG, and what the canvas shows of the same: the chips of its
+  // colour legend and the kinds of the edges it draws.
+  key: () => {
+    const E = window.__smokeExport;
+    const attrs = (selector, name) => [...E.doc.querySelectorAll(selector)].map((el) => el.getAttribute(name));
+    const legend = E.doc.querySelector('[data-part="legend"]');
+    return {
+      heading: [...E.doc.querySelectorAll('[data-part="heading"] text')].map((el) => el.textContent),
+      headings: E.doc.querySelectorAll('[data-part="heading"]').length,
+      legends: E.doc.querySelectorAll('[data-part="legend"]').length,
+      // Where the key starts: the end of the map in the picture.
+      legendTop: legend ? E.shift(legend.parentElement.getAttribute('transform'))[1] : null,
+      keys: attrs('[data-key]', 'data-key'),
+      kinds: attrs('[data-key-kind]', 'data-key-kind'),
+      chips: [...E.doc.querySelectorAll('[data-key="colour"] [data-key-value]')].map((el) => ({ value: el.getAttribute('data-key-value'), colour: E.paint(el, 'fill') })),
+      canvas: {
+        chips: [...document.querySelectorAll('#color-legend [data-legend-value]')].map((li) => ({ value: li.dataset.legendValue, colour: E.rgba(getComputedStyle(li.querySelector('.color-legend-chip')).backgroundColor) })),
+        kinds: ['dataflow', 'dependency', 'control', 'config'].filter((kind) => document.querySelector('.react-flow__edge.arch-edge-' + kind + ':not(.arch-quiet)') !== null),
+      },
+    };
+  },
+  // The opacity of every box, line and label in the SVG beside the one the browser computes on
+  // the canvas, with whether the canvas dims or pales it; and the boxes the SVG rings.
+  marks: () => {
+    const E = window.__smokeExport;
+    const pair = (g, el) => ({
+      picture: Number(g.getAttribute('opacity') ?? 1),
+      canvas: el ? Number(getComputedStyle(el).opacity) : null,
+      dimmed: el?.classList.contains('arch-dimmed') ?? false,
+      faded: el?.classList.contains('arch-faded') ?? false,
+    });
+    return {
+      boxes: [...E.doc.querySelectorAll('g[data-node]')].map((g) => ({ id: g.getAttribute('data-node'), ...pair(g, document.querySelector('.react-flow__node[data-id="' + g.getAttribute('data-node') + '"]')) })),
+      edges: [...E.doc.querySelectorAll('g[data-edge]')].map((g) => ({ id: g.getAttribute('data-edge'), ...pair(g, document.querySelector('.react-flow__edge[data-id="' + g.getAttribute('data-edge') + '"]')) })),
+      labels: [...E.doc.querySelectorAll('g[data-edge-label]')].map((g) => ({ id: g.getAttribute('data-edge-label'), ...pair(g, document.querySelector('.arch-edge-label[data-edge-id="' + g.getAttribute('data-edge-label') + '"]')) })),
+      ringed: [...E.doc.querySelectorAll('g[data-node]')].filter((g) => g.querySelector('[data-part="selected"]')).map((g) => g.getAttribute('data-node')),
+      selected: [...document.querySelectorAll('.react-flow__node.selected')].map((el) => el.dataset.id),
+    };
+  },
+  // The names of the domains with the larger titles: the sizes and the number of the lines the
+  // SVG writes, and the size and the number of lines of the name on the canvas.
+  largeTitles: () =>
+    [...document.querySelectorAll('.arch-level-domain:not(.arch-compact)')].map((box) => {
+      const id = box.closest('.react-flow__node').dataset.id;
+      const name = box.querySelector('.arch-node-name');
+      const style = getComputedStyle(name);
+      const g = window.__smokeExport.doc.querySelector('g[data-node="' + id + '"]');
+      const first = g?.querySelector('text');
+      return {
+        id,
+        size: parseFloat(style.fontSize),
+        lines: Math.round(name.offsetHeight / parseFloat(style.lineHeight)),
+        picture: first ? [...g.children].filter((el) => el.localName === 'text' && el.getAttribute('font-size') === first.getAttribute('font-size') && el.getAttribute('text-anchor') === first.getAttribute('text-anchor')).map((el) => Number(el.getAttribute('font-size'))) : null,
+      };
+    }),
+  // The work-item lines of the SVG and of the canvas, and those marked as selected.
+  workItems: () => {
+    const { doc } = window.__smokeExport;
+    return {
+      picture: doc.querySelectorAll('[data-workitem]').length,
+      canvas: document.querySelectorAll('.arch-workitem').length,
+      selected: {
+        picture: [...doc.querySelectorAll('[data-workitem][data-selected="true"]')].map((g) => g.getAttribute('data-workitem')).sort(),
+        canvas: [...document.querySelectorAll('.arch-workitem-selected')].map((el) => el.dataset.workitemId).sort(),
+      },
+    };
+  },
+  // The heat strips and the progress bars of the SVG beside those of the canvas, in pixels of
+  // the map: the height and the count of a strip (its own rectangle: the one of a closed group
+  // is not shortened by what clips it), the width of the done part of a bar.
+  lenses: () => {
+    const E = window.__smokeExport;
+    const zoom = window.__smoke.viewport().zoom;
+    return {
+      strips: E.doc.querySelectorAll('[data-part="heat"]').length,
+      heat: [...document.querySelectorAll('.arch-heat-left')].map((strip) => {
+        const id = strip.closest('.react-flow__node').dataset.id;
+        const g = E.doc.querySelector('g[data-node="' + id + '"] > g[data-part="heat"][data-side="left"]');
+        return { id, canvas: [strip.getBoundingClientRect().height / zoom, strip.dataset.heat], picture: g ? [Number(g.querySelectorAll('rect')[1]?.getAttribute('height')), g.getAttribute('data-heat')] : null };
+      }),
+      bars: E.doc.querySelectorAll('[data-part="progress"]').length,
+      progress: [...document.querySelectorAll('.arch-progress')].map((bar) => {
+        const id = bar.closest('.react-flow__node').dataset.id;
+        const g = E.doc.querySelector('g[data-node="' + id + '"] > g[data-part="progress"]');
+        return { id, canvas: parseFloat(getComputedStyle(bar, '::after').width), picture: g ? Number(g.querySelectorAll('rect')[1]?.getAttribute('width') ?? 0) : null };
+      }),
+    };
+  },
+  // The handle at the right edge of a group that can be resized (none where groups cannot be):
+  // its group and the point to grab it by.
+  resizeHandle: () => {
+    for (const el of document.querySelectorAll('.react-flow__node-group')) {
+      const box = el.getBoundingClientRect();
+      for (const handle of el.querySelectorAll('.arch-resize')) {
+        const r = handle.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        if (Math.abs(x - box.right) <= 6 && y > box.top + box.height * 0.25 && y < box.bottom - box.height * 0.25 && handle.contains(document.elementFromPoint(x, y))) {
+          return { id: el.dataset.id, x, y, zoom: window.__smoke.viewport().zoom };
+        }
+      }
+    }
+    return null;
+  },
+  // An exported page, read without being opened: what it must not hold, and what it lists.
+  page: (text) => {
+    const doc = new DOMParser().parseFromString(text, 'text/html');
+    const all = [...doc.querySelectorAll('*')];
+    const addresses = ['src', 'srcset', 'action', 'poster', 'data', 'background', 'xlink:href'];
+    return {
+      scripts: doc.scripts.length,
+      handlers: all.flatMap((el) => el.getAttributeNames().filter((name) => name.toLowerCase().startsWith('on')).map((name) => el.localName + ' ' + name)),
+      addresses: all.flatMap((el) => addresses.filter((name) => el.hasAttribute(name)).map((name) => el.localName + ' ' + name)),
+      links: all.filter((el) => el.hasAttribute('href')).map((el) => el.getAttribute('href')),
+      listed: [...doc.querySelectorAll('li[data-node]')].map((li) => li.getAttribute('data-node')),
+      rows: doc.querySelectorAll('tr[data-edge]').length,
+      drawn: [...doc.querySelectorAll('.map svg g[data-node]')].map((g) => g.getAttribute('data-node')),
+      names: [...doc.querySelectorAll('.map svg g[data-node]')].map((g) => g.querySelector('text')?.textContent ?? ''),
+    };
+  },
+})`;
 const PROFILE_PREFIX = 'arch-map-smoke-';
 /** The profile directory that every run uses, unless another run is using it at that moment. */
 const SHARED_PROFILE = `${PROFILE_PREFIX}profile`;
@@ -1023,6 +1484,8 @@ async function run(viewerPath, browserPath) {
   let cdp;
   /** Directory for the data files the run writes itself; removed at the end. @type {string | undefined} */
   let scratch;
+  /** Address of the exported page the run opens itself. @type {string | undefined} */
+  let exportedPage;
   /** @type {string[]} */
   const failures = [];
   /** @param {string} name @param {unknown} ok @param {unknown} [detail] */
@@ -8230,6 +8693,1673 @@ async function run(viewerPath, browserPath) {
       }
     }
 
+    // --- Export: the map as a PNG, an SVG and a page of its own --------------------------------
+    // In a block: its names are of use to no other part of the run.
+    {
+      /** @typedef {{ r: number, g: number, b: number, a: number }} Colour */
+      /** @typedef {{ status: Record<string, string>, file: Buffer | undefined }} Exported */
+      /**
+       * A point of the map where a picture and the screen show a flat colour (`probes()` in the
+       * page): in pixels of the map, and on the screen from the corner of the canvas.
+       * @typedef {object} Probe
+       * @property {string} id
+       * @property {string} kind
+       * @property {string} [band]
+       * @property {number} x
+       * @property {number} y
+       * @property {[number, number]} screen
+       * @property {boolean} clear
+       */
+      /**
+       * A box in the SVG and on the canvas: x, y, width, height, and the two ends of its header.
+       * @typedef {object} PlacedBox
+       * @property {string} id
+       * @property {number[]} picture
+       * @property {number[] | null} canvas
+       * @property {number[] | null} header
+       */
+      /**
+       * The name of a box on the canvas and in the SVG (`names()` in the page).
+       * @typedef {object} DrawnName
+       * @property {string} id
+       * @property {string} name
+       * @property {boolean} cut
+       * @property {number} room
+       * @property {string | null} picture
+       * @property {number} length
+       * @property {number} middle
+       * @property {{ width: number, middle: number }} range
+       */
+      /**
+       * The opacity of a box, a line or a label in the SVG and on the canvas.
+       * @typedef {object} Mark
+       * @property {string} id
+       * @property {number} picture
+       * @property {number | null} canvas
+       * @property {boolean} dimmed
+       * @property {boolean} faded
+       */
+
+      // What the block starts from, to come back to at its end.
+      const EXPORT_KEY = 'architecture-map.export';
+      const EXPORT_START_VIEW = 'Before the exports';
+      const exportStart = {
+        tab: await attr('data-panel-tab'),
+        panelCollapsed: await attr('data-panel-collapsed'),
+        heat: await attr('data-heat'),
+        progress: await attr('data-progress'),
+        onDemand: await attr('data-edges-on-demand'),
+        shrink: await attr('data-compact-collapsed'),
+        focusMode: await attr('data-focus-mode'),
+        rows: await attr('data-show-rows'),
+        closeGaps: await attr('data-close-gaps'),
+        colorBy: await attr('data-color-by'),
+        storyMode: await attr('data-story-mode'),
+        hiddenKinds: await attr('data-hidden-kinds'),
+        lodMode: await attr('data-lod-mode'),
+        collapsed: await attr('data-collapsed-count'),
+        stored: /** @type {string | null} */ (
+          await evaluate(`localStorage.getItem('${EXPORT_KEY}')`)
+        ),
+        keys: /** @type {string[]} */ (await evaluate(`Object.keys(localStorage)`)),
+        requests: requests.length,
+        violations: violations.length,
+      };
+      /** Errors the page reports during the exports; none is expected. @type {string[]} */
+      const exportErrors = [];
+      client.on('Runtime.exceptionThrown', (params) => {
+        exportErrors.push(
+          params.exceptionDetails?.exception?.description ?? params.exceptionDetails?.text ?? '?',
+        );
+      });
+      client.on('Runtime.consoleAPICalled', (params) => {
+        if (params.type === 'error') {
+          exportErrors.push(
+            String(params.args?.[0]?.value ?? params.args?.[0]?.description ?? '?'),
+          );
+        }
+      });
+
+      // The files go into a folder of the run. A headless browser that is not told where saves
+      // into the Downloads folder of whoever runs the test: without the folder, nothing is
+      // exported at all.
+      scratch ??= await mkdtemp(path.join(os.tmpdir(), 'arch-map-smoke-data-'));
+      const exportsDir = path.join(scratch, 'exports');
+      await mkdir(exportsDir, { recursive: true });
+      const downloads = { behavior: 'allow', downloadPath: exportsDir };
+      const downloadsSet = await client.send('Browser.setDownloadBehavior', downloads).then(
+        () => true,
+        () =>
+          client.send('Page.setDownloadBehavior', downloads).then(
+            () => true,
+            () => false,
+          ),
+      );
+      if (!downloadsSet) {
+        throw new Error('the browser takes no folder for its downloads: nothing is exported');
+      }
+
+      /**
+       * Asks the page about the exported files (`EXPORT_HELPERS`). The call may carry a whole
+       * file: an error names the start of it only.
+       * @param {string} call
+       * @returns {Promise<any>}
+       */
+      const exportPage = (call) =>
+        evaluate(`${EXPORT_HELPERS}.${call}`).catch((error) => {
+          throw new Error(
+            `page error in ${call.slice(0, 60)}: ${String(error.message).slice(-80)}`,
+          );
+        });
+      /**
+       * Clicks one of the three buttons and waits for the export to end: the text and the
+       * attributes of its status and, when a file was saved, that file — complete, with the
+       * number of bytes the status states. A file of that name from an earlier export is removed
+       * first: the browser would number the new one.
+       * @param {'png' | 'svg' | 'html'} format @param {string} [base]
+       * @returns {Promise<Exported>}
+       */
+      const exported = async (format, base = 'architecture') => {
+        const counted = `Number(document.querySelector('#export-status')?.dataset.count ?? 0)`;
+        /** @type {number} */
+        const before = await evaluate(counted);
+        await rm(path.join(exportsDir, `${base}-map.${format}`), { force: true });
+        // While a layout is on its way the buttons wait.
+        await until(
+          `document.querySelector('#export-${format}')?.disabled === false`,
+          `the ${format} button to be ready`,
+        );
+        await click(`#export-${format}`);
+        await until(
+          `${counted} > ${before} && document.querySelector('#export-status').dataset.state !== 'working'`,
+          `the ${format} export to end`,
+        );
+        /** @type {Record<string, string>} */
+        const status = await evaluate(`(() => {
+          const status = document.querySelector('#export-status');
+          return { text: status.textContent, ...status.dataset };
+        })()`);
+        if (status.state !== 'saved') return { status, file: undefined };
+        const saved = path.join(exportsDir, status.name ?? '');
+        const file = await waitFor(async () => {
+          const data = await readFile(saved).catch(() => undefined);
+          return data !== undefined && data.length === Number(status.bytes) ? data : undefined;
+        }, `the file ${status.name} with ${status.bytes} bytes`);
+        return { status, file };
+      };
+      /**
+       * Exports the SVG and reads it into the page: what the checks ask about from then on. An
+       * export that saves nothing where a picture is expected ends the run.
+       * @param {string} [base]
+       */
+      const savedSvg = async (base) => {
+        const { status, file } = await exported('svg', base);
+        if (file === undefined) throw new Error(`no SVG was saved: ${status.text}`);
+        const svg = file.toString('utf8');
+        const read = await exportPage(`load(${JSON.stringify(svg)})`);
+        return { status, file, svg, read };
+      };
+      /**
+       * Width and height a PNG file states, or null for a file that is no PNG.
+       * @param {Buffer | undefined} file
+       */
+      const pngSizeOf = (file) =>
+        file !== undefined &&
+        file.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+        file.toString('latin1', 12, 16) === 'IHDR'
+          ? { width: file.readUInt32BE(16), height: file.readUInt32BE(20) }
+          : null;
+      /** Puts a PNG into the page under a name. @param {string} name @param {string} base64 */
+      const showPicture = (name, base64) =>
+        exportPage(`picture(${JSON.stringify(name)}, ${JSON.stringify(base64)})`);
+      /**
+       * The pixels of a picture in the page at whole points.
+       * @param {string} name @param {number[][]} points @returns {Promise<number[][]>}
+       */
+      const pixelsOf = (name, points) =>
+        exportPage(`pixels(${JSON.stringify(name)}, ${JSON.stringify(points)})`);
+      /** @param {number} a @param {number} b @param {number} by */
+      const near = (a, b, by) => Math.abs(a - b) <= by;
+      /**
+       * Whether two lists of numbers are the same within `by`.
+       * @param {number[]} a @param {number[]} b @param {number} by
+       */
+      const nearAll = (a, b, by) =>
+        a.length === b.length && a.every((value, i) => near(value, b[i] ?? NaN, by));
+      /**
+       * Whether two colours are the same: each channel within `by` of 255, the alpha within 0.01.
+       * @param {Colour | null | undefined} a @param {Colour | null | undefined} b
+       * @param {number} [by]
+       */
+      const sameColour = (a, b, by = 1) =>
+        !!a &&
+        !!b &&
+        near(a.r, b.r, by) &&
+        near(a.g, b.g, by) &&
+        near(a.b, b.b, by) &&
+        near(a.a, b.a, 0.01);
+      /**
+       * A colour over an opaque one.
+       * @param {Colour} top @param {Colour} below @returns {Colour}
+       */
+      const over = (top, below) => ({
+        r: top.r * top.a + below.r * (1 - top.a),
+        g: top.g * top.a + below.g * (1 - top.a),
+        b: top.b * top.a + below.b * (1 - top.a),
+        a: 1,
+      });
+      /** A pixel as a colour. @param {number[] | undefined} pixel @returns {Colour | null} */
+      const colourOf = (pixel) =>
+        pixel === undefined
+          ? null
+          : {
+              r: pixel[0] ?? NaN,
+              g: pixel[1] ?? NaN,
+              b: pixel[2] ?? NaN,
+              a: (pixel[3] ?? NaN) / 255,
+            };
+      /** The properties of the page the pictures are probed for. */
+      const PALETTE = [
+        '--bg',
+        '--leaf-bg',
+        '--domain-header-bg',
+        '--band-gutter',
+        '--band-even',
+        '--band-odd',
+        '--node-selected',
+      ];
+      /** @returns {Promise<Record<string, Colour>>} */
+      const paletteNow = () => exportPage(`palette(${JSON.stringify(PALETTE)})`);
+      /** The four choices as the controls show them. */
+      const choicesShown = () =>
+        evaluate(`({
+          area: document.querySelector('#export-area')?.value ?? null,
+          scheme: document.querySelector('#export-scheme')?.value ?? null,
+          scale: document.querySelector('#export-scale')?.value ?? null,
+          caption: document.querySelector('#export-caption')?.checked ?? null,
+        })`);
+      /**
+       * Makes the four choices, each as a pick from its list or a click on its box would.
+       * @param {{ area?: string, scheme?: string, scale?: string, caption?: boolean }} choices
+       */
+      const choose = async (choices) => {
+        for (const name of /** @type {const} */ (['area', 'scheme', 'scale'])) {
+          const value = choices[name];
+          if (value !== undefined) await chooseOption(`#export-${name}`, value);
+        }
+        if (choices.caption !== undefined) await setSetting('export-caption', choices.caption);
+      };
+      /** Waits until nothing on the page is fading in or out. */
+      const calm = () =>
+        until(
+          `document.getAnimations().every((animation) => !(animation instanceof CSSTransition) || animation.playState !== 'running')`,
+          'the page at rest',
+        );
+      /**
+       * What of the canvas the SVG last read does not hold as it is drawn — boxes, shown edges
+       * and labels by their IDs, each once, and as many row bands; a name that is empty or no
+       * beginning of the name of its box; an edge without its line or its head; a label with
+       * other words — and how many of each it holds.
+       */
+      const contentProblems = async () => {
+        const held = await exportPage('contents()');
+        /** @type {string[]} */
+        const problems = [];
+        for (const what of ['boxes', 'edges', 'labels']) {
+          /** @type {{ picture: string[], canvas: string[] }} */
+          const { picture, canvas } = held[what];
+          if (!same([...picture].sort(), [...canvas].sort())) {
+            const missing = canvas.filter((id) => !picture.includes(id));
+            const extra = picture.filter((id) => !canvas.includes(id));
+            problems.push(
+              `${what}: ${JSON.stringify({ missing, extra, written: picture.length })}`,
+            );
+          }
+        }
+        if (held.bands.picture !== held.bands.canvas) {
+          problems.push(`row bands: ${held.bands.picture} of ${held.bands.canvas}`);
+        }
+        for (const box of held.names) {
+          const first = box.first.endsWith('…') ? box.first.slice(0, -1) : box.first;
+          if (box.first === '' || box.name === null || !box.name.startsWith(first)) {
+            problems.push(`name of ${box.id}: "${box.first}" for "${box.name}"`);
+          }
+        }
+        for (const edge of held.parts) {
+          if (edge.lines !== 1 || edge.heads !== 1) problems.push(`parts of ${edge.id}`);
+        }
+        for (const label of held.words) {
+          if (label.picture !== label.canvas) problems.push(`words of the label of ${label.id}`);
+        }
+        return {
+          problems,
+          boxes: /** @type {number} */ (held.boxes.picture.length),
+          edges: /** @type {number} */ (held.edges.picture.length),
+          labels: /** @type {number} */ (held.labels.picture.length),
+          bands: /** @type {number} */ (held.bands.picture),
+        };
+      };
+      /**
+       * What the SVG last read has elsewhere than the canvas: a box (its corner and its size
+       * within half a pixel), the line of an edge (the eight numbers of its path within one), a
+       * label (the middle of its box within a pixel, its width within two, its height within one
+       * and a half).
+       */
+      const placeProblems = async () => {
+        const placed = await exportPage('places()');
+        /** @type {string[]} */
+        const problems = [];
+        for (const box of placed.boxes) {
+          if (!box.canvas || !nearAll(box.picture, box.canvas, 0.5)) {
+            problems.push(`${box.id}: ${JSON.stringify([box.picture, box.canvas])}`);
+          }
+        }
+        for (const edge of placed.edges) {
+          if (!edge.canvas || edge.picture.length !== 8 || !nearAll(edge.picture, edge.canvas, 1)) {
+            problems.push(`${edge.id}: ${JSON.stringify([edge.picture, edge.canvas])}`);
+          }
+        }
+        for (const label of placed.labels) {
+          const [x, y, width, height] = label.picture;
+          const [cx, cy, cWidth, cHeight] = label.canvas ?? [];
+          if (
+            !near(x, cx, 1) ||
+            !near(y, cy, 1) ||
+            !near(width, cWidth, 2) ||
+            !near(height, cHeight, 1.5)
+          ) {
+            problems.push(`label of ${label.id}: ${JSON.stringify([label.picture, label.canvas])}`);
+          }
+        }
+        return {
+          problems,
+          boxes: /** @type {number} */ (placed.boxes.length),
+          edges: /** @type {number} */ (placed.edges.length),
+          labels: /** @type {number} */ (placed.labels.length),
+          /** @type {PlacedBox[]} */
+          all: placed.boxes,
+        };
+      };
+      /**
+       * What the SVG last read colours otherwise than the canvas (the background of a box, its
+       * header and its name; the colour, the width and the dashes of a line), and the kinds of
+       * boxes and of edges that were compared.
+       */
+      const colourProblems = async () => {
+        const coloured = await exportPage('colours()');
+        /** @type {string[]} */
+        const problems = [];
+        for (const box of coloured.boxes) {
+          for (const part of ['box', 'header', 'name']) {
+            /** @type {[Colour | null, Colour | null] | null} */
+            const pair = box[part];
+            // A leaf has no header.
+            if (pair === null && part === 'header') continue;
+            if (pair === null || !sameColour(pair[0], pair[1])) {
+              problems.push(`${part} of ${box.id}: ${JSON.stringify(pair)}`);
+            }
+          }
+        }
+        for (const edge of coloured.edges) {
+          if (
+            !sameColour(edge.stroke[0], edge.stroke[1]) ||
+            !near(edge.width[0], edge.width[1] ?? NaN, 0.01) ||
+            edge.dash[1] === null ||
+            !nearAll(edge.dash[0], edge.dash[1], 0.01)
+          ) {
+            problems.push(
+              `line of ${edge.id}: ${JSON.stringify([edge.stroke, edge.width, edge.dash])}`,
+            );
+          }
+        }
+        return {
+          problems,
+          boxes: /** @type {string[]} */ ([
+            ...new Set(coloured.boxes.map((/** @type {{ kind: string }} */ box) => box.kind)),
+          ]),
+          edges: /** @type {string[]} */ ([
+            ...new Set(coloured.edges.map((/** @type {{ kind: string }} */ edge) => edge.kind)),
+          ]),
+        };
+      };
+      /**
+       * The names of the SVG last read against the canvas. A name the canvas cuts ends in "…",
+       * is at most as long as its room and more than half of it; every other is whole, as long
+       * as the canvas draws it and as high up, each within a pixel and a half.
+       */
+      const nameProblems = async () => {
+        /** @type {DrawnName[]} */
+        const names = await exportPage('names()');
+        /** @type {string[]} */
+        const problems = [];
+        for (const name of names) {
+          const right = name.cut
+            ? name.picture !== null &&
+              name.picture.endsWith('…') &&
+              name.length <= name.room + 0.5 &&
+              name.length > name.room / 2
+            : name.picture === name.name &&
+              near(name.length, name.range.width, 1.5) &&
+              near(name.middle, name.range.middle, 1.5);
+          if (!right) problems.push(`${name.id}: ${JSON.stringify(name)}`);
+        }
+        return {
+          problems,
+          cut: names.filter((name) => name.cut).map((name) => name.id),
+          whole: names.filter((name) => !name.cut).map((name) => name.id),
+        };
+      };
+      /**
+       * Drags the empty canvas by (dx, dy), or as far that way as the canvas allows.
+       * @param {number} dx @param {number} dy
+       */
+      const pan = async (dx, dy) => {
+        const plan = await evaluate(`window.__smoke.panPlan(${dx}, ${dy})`);
+        if (plan === null) throw new Error('no empty canvas to drag the map by');
+        await drag(plan.from, plan.to);
+        await settled();
+      };
+
+      // Start: nothing selected or focused, every lens off, every group open, rows, the
+      // Components level, the whole map in view. A saved view keeps the way back.
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      if ((await attr('data-focus')) !== null) {
+        await chooseOption('#focus-select', '');
+        await until(`window.__smoke.attr('data-focus') === null`, 'no focus before the exports');
+      }
+      await untilFiltered(null);
+      await saveView(EXPORT_START_VIEW);
+      await until(
+        `window.__smoke.count('#views-list li[data-view-name="${EXPORT_START_VIEW}"]') === 1`,
+        'the view to come back to after the exports',
+      );
+      if (exportStart.focusMode !== 'focus') {
+        await click('#focus-mode');
+        await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode');
+      }
+      await closeUp(false);
+      await showRows(true);
+      for (const id of ['heat', 'progress', 'edges-on-demand', 'compact-collapsed']) {
+        await setSetting(id, false);
+      }
+      if (exportStart.colorBy !== 'none') {
+        await chooseOption('#color-by', 'none');
+        await until(`window.__smoke.attr('data-color-by') === 'none'`, 'colour by nothing');
+      }
+      if (exportStart.storyMode !== 'stories') await chooseStories('stories');
+      for (const kind of (exportStart.hiddenKinds ?? '').split(' ').filter(Boolean)) {
+        await click(`#kind-filters [data-kind="${kind}"]`);
+      }
+      await until(`window.__smoke.attr('data-hidden-kinds') === ''`, 'every kind of edge shown');
+      await click('#expand-all');
+      await until(`window.__smoke.attr('data-collapsed-count') === '0'`, 'everything expanded');
+      await pinLod('components');
+      await fit();
+
+      // The section: on the Files tab while a map is drawn, with the choices nobody has made yet.
+      await showControl('#export');
+      const section = await evaluate(`(() => {
+        const options = (id) => [...document.querySelectorAll(id + ' option')].map((option) => option.value + ' ' + option.textContent);
+        return {
+          sections: document.querySelectorAll('#export').length,
+          tab: document.querySelector('#export')?.closest('[role="tabpanel"]')?.id ?? null,
+          title: window.__smoke.text('#export-title'),
+          buttons: ['png', 'svg', 'html'].map((format) => {
+            const button = document.querySelector('#export-' + format);
+            return button ? button.textContent + ' ' + button.disabled + ' ' + button.title : null;
+          }),
+          area: options('#export-area'),
+          scheme: options('#export-scheme'),
+          scale: options('#export-scale'),
+          scaleTitle: document.querySelector('#export-scale')?.title ?? null,
+          caption: document.querySelector('#export-caption')?.closest('label')?.textContent ?? null,
+          note: window.__smoke.text('#export-note'),
+          status: document.querySelectorAll('#export-status').length,
+          hint: document.querySelectorAll('#export-hint').length,
+        };
+      })()`);
+      const choicesAtFirst = await choicesShown();
+      check(
+        'the Files tab has an Export section: three buttons, the four choices as nobody has made them yet, and its note',
+        exportStart.stored === null &&
+          section.sections === 1 &&
+          section.tab === 'panel-files' &&
+          section.title === 'Export' &&
+          same(section.buttons, [
+            'PNG false Save a picture of the map (PNG)',
+            'SVG false Save the map as a vector drawing: shapes and text, sharp at any size (SVG)',
+            'HTML false Save the map as a web page that needs nothing else and lists the boxes as text (HTML)',
+          ]) &&
+          same(section.area, ['map Whole map', 'view What is on screen']) &&
+          same(section.scheme, ['screen As on screen', 'light Light', 'dark Dark']) &&
+          same(section.scale, ['1 1×', '2 2×', '3 3×']) &&
+          section.scaleTitle === 'Pixels of the PNG per pixel of the map' &&
+          section.caption === 'Title and legend' &&
+          same(choicesAtFirst, { area: 'map', scheme: 'screen', scale: '2', caption: true }) &&
+          section.note ===
+            'The map as it is drawn now: level of detail, focus, colours, work items and what is selected. A PNG is a fixed picture; SVG stays sharp at any size; the HTML page opens in any browser.' &&
+          section.status === 0 &&
+          section.hint === 0,
+        { stored: exportStart.stored, section, choicesAtFirst },
+      );
+
+      // The SVG of the whole map at the Components level, with its title and legend.
+      const light = await paletteNow();
+      const plain = await savedSvg();
+      const plainImage = await exportPage('image()');
+      const refused = [
+        '<style',
+        ' style=',
+        '<script',
+        '<image',
+        '<use',
+        '<foreignObject',
+        '<filter',
+        'href=',
+        'NaN',
+      ].filter((part) => plain.svg.includes(part));
+      check(
+        'SVG: the file is architecture-map.svg with the bytes and the size the status states, one plain picture that loads as an image',
+        plain.status.text === 'Saved architecture-map.svg.' &&
+          plain.status.name === 'architecture-map.svg' &&
+          plain.status.format === 'svg' &&
+          plain.file.length === Number(plain.status.bytes) &&
+          plain.read.error === null &&
+          plain.read.root === 'svg' &&
+          plain.read.width === Number(plain.status.width) &&
+          plain.read.height === Number(plain.status.height) &&
+          plain.read.width > 0 &&
+          plain.read.height > 0 &&
+          plain.read.role === 'img' &&
+          plain.read.title === 'architecture.yaml' &&
+          typeof plain.read.desc === 'string' &&
+          plain.read.desc.includes(
+            `${plain.status.nodes} boxes and ${plain.status.edges} edges. Level: Components`,
+          ) &&
+          refused.length === 0 &&
+          plainImage.width === plain.read.width &&
+          plainImage.height === plain.read.height,
+        {
+          status: plain.status,
+          read: { ...plain.read, nodes: undefined, edges: undefined, texts: undefined },
+          refused,
+          plainImage,
+        },
+      );
+      const plainHeld = await contentProblems();
+      check(
+        'SVG: it holds every box, shown edge, label and row band of the canvas, each once: every box with its name, every edge with its line and its head, every label with its words',
+        plainHeld.problems.length === 0 &&
+          plainHeld.boxes > 10 &&
+          plainHeld.edges > 5 &&
+          plainHeld.labels > 0 &&
+          plainHeld.bands > 0 &&
+          plainHeld.boxes === Number(plain.status.nodes) &&
+          plainHeld.edges === Number(plain.status.edges),
+        { ...plainHeld, problems: plainHeld.problems.slice(0, 5), status: plain.status },
+      );
+      const plainPlaced = await placeProblems();
+      check(
+        'SVG: boxes, edges and labels are where the canvas has them',
+        plainPlaced.problems.length === 0 &&
+          plainPlaced.boxes === plainHeld.boxes &&
+          plainPlaced.edges === plainHeld.edges &&
+          plainPlaced.labels === plainHeld.labels,
+        { problems: plainPlaced.problems.slice(0, 5), boxes: plainPlaced.boxes },
+      );
+      const plainColours = await colourProblems();
+
+      // The PNG of the same map: twice the picture, and the colours of the page where it is flat.
+      /** @type {Probe[]} */
+      const plainProbes = (await exportPage('probes()')).filter(
+        (/** @type {Probe} */ probe) =>
+          probe.clear && ['leaf', 'domain header', 'gutter'].includes(probe.kind),
+      );
+      const png = await exported('png');
+      const pngSize = pngSizeOf(png.file);
+      check(
+        'PNG: the file is architecture-map.png, a PNG of twice the picture, as large as the status states',
+        png.status.state === 'saved' &&
+          png.status.name === 'architecture-map.png' &&
+          png.status.format === 'png' &&
+          pngSize !== null &&
+          pngSize.width === Number(png.status.width) &&
+          pngSize.height === Number(png.status.height) &&
+          pngSize.width === Math.floor(plain.read.width * 2) &&
+          pngSize.height === Math.floor(plain.read.height * 2) &&
+          png.status.reduced === 'false' &&
+          png.status.scale === '2.0000' &&
+          png.status.text ===
+            `Saved architecture-map.png (${pngSize.width} × ${pngSize.height} px).`,
+        { status: png.status, pngSize, svg: [plain.read.width, plain.read.height] },
+      );
+      if (png.file !== undefined && pngSize !== null) {
+        await showPicture('png', png.file.toString('base64'));
+        const [shiftX, shiftY] = /** @type {[number, number]} */ (plain.read.shift);
+        const corners = await pixelsOf('png', [
+          [0, 0],
+          [pngSize.width - 1, pngSize.height - 1],
+        ]);
+        const seen = await pixelsOf(
+          'png',
+          plainProbes.map((probe) => [
+            Math.floor((probe.x + shiftX) * 2),
+            Math.floor((probe.y + shiftY) * 2),
+          ]),
+        );
+        /** The colour of the page at a probe. @param {Probe} probe @returns {Colour | undefined} */
+        const expected = (probe) => {
+          if (probe.kind === 'leaf') return light['--leaf-bg'];
+          if (probe.kind === 'domain header') return light['--domain-header-bg'];
+          const [gutter, band, bg] = [
+            light['--band-gutter'],
+            light[`--band-${probe.band}`],
+            light['--bg'],
+          ];
+          return gutter && band && bg ? over(gutter, over(band, bg)) : undefined;
+        };
+        const wrong = plainProbes.flatMap((probe, i) =>
+          sameColour(colourOf(seen[i]), expected(probe), 3)
+            ? []
+            : [`${probe.kind} ${probe.id}: ${JSON.stringify([seen[i], expected(probe)])}`],
+        );
+        const probed = Object.fromEntries(
+          ['leaf', 'domain header', 'gutter'].map((kind) => [
+            kind,
+            plainProbes.filter((probe) => probe.kind === kind).length,
+          ]),
+        );
+        check(
+          'PNG: the corners, leaves, domain headers and row gutters have the colours the page computes for them',
+          corners.every((corner) => sameColour(colourOf(corner), light['--bg'], 3)) &&
+            wrong.length === 0 &&
+            Object.values(probed).every((count) => count > 0),
+          { corners, bg: light['--bg'], probed, wrong: wrong.slice(0, 5) },
+        );
+        await exportPage('forget()');
+      }
+
+      // The page of the same map, read as a file.
+      const html = await exported('html');
+      const htmlText = html.file?.toString('utf8') ?? '';
+      const htmlRead = await exportPage(`page(${JSON.stringify(htmlText)})`);
+      check(
+        'HTML: the file is architecture-map.html, a page without a script, a handler or an address, that lists the boxes and the edges of the picture',
+        html.status.text === 'Saved architecture-map.html.' &&
+          html.status.name === 'architecture-map.html' &&
+          htmlText.startsWith('<!doctype html>') &&
+          !/<script/i.test(htmlText) &&
+          htmlRead.scripts === 0 &&
+          htmlRead.handlers.length === 0 &&
+          htmlRead.addresses.length === 0 &&
+          htmlRead.links.length > 1 &&
+          htmlRead.links.every(
+            (/** @type {string} */ href) => href === 'data:,' || href.startsWith('#'),
+          ) &&
+          same(htmlRead.drawn, plain.read.nodes) &&
+          same([...htmlRead.listed].sort(), [...plain.read.nodes].sort()) &&
+          htmlRead.rows === plain.read.edges.length,
+        {
+          status: html.status,
+          start: htmlText.slice(0, 20),
+          handlers: htmlRead.handlers,
+          addresses: htmlRead.addresses,
+          links: htmlRead.links.filter((/** @type {string} */ href) => !href.startsWith('#')),
+          listed: htmlRead.listed.length,
+          rows: htmlRead.rows,
+        },
+      );
+
+      // Colours. The open components are at the Subcomponents level, looked at without a
+      // colouring (with one, every box that has the attribute is tinted); by an attribute, the
+      // tint of the boxes is the browser's own mix.
+      await pinLod('subcomponents');
+      await savedSvg();
+      const openColours = await colourProblems();
+      await pinLod('components');
+      await fit();
+      await chooseOption('#color-by', 'owner');
+      await until(`window.__smoke.attr('data-color-by') === 'owner'`, 'colour by owner');
+      await savedSvg();
+      const tintedColours = await colourProblems();
+      const tintedKey = await exportPage('key()');
+      const boxKinds = [
+        ...new Set([...plainColours.boxes, ...tintedColours.boxes, ...openColours.boxes]),
+      ];
+      const lineKinds = [
+        ...new Set([...plainColours.edges, ...tintedColours.edges, ...openColours.edges]),
+      ];
+      check(
+        'SVG: boxes, headers, names and lines have the colours the browser computes on the canvas, with and without Colour by',
+        plainColours.problems.length === 0 &&
+          tintedColours.problems.length === 0 &&
+          openColours.problems.length === 0 &&
+          ['leaf', 'open domain', 'open component', 'closed group', 'tinted leaf'].every((kind) =>
+            boxKinds.includes(kind),
+          ) &&
+          boxKinds.some((kind) => kind.startsWith('tinted') && kind !== 'tinted leaf') &&
+          lineKinds.length >= 2,
+        {
+          boxKinds,
+          lineKinds,
+          problems: [
+            ...plainColours.problems,
+            ...tintedColours.problems,
+            ...openColours.problems,
+          ].slice(0, 5),
+        },
+      );
+
+      // Title and legend, with Colour by: the name of the file, and the key of what is drawn.
+      const drawnKinds = /** @type {string[]} */ (tintedKey.canvas.kinds);
+      check(
+        'Title and legend: the heading starts with the name of the file, and the key has the chips of the colour legend, in its order and its colours, and the kinds of edge that are drawn',
+        tintedKey.headings === 1 &&
+          tintedKey.legends === 1 &&
+          tintedKey.heading[0] === 'architecture.yaml' &&
+          tintedKey.heading.join(' ').includes('Level: Components · Colour by Owner') &&
+          tintedKey.chips.length > 1 &&
+          tintedKey.chips.length === tintedKey.canvas.chips.length &&
+          tintedKey.chips.every(
+            (/** @type {{ value: string, colour: Colour }} */ chip, /** @type {number} */ i) =>
+              chip.value === tintedKey.canvas.chips[i].value &&
+              sameColour(chip.colour, tintedKey.canvas.chips[i].colour),
+          ) &&
+          drawnKinds.length >= 2 &&
+          same(tintedKey.kinds, drawnKinds) &&
+          same(tintedKey.keys, ['edges', 'colour']),
+        tintedKey,
+      );
+      await click('#kind-filters [data-kind="dataflow"]');
+      await until(`window.__smoke.attr('data-hidden-kinds') === 'dataflow'`, 'dataflow hidden');
+      await until(
+        `window.__smoke.count('.react-flow__edge.arch-edge-dataflow') === 0`,
+        'no dataflow edge drawn',
+      );
+      await savedSvg();
+      const withoutKind = await exportPage('key()');
+      await click('#kind-filters [data-kind="dataflow"]');
+      await until(`window.__smoke.attr('data-hidden-kinds') === ''`, 'dataflow shown again');
+      await until(
+        `window.__smoke.count('.react-flow__edge.arch-edge-dataflow') > 0`,
+        'the dataflow edges drawn again',
+      );
+      // Heat and progress on as well: their lines in the key, and the marks on the boxes.
+      await setSetting('heat', true);
+      await setSetting('progress', true);
+      await until(
+        `window.__smoke.count('.arch-heat-left') > 0 && window.__smoke.count('.arch-progress') > 0`,
+        'heat strips and progress bars',
+      );
+      const framed = await savedSvg();
+      const framedKey = await exportPage('key()');
+      const lensMarks = await exportPage('lenses()');
+      check(
+        'Title and legend: a kind of edge that is switched off is not in the key and the note says so; heat and progress have their lines in the key while they are on',
+        drawnKinds.includes('dataflow') &&
+          !withoutKind.kinds.includes('dataflow') &&
+          same(withoutKind.kinds, withoutKind.canvas.kinds) &&
+          withoutKind.heading.join(' ').includes('Without dataflow edges') &&
+          !tintedKey.heading.join(' ').includes('Without') &&
+          same(framedKey.keys, ['edges', 'colour', 'heat', 'progress']) &&
+          framedKey.heading.join(' ').includes('Heat by work · Progress'),
+        { without: withoutKind.kinds, heading: withoutKind.heading, keys: framedKey.keys },
+      );
+      /** @type {{ id: string, canvas: [number, string], picture: [number, string] | null }[]} */
+      const strips = lensMarks.heat;
+      /** @type {{ id: string, canvas: number, picture: number | null }[]} */
+      const bars = lensMarks.progress;
+      const wrongMarks = [
+        ...strips.filter(
+          (strip) =>
+            strip.picture === null ||
+            !near(strip.picture[0], strip.canvas[0], 0.5) ||
+            strip.picture[1] !== strip.canvas[1],
+        ),
+        ...bars.filter((bar) => bar.picture === null || !near(bar.picture, bar.canvas, 0.5)),
+      ];
+      check(
+        'heat and progress: two strips for every strip pair of the canvas, each as tall as on the canvas and with its count, and every bar done as far as on the canvas',
+        strips.length > 0 &&
+          lensMarks.strips === 2 * strips.length &&
+          bars.length > 0 &&
+          lensMarks.bars === bars.length &&
+          bars.some((bar) => bar.canvas > 0) &&
+          wrongMarks.length === 0,
+        { strips: lensMarks.strips, bars: lensMarks.bars, wrong: wrongMarks.slice(0, 5) },
+      );
+      // Without them: the map and its margin alone, in the same state.
+      await choose({ caption: false });
+      const bare = await savedSvg();
+      const bareKey = await exportPage('key()');
+      const mapSpan = await evaluate(`(() => {
+        const rects = [...document.querySelectorAll('.react-flow__node')].map((el) => el.getBoundingClientRect());
+        const zoom = window.__smoke.viewport().zoom;
+        return {
+          width: (Math.max(...rects.map((r) => r.right)) - Math.min(...rects.map((r) => r.left))) / zoom,
+          height: (Math.max(...rects.map((r) => r.bottom)) - Math.min(...rects.map((r) => r.top))) / zoom,
+        };
+      })()`);
+      const headingHeight = framed.read.shift[1] - bare.read.shift[1];
+      check(
+        'Title and legend off: no heading and no key, and the picture is the map with its margin — what lies between the two in a picture that has them',
+        bareKey.headings === 0 &&
+          bareKey.legends === 0 &&
+          bareKey.keys.length === 0 &&
+          headingHeight > 20 &&
+          framedKey.legendTop !== null &&
+          bare.read.height === framedKey.legendTop - headingHeight &&
+          bare.read.height < framed.read.height &&
+          bare.read.width <= framed.read.width &&
+          bare.read.width >= mapSpan.width + 47 &&
+          bare.read.height >= mapSpan.height + 47,
+        {
+          bare: [bare.read.width, bare.read.height],
+          framed: [framed.read.width, framed.read.height],
+          headingHeight,
+          legendTop: framedKey.legendTop,
+          mapSpan,
+        },
+      );
+      await choose({ caption: true });
+      await setSetting('heat', false);
+      await setSetting('progress', false);
+      await chooseOption('#color-by', 'none');
+      await until(`window.__smoke.attr('data-color-by') === 'none'`, 'colour by nothing');
+
+      // Shrunk groups: the list of what is inside, as the canvas wraps it.
+      await setSetting('compact-collapsed', true);
+      await until(
+        `window.__smoke.count('.arch-group.arch-compact') > 0 && window.__smoke.attr('data-layout-pending') === 'false' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        'the map with shrunk groups',
+      );
+      await settled();
+      await savedSvg();
+      const shrunkHeld = await contentProblems();
+      /** @type {{ id: string, canvas: string, canvasLines: number, lines: string[] | null }[]} */
+      const shrunk = await exportPage('shrunk()');
+      const spaceless = (/** @type {string} */ words) => words.replace(/\s+/g, '');
+      const wrongLists = shrunk.filter(
+        (group) =>
+          group.lines === null ||
+          group.lines.length === 0 ||
+          spaceless(group.lines.join(' ')) !== spaceless(group.canvas) ||
+          Math.abs(group.lines.length - group.canvasLines) > 1,
+      );
+      check(
+        'SVG: the list of a shrunk group has the words of the canvas, on as many lines or one more or less',
+        shrunk.length > 0 && wrongLists.length === 0 && shrunkHeld.problems.length === 0,
+        {
+          groups: shrunk.length,
+          wrong: wrongLists.slice(0, 3),
+          held: shrunkHeld.problems.slice(0, 3),
+        },
+      );
+      await setSetting('compact-collapsed', false);
+      await until(
+        `window.__smoke.count('.arch-group.arch-compact') === 0 && window.__smoke.attr('data-layout-pending') === 'false' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        'the map with full boxes again',
+      );
+      await fit();
+
+      // The states of the map. A selected box: its ring, the rest dimmed, and the hint.
+      const SELECTION_HINT =
+        'The selection is part of the picture: click the empty canvas first for one without it.';
+      const ON_DEMAND_HINT = 'Edges on demand: only the edges shown now are in the picture.';
+      /**
+       * Where the opacities of the SVG last read are not the ones the browser computes on the
+       * canvas, and how many boxes the canvas dims and pales.
+       */
+      const markProblems = async () => {
+        await calm();
+        const marks = await exportPage('marks()');
+        /** @type {Mark[]} */
+        const all = [...marks.boxes, ...marks.edges, ...marks.labels];
+        /** @type {Mark[]} */
+        const boxes = marks.boxes;
+        return {
+          problems: all
+            .filter((mark) => mark.canvas === null || !near(mark.picture, mark.canvas, 0.005))
+            .map((mark) => `${mark.id}: ${mark.picture} for ${mark.canvas}`),
+          dimmed: boxes.filter((mark) => mark.dimmed && !mark.faded),
+          faded: boxes.filter((mark) => mark.faded),
+          ringed: /** @type {string[]} */ (marks.ringed),
+          selected: /** @type {string[]} */ (marks.selected),
+        };
+      };
+      await click('.react-flow__node[data-id="data.event-store"]');
+      await untilSelection('node:data.event-store');
+      const selected = await savedSvg();
+      const selectionHint = await text('#export-hint');
+      const selectedMarks = await markProblems();
+      check(
+        'a selected box has its ring in the picture and the rest is dimmed as on the canvas; the section says that the selection is part of the picture',
+        selectionHint === SELECTION_HINT &&
+          same(selectedMarks.ringed, ['data.event-store']) &&
+          same(selectedMarks.selected, ['data.event-store']) &&
+          selectedMarks.dimmed.length > 0 &&
+          selectedMarks.dimmed.every((mark) => mark.picture === 0.3) &&
+          selectedMarks.problems.length === 0 &&
+          selected.read.texts.join(' ').includes('With the selection'),
+        {
+          selectionHint,
+          ringed: selectedMarks.ringed,
+          dimmed: selectedMarks.dimmed.length,
+          problems: selectedMarks.problems.slice(0, 5),
+        },
+      );
+      // Edges on demand, with the box still selected: its edges, and no other.
+      await setSetting('edges-on-demand', true);
+      await until(`window.__smoke.attr('data-edges-held-back') === 'true'`, 'edges on demand');
+      const onDemand = await savedSvg();
+      const bothHints = await text('#export-hint');
+      const demandHeld = await contentProblems();
+      const edgesDrawn = await countOf('.react-flow__edge');
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      const demandHint = await text('#export-hint');
+      check(
+        'edges on demand: only the edges shown are in the picture, and the section says so, beside the selection while there is one',
+        bothHints === `${SELECTION_HINT} ${ON_DEMAND_HINT}` &&
+          demandHint === ON_DEMAND_HINT &&
+          demandHeld.problems.length === 0 &&
+          demandHeld.edges > 0 &&
+          demandHeld.edges < edgesDrawn &&
+          onDemand.read.texts.join(' ').includes('Edges on demand: only the edges shown'),
+        {
+          bothHints,
+          demandHint,
+          edges: demandHeld.edges,
+          edgesDrawn,
+          problems: demandHeld.problems.slice(0, 5),
+        },
+      );
+      await setSetting('edges-on-demand', false);
+      await until(`window.__smoke.attr('data-edges-held-back') === 'false'`, 'every edge again');
+      // A focus pales the rest; in Filter mode the picture is the reduced map.
+      await chooseOption('#focus-select', 'flow:telemetry-to-dashboards');
+      await until(
+        `window.__smoke.attr('data-focus') === 'flow:telemetry-to-dashboards'`,
+        'the focus on the flow',
+      );
+      await settled();
+      const focused = await savedSvg();
+      const focusMarks = await markProblems();
+      check(
+        'a focus: what it leaves out is paled in the picture as on the canvas',
+        focusMarks.faded.length > 0 &&
+          focusMarks.faded.every((mark) => mark.picture === 0.14) &&
+          focusMarks.problems.length === 0 &&
+          focused.read.texts.join(' ').includes('Focus: the rest is paled'),
+        { faded: focusMarks.faded.length, problems: focusMarks.problems.slice(0, 5) },
+      );
+      const wholeBoxes = focused.read.nodes.length;
+      await click('#focus-mode');
+      await untilFiltered('flow:telemetry-to-dashboards');
+      const filtered = await savedSvg();
+      const filteredHeld = await contentProblems();
+      check(
+        'Filter: the picture is the map reduced to the focus',
+        filteredHeld.problems.length === 0 &&
+          filteredHeld.boxes > 0 &&
+          filteredHeld.boxes < wholeBoxes &&
+          filtered.read.texts.join(' ').includes('Filtered to the focus'),
+        { boxes: filteredHeld.boxes, wholeBoxes, problems: filteredHeld.problems.slice(0, 5) },
+      );
+      await click('#focus-mode');
+      await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode again');
+      await chooseOption('#focus-select', '');
+      await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+      await untilFiltered(null);
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await fit();
+
+      // By hand: a domain dragged down by its header leaves the bounds of the map, and the
+      // picture grows by as much. Nothing of a grip or a handle is in a file.
+      await choose({ caption: false });
+      const beforeMove = await savedSvg();
+      /** @type {string} */
+      const movedId = (await exportPage('outermost()')).bottom.id;
+      await centreOn(movedId);
+      await click('#unlock-positions');
+      await until(
+        `window.__smoke.attr('data-positions-unlocked') === 'true'`,
+        'unlocked positions',
+      );
+      const grabAt = await headerGrip(movedId);
+      await drag(grabAt, { x: grabAt.x, y: grabAt.y + 160 });
+      await until(`window.__smoke.attr('data-moved-count') === '1'`, `${movedId} moved by hand`);
+      await settled();
+      await savedSvg();
+      const unlockedHeld = await contentProblems();
+      // Where groups can be resized: the right edge of one dragged outwards.
+      /** @type {{ id: string, x: number, y: number, zoom: number } | null} */
+      const handle = await exportPage('resizeHandle()');
+      if (handle !== null) {
+        const widthOf = `document.querySelector('.react-flow__node[data-id="${handle.id}"]').offsetWidth`;
+        /** @type {number} */
+        const widthBefore = await evaluate(widthOf);
+        await drag({ x: handle.x, y: handle.y }, { x: handle.x + 60, y: handle.y });
+        const wider = await eventually(`${widthOf} > ${widthBefore} + 20`, 'the group resized');
+        await settled();
+        await savedSvg();
+        const resizedPlaced = await placeProblems();
+        const resized = resizedPlaced.all.find((box) => box.id === handle.id);
+        check(
+          'a group resized by hand is as large in the picture as on the canvas, and its header ends at its new width',
+          wider &&
+            resizedPlaced.problems.length === 0 &&
+            resized !== undefined &&
+            resized.header !== null &&
+            (resized.picture[2] ?? NaN) > widthBefore + 20 &&
+            // The header lies inside the border: as far from the right edge as from the left.
+            near(
+              (resized.header[0] ?? NaN) + (resized.header[1] ?? NaN),
+              resized.picture[2] ?? NaN,
+              0.5,
+            ),
+          { handle, widthBefore, resized, problems: resizedPlaced.problems.slice(0, 5) },
+        );
+      }
+      await click('#unlock-positions');
+      await until(`window.__smoke.attr('data-positions-unlocked') === 'false'`, 'locked positions');
+      const afterMove = await savedSvg();
+      const movedPlaced = await placeProblems();
+      const movedBox = movedPlaced.all.find((box) => box.id === movedId);
+      // The lower end of the picture before the move, and of the dragged box now, in map pixels.
+      const boundBefore = beforeMove.read.height - beforeMove.read.shift[1];
+      const boxBottom = (movedBox?.picture[1] ?? NaN) + (movedBox?.picture[3] ?? NaN);
+      const grown = afterMove.read.height - beforeMove.read.height;
+      check(
+        'while the positions are unlocked the picture holds the boxes of the canvas and nothing else',
+        unlockedHeld.problems.length === 0 && unlockedHeld.boxes === plainHeld.boxes,
+        { boxes: unlockedHeld.boxes, problems: unlockedHeld.problems.slice(0, 5) },
+      );
+      check(
+        'a box moved by hand is where it was dropped in the picture, and the picture is as much larger as the box left the old bounds',
+        movedPlaced.problems.length === 0 &&
+          movedBox !== undefined &&
+          grown > 20 &&
+          (handle !== null || near(grown, Math.ceil(boxBottom + 24) - boundBefore, 1.5)),
+        {
+          movedId,
+          grown,
+          boundBefore,
+          boxBottom,
+          resized: handle !== null,
+          problems: movedPlaced.problems.slice(0, 5),
+        },
+      );
+      await click('#unlock-positions');
+      await until(`window.__smoke.attr('data-positions-unlocked') === 'true'`, 'unlocked again');
+      await click('#reset-positions');
+      await until(`window.__smoke.attr('data-moved-count') === '0'`, 'positions reset');
+      await click('#unlock-positions');
+      await until(
+        `window.__smoke.attr('data-positions-unlocked') === 'false'`,
+        'locked at the end',
+      );
+      await fit();
+
+      // A part of the map: what the window shows, at the scale of the map. The domain furthest
+      // to the right is dragged out of the window with the map.
+      await choose({ area: 'view', caption: false });
+      /** @type {{ id: string, name: string }} */
+      const outside = (await exportPage('outermost()')).right;
+      for (let turn = 0; turn < 6; turn++) {
+        /** @type {number} */
+        const toGo = await exportPage(`toLeaveRight(${JSON.stringify(outside.id)})`);
+        if (toGo <= 0) break;
+        await pan(toGo + 10, 0);
+      }
+      /** @type {number} */
+      const stillToGo = await exportPage(`toLeaveRight(${JSON.stringify(outside.id)})`);
+      const partCanvas = await exportPage('canvas()');
+      const viewAtPart = await viewNow();
+      const part = await savedSvg();
+      const partPng = await exported('png');
+      const partPngSize = pngSizeOf(partPng.file);
+      const partHtml = await exported('html');
+      const partPage = await exportPage(
+        `page(${JSON.stringify(partHtml.file?.toString('utf8') ?? '')})`,
+      );
+      const partWidth = (partCanvas.width - partCanvas.covered) / viewAtPart.zoom;
+      const partHeight = partCanvas.height / viewAtPart.zoom;
+      check(
+        'What is on screen: the picture is the part of the map in the window, in pixels of the map; a domain outside it is in none of the files; the PNG is twice the SVG',
+        stillToGo <= 0 &&
+          Number.isInteger(part.read.width) &&
+          Number.isInteger(part.read.height) &&
+          // Grown to whole pixels of the map on every side: less than two more.
+          part.read.width >= partWidth - 0.001 &&
+          part.read.width < partWidth + 2 &&
+          part.read.height >= partHeight - 0.001 &&
+          part.read.height < partHeight + 2 &&
+          part.read.nodes.length > 0 &&
+          !part.read.nodes.includes(outside.id) &&
+          outside.name !== '' &&
+          !part.read.names.includes(outside.name) &&
+          partHtml.status.state === 'saved' &&
+          partPage.drawn.length === part.read.nodes.length &&
+          !partPage.listed.includes(outside.id) &&
+          !partPage.names.includes(outside.name) &&
+          partPngSize !== null &&
+          partPngSize.width === 2 * part.read.width &&
+          partPngSize.height === 2 * part.read.height,
+        {
+          outside,
+          stillToGo,
+          svg: [part.read.width, part.read.height],
+          window: [partWidth, partHeight],
+          png: partPngSize,
+          boxes: part.read.nodes.length,
+        },
+      );
+      // Dragged on until nothing of the map is in the window: nothing to save.
+      for (let turn = 0; turn < 12 && (await exportPage('inView(40)')) > 0; turn++) {
+        await pan(0, -2000);
+      }
+      const nothing = await exported('svg');
+      // A file that does not come cannot be awaited: it is looked for a moment later.
+      await sleep(500);
+      const arrived = await readdir(exportsDir);
+      check(
+        'What is on screen, with nothing of the map there: the section says so and no file is saved',
+        (await exportPage('inView(40)')) === 0 &&
+          nothing.status.state === 'failed' &&
+          nothing.status.text === 'Nothing of the map is on screen.' &&
+          nothing.status.name === undefined &&
+          nothing.file === undefined &&
+          !arrived.includes('architecture-map.svg'),
+        { status: nothing.status, arrived },
+      );
+      await choose({ area: 'map', caption: true });
+      await fit();
+
+      // The two colour schemes. The screen is made dark for a moment, and made light again
+      // whatever happens: everything after this expects the light scheme.
+      /**
+       * Whether the background of an exported SVG is that colour.
+       * @param {{ read: any }} picture @param {Colour | undefined} bg
+       */
+      const hasBackground = (picture, bg) => sameColour(picture.read.background, bg);
+      const canvasColours = () =>
+        evaluate(`JSON.stringify([
+          getComputedStyle(document.querySelector('.react-flow__node-leaf .arch-node')).backgroundColor,
+          getComputedStyle(document.querySelector('.react-flow__node-leaf .arch-node-name')).color,
+          getComputedStyle(document.documentElement).getPropertyValue('--bg'),
+        ])`);
+      await choose({ scale: '1' });
+      await client.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+      });
+      /** @type {Record<string, Colour>} */
+      let dark = {};
+      try {
+        await until(
+          `window.matchMedia('(prefers-color-scheme: dark)').matches`,
+          'the dark colour scheme',
+        );
+        dark = await paletteNow();
+        const darkCanvas = await canvasColours();
+        const asOnScreen = await savedSvg();
+        const darkPng = await exported('png');
+        /** @type {number[] | undefined} */
+        let darkCorner;
+        if (darkPng.file !== undefined) {
+          await showPicture('dark', darkPng.file.toString('base64'));
+          [darkCorner] = await pixelsOf('dark', [[0, 0]]);
+          await exportPage('forget()');
+        }
+        await choose({ scheme: 'light' });
+        const lightOnDark = await savedSvg();
+        check(
+          'on a dark screen "As on screen" gives a dark SVG and a dark PNG, "Light" a light SVG, and the canvas stays as it is',
+          !sameColour(dark['--bg'], light['--bg'], 20) &&
+            hasBackground(asOnScreen, dark['--bg']) &&
+            sameColour(colourOf(darkCorner), dark['--bg'], 3) &&
+            hasBackground(lightOnDark, light['--bg']) &&
+            (await canvasColours()) === darkCanvas,
+          {
+            dark: dark['--bg'],
+            light: light['--bg'],
+            asOnScreen: asOnScreen.read.background,
+            darkCorner,
+            lightOnDark: lightOnDark.read.background,
+          },
+        );
+      } finally {
+        await client.send('Emulation.setEmulatedMedia', { features: [] });
+        await until(
+          `!window.matchMedia('(prefers-color-scheme: dark)').matches`,
+          'the light colour scheme again',
+        );
+      }
+      const lightCanvas = await canvasColours();
+      await choose({ scheme: 'dark' });
+      const darkOnLight = await savedSvg();
+      check(
+        'on a light screen "Dark" gives a dark SVG, and the canvas stays light',
+        hasBackground(darkOnLight, dark['--bg']) &&
+          !hasBackground(darkOnLight, light['--bg']) &&
+          (await canvasColours()) === lightCanvas,
+        { darkOnLight: darkOnLight.read.background, dark: dark['--bg'] },
+      );
+      await choose({ scheme: 'screen', scale: '2' });
+
+      // Names, at the two levels that draw every box: whole where the canvas shows them whole.
+      for (const [level, name] of /** @type {[string, string][]} */ ([
+        ['subcomponents', 'Subcomponents'],
+        ['detail', 'Everything'],
+      ])) {
+        await pinLod(level);
+        await fit();
+        await savedSvg();
+        const named = await nameProblems();
+        check(
+          `SVG: at the ${name} level a name is whole where the canvas shows it whole, as long and as high up as there, and cut where the canvas cuts it`,
+          named.problems.length === 0 && named.whole.length > 20,
+          { cut: named.cut, whole: named.whole.length, problems: named.problems.slice(0, 3) },
+        );
+      }
+
+      // Everything, with the work items: every line, and the mark of the selected one.
+      await click('.arch-workitem-item[data-workitem-id="1010"]');
+      await untilSelection('workitem:1010');
+      await settled();
+      await savedSvg();
+      const items = await exportPage('workItems()');
+      check(
+        'work items: every line of the canvas is in the picture, and the lines of the selected work item are marked',
+        items.canvas > 20 &&
+          items.picture === items.canvas &&
+          items.selected.canvas.length > 0 &&
+          same(items.selected.picture, items.selected.canvas),
+        items,
+      );
+      await press('Escape', { keyCode: 27 });
+      await untilSelection(null);
+      await fit();
+
+      // How long the three take for the example at its largest, and how large the files are.
+      // The page of this map is the one opened at the end.
+      const largest = await savedSvg();
+      const largestPng = await exported('png');
+      const largestHtml = await exported('html');
+      const cost = (/** @type {Exported} */ made) =>
+        `${made.status.format ?? '?'} ${made.status.ms ?? '?'} ms, ${made.status.bytes ?? '?'} bytes`;
+      check(
+        `at the Everything level the three files are made (${[largest, largestPng, largestHtml].map(cost).join('; ')})`,
+        largest.status.state === 'saved' &&
+          largestPng.status.state === 'saved' &&
+          largestHtml.status.state === 'saved' &&
+          largestPng.status.reduced === 'false' &&
+          [largest, largestPng, largestHtml].every(
+            (made) => Number(made.status.ms) >= 0 && Number(made.status.bytes) > 0,
+          ),
+        [largest.status, largestPng.status, largestHtml.status],
+      );
+      const pageFile = path.join(exportsDir, 'architecture-map.html');
+      const pageBoxes = /** @type {string[]} */ (largest.read.nodes);
+      const pageEdges = /** @type {string[]} */ (largest.read.edges);
+
+      // Auto, zoomed out to the Domains level: the larger titles.
+      await pinLod('auto', await attr('data-zoom-lod'));
+      await zoomToLevel('domains');
+      await savedSvg();
+      /** @type {{ id: string, size: number, lines: number, picture: number[] | null }[]} */
+      const titles = await exportPage('largeTitles()');
+      const wrongTitles = titles.filter(
+        (title) =>
+          title.size !== 28 ||
+          title.picture === null ||
+          title.picture.length !== title.lines ||
+          title.picture.some((size) => size !== 28),
+      );
+      check(
+        'the larger titles of the Domains level: the name of a domain is 28 px in the picture as on the canvas, on as many lines',
+        (await attr('data-lod')) === 'domains' &&
+          (await attr('data-zoom-lod')) === 'domains' &&
+          titles.length > 2 &&
+          wrongTitles.length === 0,
+        { titles: titles.length, wrong: wrongTitles.slice(0, 5) },
+      );
+
+      // The PNG against the screen: the same part of the map, pixel for pixel of the map — at a
+      // zoom of exactly 1, which a link carries, with the view at whole pixels.
+      await pinLod('detail');
+      await fit();
+      await evaluate(`document.querySelector('#copy-view-link').click()`);
+      await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
+      const fittedView = JSON.parse(
+        Buffer.from(
+          /** @type {string} */ (await evaluate(`window.location.hash`)).slice('#view='.length),
+          'base64url',
+        ).toString('utf8'),
+      );
+      const fittedCanvas = await exportPage('canvas()');
+      const viewAtOne = {
+        ...fittedView,
+        center: {
+          x: fittedCanvas.width / 2 - Math.round(fittedCanvas.width / 2 - fittedView.center.x),
+          y: fittedCanvas.height / 2 - Math.round(fittedCanvas.height / 2 - fittedView.center.y),
+          zoom: 1,
+        },
+      };
+      await reloadWith(linkOf(viewAtOne));
+      const atOne = await eventually(
+        `window.__smoke.attr('data-lod') === 'detail' && window.__smoke.attr('data-lines-laid-out') === 'true' && window.__smoke.viewport()?.zoom === 1`,
+        'the view of the link, at a zoom of 1',
+      );
+      await settled();
+      // The fragment would apply the view on every load from here on.
+      await evaluate(`window.history.replaceState(null, '', window.location.href.split('#')[0])`);
+      await choose({ area: 'view', caption: false, scale: '1' });
+      const viewOne = await viewNow();
+      const onScreen = await savedSvg();
+      const screenPng = await exported('png');
+      await park();
+      const clip = await exportPage('canvas()');
+      /** @type {Probe[]} */
+      const screenProbes = (await exportPage('probes()')).filter(
+        (/** @type {Probe} */ probe) =>
+          probe.clear && ['leaf', 'group', 'gutter'].includes(probe.kind),
+      );
+      /** @type {string | undefined} */
+      let shot;
+      await exportPage('hideOverlays()');
+      try {
+        await evaluate(`window.__smoke.frames()`);
+        shot = (
+          await client.send('Page.captureScreenshot', {
+            format: 'png',
+            clip: { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: 1 },
+          })
+        ).data;
+      } finally {
+        await exportPage('showOverlays()');
+      }
+      let largestDifference = NaN;
+      /** @type {string[]} */
+      const different = [];
+      if (screenPng.file !== undefined && shot !== undefined) {
+        await showPicture('png', screenPng.file.toString('base64'));
+        await showPicture('screen', shot);
+        const [shiftX, shiftY] = /** @type {[number, number]} */ (onScreen.read.shift);
+        const inPicture = await pixelsOf(
+          'png',
+          screenProbes.map((probe) => [Math.floor(probe.x + shiftX), Math.floor(probe.y + shiftY)]),
+        );
+        const inScreen = await pixelsOf(
+          'screen',
+          screenProbes.map((probe) => [Math.floor(probe.screen[0]), Math.floor(probe.screen[1])]),
+        );
+        largestDifference = 0;
+        screenProbes.forEach((probe, i) => {
+          const difference = Math.max(
+            ...[0, 1, 2].map((channel) =>
+              Math.abs((inPicture[i]?.[channel] ?? NaN) - (inScreen[i]?.[channel] ?? NaN)),
+            ),
+          );
+          if (!(difference <= 12)) {
+            different.push(
+              `${probe.kind} ${probe.id}: ${JSON.stringify([inPicture[i], inScreen[i]])}`,
+            );
+          }
+          largestDifference = Math.max(
+            largestDifference,
+            Number.isNaN(difference) ? 255 : difference,
+          );
+        });
+        await exportPage('forget()');
+      }
+      check(
+        `PNG against the screen: at a zoom of 1 the picture of what is on screen has the colours of the screen (largest difference ${largestDifference} of 255 at ${screenProbes.length} points)`,
+        atOne &&
+          viewOne.zoom === 1 &&
+          Number.isInteger(viewOne.x) &&
+          Number.isInteger(viewOne.y) &&
+          clip.ratio === 1 &&
+          (await selection()) === null &&
+          screenPng.status.state === 'saved' &&
+          screenPng.status.scale === '1.0000' &&
+          Number(screenPng.status.width) === onScreen.read.width &&
+          Number(screenPng.status.height) === onScreen.read.height &&
+          screenProbes.length >= 10 &&
+          largestDifference <= 12 &&
+          different.length === 0,
+        {
+          viewOne,
+          clip,
+          probes: screenProbes.length,
+          largestDifference,
+          different: different.slice(0, 5),
+        },
+      );
+
+      // Remembered: the four choices are stored as they are made, and shown again after a
+      // reload. A stored entry that is no choice gives the choice nobody has made.
+      const errorsBeforeReloads = exportErrors.length;
+      await choose({ area: 'view', scheme: 'dark', scale: '3', caption: false });
+      /** @type {string | null} */
+      const storedChoices = await evaluate(`localStorage.getItem('${EXPORT_KEY}')`);
+      await reloadWith('');
+      await showControl('#export');
+      const choicesKept = await choicesShown();
+      check(
+        'the four choices are stored in the browser as they are made, and the section shows them again after a reload',
+        storedChoices === '{"area":"view","scheme":"dark","caption":false,"scale":3}' &&
+          same(choicesKept, { area: 'view', scheme: 'dark', scale: '3', caption: false }),
+        { storedChoices, choicesKept },
+      );
+      await evaluate(
+        `localStorage.setItem('${EXPORT_KEY}', '{"area":"x","scale":7,"caption":"no","scheme":"dark"}')`,
+      );
+      await reloadWith('');
+      await showControl('#export');
+      const choicesRead = await choicesShown();
+      check(
+        'a stored entry that is no choice gives the choice nobody has made, the others are kept, and nothing fails in the page',
+        same(choicesRead, { area: 'map', scheme: 'dark', scale: '2', caption: true }) &&
+          exportErrors.length === errorsBeforeReloads,
+        { choicesRead, errors: exportErrors.slice(errorsBeforeReloads, errorsBeforeReloads + 5) },
+      );
+      await choose({ scheme: 'screen' });
+
+      // A structure of its own: boxes are sized by the number of characters of their names, so
+      // names of wide letters do not fit, and the canvas cuts them. Opened as the picker would:
+      // a file dropped on the page would join the recent maps.
+      await evaluate(
+        `window.__smoke.openFile('#yaml-file', 'wide.yaml', ${JSON.stringify(
+          [
+            'version: 1',
+            'domains:',
+            '  - id: wide',
+            '    name: WWWWWWWWWWWWWWWWWWWW',
+            '    components:',
+            '      - { id: wide.leaf, name: WWWWWWWWWWWWWWWWWWWW }',
+            '  - id: plain',
+            '    name: Plain',
+            '    components:',
+            '      - { id: plain.leaf, name: Short }',
+            '',
+          ].join('\n'),
+        )})`,
+      );
+      await until(`window.__smoke.text('#source-name') === 'wide.yaml'`, 'the map of wide names');
+      await until(
+        `window.__smoke.count('.react-flow__node[data-id="wide"]') === 1`,
+        'the domain of wide names',
+      );
+      await pinLod('subcomponents');
+      await fit();
+      await choose({ caption: false });
+      const wide = await savedSvg('wide');
+      const wideNames = await nameProblems();
+      check(
+        'SVG: a name the canvas cuts ends in "…" in the picture and stays within its box, for a leaf and for a group; the short names beside them are whole',
+        wide.status.name === 'wide-map.svg' &&
+          wideNames.problems.length === 0 &&
+          same(wideNames.cut, ['wide', 'wide.leaf']) &&
+          same(wideNames.whole, ['plain', 'plain.leaf']),
+        { status: wide.status, ...wideNames },
+      );
+
+      // The exported page, opened: this leaves the viewer, so it comes last. It is the page of
+      // the example at the Everything level.
+      const pageRequests = requests.length;
+      const pageViolations = violations.length;
+      await client.send('Page.navigate', { url: pathToFileURL(pageFile).href });
+      await until(
+        `document.readyState === 'complete' && document.querySelector('.map svg') !== null`,
+        'the exported page',
+      );
+      exportedPage = await evaluate(`window.location.href`);
+      const pageState = () =>
+        evaluate(`(() => {
+          const svg = document.querySelector('.map svg');
+          const region = document.querySelector('.map');
+          return {
+            fit: document.querySelector('#fit').checked,
+            width: svg.getBoundingClientRect().width,
+            own: Number(svg.getAttribute('width')),
+            room: region.clientWidth,
+            scroll: region.scrollWidth,
+          };
+        })()`);
+      const opened = await evaluate(`({
+        policy: document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content ?? null,
+        scripts: document.scripts.length,
+        listed: document.querySelectorAll('li[data-node]').length,
+        rows: document.querySelectorAll('tr[data-edge]').length,
+        drawn: [...document.querySelectorAll('.map svg g[data-node]')].map((g) => g.getAttribute('data-node')),
+        title: document.title,
+      })`);
+      const fitted = await pageState();
+      const pageAsked = requests.slice(pageRequests);
+      check(
+        'HTML: opened, the page keeps its policy, runs no script, asks for nothing but itself, and lists every box and edge of its picture',
+        exportedPage?.toLowerCase() === pathToFileURL(pageFile).href.toLowerCase() &&
+          opened.policy === EXPORT_PAGE_POLICY &&
+          opened.scripts === 0 &&
+          opened.title === 'architecture.yaml' &&
+          pageAsked.includes(exportedPage ?? '') &&
+          pageAsked.every((url) => url === exportedPage || url.startsWith('data:')) &&
+          violations.length === pageViolations &&
+          pageBoxes.length > 20 &&
+          same(opened.drawn, pageBoxes) &&
+          opened.listed === pageBoxes.length &&
+          opened.rows === pageEdges.length,
+        {
+          exportedPage,
+          policy: opened.policy,
+          scripts: opened.scripts,
+          asked: pageAsked.slice(0, 5).map((url) => url.slice(0, 200)),
+          violations: violations.slice(pageViolations, pageViolations + 5),
+          listed: opened.listed,
+          rows: opened.rows,
+          boxes: pageBoxes.length,
+          edges: pageEdges.length,
+        },
+      );
+      await clickAt(
+        await evaluate(`(() => {
+          const r = document.querySelector('#fit').getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })()`),
+        '#fit',
+      );
+      const unfitted = await eventually(
+        `!document.querySelector('#fit').checked`,
+        'Fit the width switched off',
+      );
+      const ownSize = await pageState();
+      check(
+        'HTML: Fit the width is on at first and the picture is as wide as its region; switched off, the picture has its own width and the region scrolls',
+        fitted.fit === true &&
+          near(fitted.width, fitted.room, 1) &&
+          unfitted &&
+          near(ownSize.width, ownSize.own, 1) &&
+          ownSize.own > ownSize.room &&
+          ownSize.scroll > ownSize.room,
+        { fitted, ownSize },
+      );
+      const linked = pageBoxes.find((id) => !id.includes('.')) ?? '';
+      await evaluate(`window.location.hash = ${JSON.stringify(`#n.${linked}`)}`);
+      const targeted = await eventually(
+        `document.getElementById(${JSON.stringify(`n.${linked}`)})?.matches(':target') === true`,
+        'the box the link names',
+      );
+      const outline = await evaluate(`(() => {
+        const style = getComputedStyle(document.getElementById(${JSON.stringify(`n.${linked}`)}).querySelector('rect[data-part="box"]'));
+        return { stroke: style.stroke, width: style.strokeWidth };
+      })()`);
+      const [red, green, blue] = (String(outline.stroke).match(/[\d.]+/g) ?? []).map(Number);
+      check(
+        'HTML: a link of the list marks its box in the picture, with the outline of a selected box',
+        linked !== '' &&
+          targeted &&
+          outline.width === '4px' &&
+          sameColour(
+            colourOf([red ?? NaN, green ?? NaN, blue ?? NaN, 255]),
+            light['--node-selected'],
+          ),
+        { linked, outline, selected: light['--node-selected'] },
+      );
+
+      // Back in the viewer, which starts without a map — and so without the section.
+      await client.send('Page.navigate', { url: pathToFileURL(viewerPath).href });
+      await startPage();
+      check(
+        'the start page, without a map, has no Export section',
+        (await evaluate(`document.querySelectorAll('#export').length`)) === 0 &&
+          (await evaluate(`document.querySelectorAll('#yaml-file').length`)) === 1,
+      );
+      await dropFiles(dataFiles);
+      await mapShown();
+      await until(`window.__smoke.attr('data-lines-laid-out') === 'true'`, 'the example again');
+
+      // Back to what the block started from.
+      await client
+        .send('Browser.setDownloadBehavior', { behavior: 'default' })
+        .catch(() => undefined);
+      if ((await attr('data-color-by')) !== exportStart.colorBy) {
+        await chooseOption('#color-by', exportStart.colorBy ?? 'none');
+      }
+      if ((await attr('data-story-mode')) !== exportStart.storyMode) {
+        await chooseStories(exportStart.storyMode ?? 'stories');
+      }
+      await setSetting('heat', exportStart.heat === 'true');
+      await setSetting('progress', exportStart.progress === 'true');
+      await setSetting('edges-on-demand', exportStart.onDemand === 'true');
+      await setSetting('compact-collapsed', exportStart.shrink === 'true');
+      if ((await attr('data-focus-mode')) !== exportStart.focusMode) await click('#focus-mode');
+      await showRows(exportStart.rows === 'true');
+      await closeUp(exportStart.closeGaps === 'true');
+      await evaluate(
+        `document.querySelector('#views-list li[data-view-name="${EXPORT_START_VIEW}"] .views-apply').click()`,
+      );
+      await until(
+        `window.__smoke.attr('data-lod-mode') === ${JSON.stringify(exportStart.lodMode)} && window.__smoke.attr('data-collapsed-count') === ${JSON.stringify(exportStart.collapsed)} && window.__smoke.attr('data-hidden-kinds') === ${JSON.stringify(exportStart.hiddenKinds)} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        'the view the exports started from',
+      );
+      await settled();
+      await evaluate(
+        `document.querySelector('#views-list li[data-view-name="${EXPORT_START_VIEW}"] .views-delete').click()`,
+      );
+      await until(
+        `window.__smoke.count('#views-list li[data-view-name="${EXPORT_START_VIEW}"]') === 0`,
+        'the view to come back to deleted',
+      );
+      if ((await attr('data-panel-tab')) !== exportStart.tab) {
+        await click(`#tab-${exportStart.tab}`);
+        await until(
+          `window.__smoke.attr('data-panel-tab') === '${exportStart.tab}'`,
+          'the tab shown before the exports',
+        );
+      }
+      if ((await attr('data-panel-collapsed')) !== exportStart.panelCollapsed) {
+        await togglePanel(exportStart.panelCollapsed === 'true');
+      }
+      // What the block left in the storage of the browser: the choices, and what the viewer
+      // keeps for the structure of wide names.
+      await evaluate(`(() => {
+        const kept = ${JSON.stringify(exportStart.keys)};
+        for (const key of Object.keys(localStorage)) {
+          if (!kept.includes(key)) localStorage.removeItem(key);
+        }
+        const stored = ${JSON.stringify(exportStart.stored)};
+        if (stored !== null) localStorage.setItem(${JSON.stringify(EXPORT_KEY)}, stored);
+      })()`);
+
+      // Nothing of all this needed more than the policy of the viewer allows: no violation, and
+      // no request but for the files of the viewer, the pictures (`data:`), the downloads
+      // (`blob:`) and the exported page.
+      const viewerFolder = `${pathToFileURL(path.dirname(viewerPath)).href}/`.toLowerCase();
+      const askedElsewhere = requests
+        .slice(exportStart.requests)
+        .filter(
+          (url) =>
+            !url.toLowerCase().startsWith(viewerFolder) &&
+            !url.startsWith('data:') &&
+            !url.startsWith('blob:') &&
+            url !== exportedPage,
+        );
+      check(
+        'nothing of the exports violated the policy of the viewer, left its folder or failed in the page',
+        violations.length === exportStart.violations &&
+          askedElsewhere.length === 0 &&
+          exportErrors.length === 0,
+        {
+          violations: violations.slice(exportStart.violations, exportStart.violations + 5),
+          asked: askedElsewhere.slice(0, 5).map((url) => url.slice(0, 200)),
+          errors: exportErrors.slice(0, 5),
+        },
+      );
+    }
+
     // --- Edge-kind filter ---------------------------------------------------------------------
     await press('Escape', { keyCode: 27 });
     await untilSelection(null);
@@ -8430,7 +10560,7 @@ async function run(viewerPath, browserPath) {
     );
 
     // --- Recent maps: a second map, read again from the disk, and forgotten -------------------
-    scratch = await mkdtemp(path.join(os.tmpdir(), 'arch-map-smoke-data-'));
+    scratch ??= await mkdtemp(path.join(os.tmpdir(), 'arch-map-smoke-data-'));
     const small = path.join(scratch, 'small.yaml');
     const yamlOf = (/** @type {string[]} */ names) =>
       `version: 1\ndomains:\n${names.map((name) => `  - id: ${name.toLowerCase()}\n    name: ${name}\n`).join('')}`;
@@ -8931,13 +11061,20 @@ async function run(viewerPath, browserPath) {
       policy,
     );
     const folder = `${pathToFileURL(path.dirname(viewerPath)).href}/`.toLowerCase();
+    // A picture of the map and a download are no request to anywhere (`data:`, `blob:`), and
+    // the exported page was opened by the run itself.
     const away = requests.filter(
-      (url) => !url.toLowerCase().startsWith(folder) && !url.startsWith('data:'),
+      (url) =>
+        !url.toLowerCase().startsWith(folder) &&
+        !url.startsWith('data:') &&
+        !url.startsWith('blob:') &&
+        url !== exportedPage,
     );
     check(
       `every request of the run stayed in the folder of the viewer (${requests.length} requests)`,
       requests.length > 0 && away.length === 0,
-      away.slice(0, 5),
+      // An address may be a whole picture.
+      away.slice(0, 5).map((url) => url.slice(0, 200)),
     );
     check(
       'nothing the viewer did during the run violated its policy',

@@ -70,8 +70,9 @@ edge-kind filter, the focus in both of its modes (Focus and Filter), edges on de
 closed up around its closed groups (what keeps its place, the level of detail, fitting), open
 groups resized and dragged by their title bar while positions are unlocked, the heat and
 progress of open groups, Colour by with labels and presets (the legend on both colour schemes,
-a view whose colouring the file lacks, the template files), the work items (loaded, diagnosed,
-room reserved per story mode) and persistence across a reload.
+a view whose colouring the file lacks, the template files), the export (PNG, SVG and HTML files
+made of the map and held against the screen), the work items (loaded, diagnosed, room reserved
+per story mode) and persistence across a reload.
 It uses Node built-ins only (Node 22+), finds the browser in its usual install location (set
 `BROWSER` to the executable to override), and closes the browser when done. The browser
 profile is one directory in the temp directory,
@@ -159,9 +160,19 @@ folder needs to know is in
 - **Data only from its own place.** `?data=` / `?workitems=` are resolved and compared with
   the page's origin before anything is fetched (`dataFileAddress` in
   `src/providers/structureSource.ts`); requests carry no referrer.
+- **Files are written only on Export.** The viewer saves a file only when **PNG**, **SVG** or
+  **HTML** is pressed under **Files → Export**, through the browser's own download
+  (`saveFile` in `src/ui/exportMap.ts`); nothing is sent anywhere. The policy is the same with
+  the export as without it: the files are text made in `src/core`, and a PNG is that text as a
+  `data:` image on a canvas, which `img-src data:` allows. An exported page carries a policy of
+  its own (`EXPORT_PAGE_POLICY` in `src/core/mapPage.ts`:
+  `default-src 'none'; style-src 'unsafe-inline'; img-src data:`), runs no script and loads
+  nothing; the unit tests hold every page they make to that policy.
 - **Proof in the smoke test.** `npm run smoke` records every request of the page and every
-  policy violation during the whole run and fails on any of either; then it tries `eval`, an
-  injected script and requests to another server and expects all of them to be blocked.
+  policy violation during the whole run and fails on any of either (a picture made for an
+  export — `data:`, `blob:` — and the exported page the run opens itself are no request
+  elsewhere); then it tries `eval`, an injected script and requests to another server and
+  expects all of them to be blocked.
 - **Licences.** `scripts/third-party-notices.ts` writes `dist/THIRD-PARTY-NOTICES.txt` from the
   packages that are really in the bundle and appends the same text to `viewer.html` as a
   comment (minifying drops the libraries' own licence comments). The build fails for a licence
@@ -668,6 +679,7 @@ items.
 | Colour the boxes                        | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric, with a legend  |
 | Calm the overview                       | **Visibility → Edges on demand**                                                           |
 | Keep or share an arrangement            | **Views** tab: save under a name, apply, delete, **Copy link**                             |
+| Save the map as a picture or a page     | **Files → Export**: **PNG**, **SVG** or **HTML**, of the map as it is drawn                |
 | Lay out without the row bands           | **Layout → Arrange in rows**                                                               |
 | Close up the room of closed groups      | **Layout → Close up the gaps**                                                             |
 | Move and resize boxes by hand           | **Layout → Unlock positions**, drag a box or a group's edge; **Reset positions** undoes it |
@@ -694,7 +706,7 @@ the tab that is chosen:
 | **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                                                   |
 | **Layout**     | **Rows**: Arrange in rows; **Closed groups**: Close up the gaps; **Positions**: Unlock / Lock positions (to move boxes and resize open groups), Reset positions                          |
 | **Views**      | The saved views: save under a name, apply, delete; Copy link, of the current arrangement or of a saved view                                                                              |
-| **Files**      | **Structure** and **Work items**: what each file holds, with Open YAML… and Open work items…; **Recent maps**                                                                            |
+| **Files**      | **Structure** and **Work items**: what each file holds, with Open YAML… and Open work items…; **Export**: PNG, SVG, HTML, with their four choices; **Recent maps**                       |
 
 The **Detail** tab is headed "Level of detail" in the body, so that it is not taken for the
 detail panel at the right. A control is offered when it has something to act on: the story
@@ -1102,6 +1114,44 @@ drawn", and the line under the switch counts what is left out ("Not drawn: 31 of
   Filter. With a `#view=` link in the address bar the view of the link is applied again, its
   focus and its mode included.
 
+### Exporting the map
+
+The section **Export** on the **Files** tab — there while a map is drawn — saves the map as a
+file: **PNG**, a picture; **SVG**, a vector drawing of shapes and text; **HTML**, a web page
+that needs nothing else, with the picture, its boxes as a nested list and its edges as a table.
+The complete description — every choice, text and limit — is the part "Exporting the map" of
+[`docs/viewer-README.md`](docs/viewer-README.md#using-the-viewer).
+
+- **What is in a file** is the map as it is drawn at the moment of the click, not the window:
+  the level of detail (in Auto the one the zoom selects), closed and shrunk groups, the map
+  closed up, moved positions, a focus or a filtered map, the selection with its dimming, the
+  edge kinds and — with **Edges on demand** — the edges that are shown, the work items and the
+  lenses. The panels, the bar of a focus, the minimap, the zoom controls, the legends on the
+  canvas and the dotted background are never in it.
+- **One picture, three files.** `mapSvg` (`src/core/mapPicture.ts`) draws the picture a second
+  time, as SVG text, from the same flow the canvas is given and the same lens values; the
+  rendered page is not copied. The SVG file is that text, the page is that text in a document
+  (`mapHtml`, `src/core/mapPage.ts`), and the PNG is that text drawn as an image and read back
+  as pixels (`src/ui/exportMap.ts`). The colours and sizes the picture repeats from
+  `src/ui/styles.css` are held to it by `src/ui/pictureStyles.test.ts`. Text widths are
+  measured in the browser at the export, so a name too long for its box is cut with "…" where
+  the map cuts it.
+- **Choices** (`src/core/exportChoices.ts`), remembered in the browser: **Area** — **Whole
+  map**, or **What is on screen**, the part of the map the canvas shows; **Colours** — **As on
+  screen**, **Light** or **Dark**, one scheme per file; **PNG size** — 1×, 2× or 3× pixels per
+  pixel of the map; **Title and legend** — the name of the structure file, a note of what is
+  shown and a key, inside the picture.
+- **The files** are named after the structure file — `architecture-map.png`,
+  `architecture-map.svg`, `architecture-map.html` — and go where the browser puts its
+  downloads. The line under the choices names the file that was saved ("Saved
+  architecture-map.svg."), or says why none was.
+- **Limits.** A PNG is at most 16 384 px a side and 64 million pixels (`PNG_LIMITS`); a larger
+  picture is saved reduced, and the line says to what. SVG and HTML have no limit. They name
+  the font of the system and embed none, each text held to its measured width. Soft shadows
+  are left out and the glow of the heat strips is a plain strip. A browser that keeps pages
+  from reading a canvas (Firefox with `privacy.resistFingerprinting`) saves a blank or speckled
+  PNG without an error; the viewer cannot tell.
+
 ### What is remembered
 
 Per structure (identified by its domain IDs), in the browser's `localStorage`:
@@ -1125,7 +1175,9 @@ gaps", has its own). They stay in this browser: saved views and links carry neit
 the viewer (not per structure): the display settings — the thresholds, "Shrink collapsed
 groups", "Arrange in rows", "Close up the gaps", the story mode, the work-item filter, the
 lenses (heat, progress, edges on demand, colour by) and the Focus / Filter switch — and the
-control panel: the tab shown and whether its body is hidden.
+control panel: the tab shown and whether its body is hidden. Once for the viewer as well, in an
+entry of their own: the four choices of **Files → Export** — area, colours, title and legend,
+PNG size.
 
 In IndexedDB, once for the viewer: the recent maps — references to the files of the last 8 maps
 opened from disk (Edge and Chrome), not their content.

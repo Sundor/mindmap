@@ -140,7 +140,8 @@ export function scriptHash(text: string): string {
  *   one next to the page — the data are YAML and JSON, which are read and never run), no
  *   `eval`, no other inline script;
  * - styles: inline only (the build inlines the stylesheet, and the canvas sets inline styles);
- * - images: `data:` only (the empty page icon);
+ * - images: `data:` only (the empty page icon, and the picture of the map while a PNG is made
+ *   of it);
  * - `fetch`: the page's own server only — the data files when it is served over HTTP;
  * - no fonts, frames, workers, media, plug-ins, forms or `<base>`.
  */

@@ -117,6 +117,20 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 - **Fixed — the legend of Colour by on the dark colour scheme.** Its chips, and the scale of a
   metric, showed the colours of the light scheme while the boxes had the dark ones; legend and
   boxes now show the same colour.
+- **Export.** **Files → Export** saves the map as a file: **PNG**, a picture; **SVG**, a vector
+  drawing of shapes and text, sharp at any size; **HTML**, a web page that needs nothing else,
+  with the picture, its boxes as a nested list and its edges as a table. A file holds the map
+  as it is drawn at the click, not the window — level of detail, closed and shrunk groups,
+  moved positions, a focus or a filtered map, the selection, the edge kinds and edges that are
+  shown, work items and lenses — and none of the panels, the minimap or the zoom controls.
+  Four choices, remembered in the browser once for the viewer: **Area** (Whole map, or What is
+  on screen), **Colours** (As on screen, Light, Dark), **PNG size** (1×, 2×, 3×) and **Title
+  and legend**, which puts the name of the structure file, a note of what is shown and a key
+  into the picture. The file is named after the structure file (`architecture-map.png`,
+  `.svg`, `.html`) and goes where the browser puts its downloads. A PNG is at most 16 384 px a
+  side and 64 million pixels: a larger picture is saved reduced, and the tab says to what; SVG
+  and HTML have no limit. Nothing is sent anywhere, the Content Security Policy of the viewer
+  is unchanged, and an exported page runs no script and loads nothing.
 
 ## 0.2.0 — 2026-10-08
 

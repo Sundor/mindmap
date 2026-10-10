@@ -121,6 +121,8 @@ import {
   readSavedViews,
   rowPlacement,
   sameFocus,
+  coloringTitle,
+  EXPORT_TEXTS,
   TEMPLATE_NOTE,
   usableColorBy,
   viewColorBy,
@@ -131,6 +133,9 @@ import {
   withPlacedRows,
   withSavedView,
   writeSavedViews,
+  type ExportChoices,
+  type ExportFormat,
+  type ExportOutcome,
   type Focus,
   type FocusMode,
   type RowPlacement,
@@ -170,6 +175,7 @@ import { ColorLegend } from './ColorLegend';
 import { DETAIL_PANEL_WIDTH, fitOptions, fitRoom, fittedViewport, fitWithRoom } from './constants';
 import { ControlPanel, type ControlTabMarks } from './ControlPanel';
 import { coveredCanvasLeft } from './coveredCanvas';
+import { exportMap } from './exportMap';
 import { DetailPanel } from './DetailPanel';
 import { DetailTab } from './DetailTab';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
@@ -2474,6 +2480,47 @@ function Viewer() {
       return false;
     }
   };
+  // The map as it is drawn now, as a file: a plain function, so it reads the state of the
+  // render it was made in.
+  const exportNow = (format: ExportFormat, choices: ExportChoices): Promise<ExportOutcome> => {
+    if (!shownFlow) return Promise.reject(new Error(EXPORT_TEXTS.nothingDrawn));
+    const { width, height } = flowStore.getState();
+    const workItemsShown = (shownWorkItems?.mode ?? 'off') !== 'off';
+    const colourOn =
+      coloring !== undefined && coloring.colorBy !== 'none' && coloring.legend.length > 0;
+    return exportMap({
+      format,
+      choices,
+      flow: shownFlow,
+      lenses,
+      coloring,
+      largeTitles: drawnLevel === 'domains' && zoomLod === 'domains',
+      workItem: { selectedId: workItemCanvas.selectedId, parentId: workItemCanvas.parentId },
+      facts: {
+        structureName: source?.name,
+        workItemsName:
+          workItemsShown || lenses.heat !== undefined || lenses.progress !== undefined
+            ? workLoad?.source?.name
+            : undefined,
+        level: drawnLevel,
+        focusName: focusName(),
+        filtered: filteredTo !== undefined,
+        colorBy: colourOn ? coloringTitle(coloring) : undefined,
+        heat: lenses.heat !== undefined,
+        progress: lenses.progress !== undefined,
+        storyMode: workItemsShown ? shownWorkItems?.mode : undefined,
+        iteration:
+          workItemsShown || lenses.progress !== undefined ? workFilter.iteration : undefined,
+        hiddenKinds: EDGE_KINDS.filter((kind) => hiddenKinds.has(kind)),
+        edgesOnDemand: edgesHeldBack,
+        selection: drawnSelection !== undefined,
+      },
+      viewport: getViewport(),
+      canvas: { width, height },
+      coveredLeft: coveredCanvasLeft(),
+      version: APP_VERSION,
+    });
+  };
   // A link with a view (`#view=…`) is applied once the model it was made for is drawn.
   const linkedViewApplied = useRef<ArchitectureModel>(undefined);
   useEffect(() => {
@@ -2838,6 +2885,17 @@ function Viewer() {
               currentRecent={currentRecent}
               onOpenRecent={openRecentById}
               onForgetRecent={forgetRecent}
+              exportMap={
+                mapDrawn
+                  ? {
+                      pending: layoutPending,
+                      selection: drawnSelection !== undefined,
+                      edgesHeldBack,
+                      active: panelTab === 'files' && !panelCollapsed,
+                      onExport: exportNow,
+                    }
+                  : undefined
+              }
             />
           ),
         }}
