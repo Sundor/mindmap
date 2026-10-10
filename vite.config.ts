@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import { singleOfflineFile } from './scripts/single-file.ts';
 import { NOTICES_FILE, thirdPartyNotices } from './scripts/third-party-notices.ts';
+import { TEMPLATE_FILES } from './src/core/template.ts';
 
 /**
  * The version of the viewer: the one of package.json, the single place it is written down
@@ -65,16 +66,20 @@ const DATA_FILES = [
 
 /**
  * What makes dist/ a folder that can be handed on without the repo: the guide to the viewer and
- * to writing its data files.
+ * to writing its data files, and the template files to start a map from (dist/template/, each
+ * from the same path under examples/).
  */
-const HANDOVER_FILES = [{ fileName: 'README.md', file: 'docs/viewer-README.md' }] as const;
+const HANDOVER_FILES = [
+  { fileName: 'README.md', file: 'docs/viewer-README.md' },
+  ...TEMPLATE_FILES.map((fileName) => ({ fileName, file: `examples/${fileName}` })),
+];
 
 /**
  * Makes the raw content files (architecture YAML, work-items JSON) available next to the viewer:
  * - dev: served at /architecture.yaml and /workitems.json (read fresh on each request; edits
  *   trigger a reload);
- * - build: emitted as dist/architecture.yaml and dist/workitems.json, with the handover file
- *   (dist/README.md).
+ * - build: emitted as dist/architecture.yaml and dist/workitems.json, with the handover files
+ *   (dist/README.md, dist/template/architecture.yaml and dist/template/workitems.json).
  * The viewer reads these data files themselves — fetched from a server, opened from disk — and
  * loads no script next to it.
  */

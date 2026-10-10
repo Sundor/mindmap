@@ -23,13 +23,15 @@ can produce a map for any project from its repository and its Azure DevOps proje
 
 ## Files in this folder
 
-| File                      | What it is                                                                 | You edit it? |
-| ------------------------- | -------------------------------------------------------------------------- | ------------ |
-| `viewer.html`             | The viewer (all code and styles inlined). Works offline and from `file://` | No           |
-| `architecture.yaml`       | The structure. **As delivered: an example** (an online shop)               | **Yes**      |
-| `workitems.json`          | The work items. **As delivered: dummy data** for the example               | **Yes**      |
-| `THIRD-PARTY-NOTICES.txt` | The licences of the open-source software inside `viewer.html`              | No           |
-| `README.md`               | This document                                                              | No           |
+| File                         | What it is                                                                                   | You edit it? |
+| ---------------------------- | -------------------------------------------------------------------------------------------- | ------------ |
+| `viewer.html`                | The viewer (all code and styles inlined). Works offline and from `file://`                   | No           |
+| `architecture.yaml`          | The structure. **As delivered: an example** (an online shop)                                 | **Yes**      |
+| `workitems.json`             | The work items. **As delivered: dummy data** for the example                                 | **Yes**      |
+| `template/architecture.yaml` | A short structure file with every key once and what it does: the file to copy and start from | Copy it      |
+| `template/workitems.json`    | The matching work items: one of each type                                                    | Copy it      |
+| `THIRD-PARTY-NOTICES.txt`    | The licences of the open-source software inside `viewer.html`                                | No           |
+| `README.md`                  | This document                                                                                | No           |
 
 The viewer reads the two data files as they are: YAML and JSON, which it shows and never runs.
 Nothing is generated from them and nothing has to be rebuilt after an edit. How the files get
@@ -38,12 +40,14 @@ into the viewer depends on how it is opened — see
 
 ## Quick start: a map for your own project
 
-1. **Write `architecture.yaml`** for the project (format: [below](#architectureyaml--the-structure);
-   method: [Deriving the structure from a repository](#deriving-the-structure-from-a-repository)).
-   Replace the example file in this folder.
-2. **Write `workitems.json`** ([format](#workitemsjson--the-work-items),
-   [Azure DevOps export](#getting-the-work-items-from-azure-devops)), replacing the dummy file.
-   For a map without work items, leave the file out.
+1. **Write `architecture.yaml`** for the project: copy `template/architecture.yaml` over the
+   example file in this folder and rewrite it (format:
+   [below](#architectureyaml--the-structure); method:
+   [Deriving the structure from a repository](#deriving-the-structure-from-a-repository)).
+2. **Write `workitems.json`** the same way: copy `template/workitems.json` over the dummy file
+   and rewrite it ([format](#workitemsjson--the-work-items),
+   [Azure DevOps export](#getting-the-work-items-from-azure-devops)). For a map without work
+   items, leave the file out.
 3. **Open `viewer.html`** (double-click) and give it the files: click **Open YAML…** and choose
    `architecture.yaml` and `workitems.json` together, or drop both on the page.
 4. Look at the **Diagnostics** panel at the bottom: it lists every problem of both files with
@@ -61,81 +65,108 @@ Two things to know:
   Served by a web server, the viewer fetches them without being asked. Both ways are described
   in [Opening the data files](#opening-the-data-files).
 - **The delivered data is an example.** Until you replace the two files, they describe an
-  online shop with about 60 invented work items.
+  online shop with about 60 invented work items. The two files in `template/` are the short
+  ones to start from: every key the viewer reads occurs in them once, with what it does. They
+  open like any other map — **Open YAML…** with both chosen, or both dropped on the page. The
+  start page and the **Files** tab of the viewer say where they are.
 
 ## `architecture.yaml` — the structure
 
-A complete, valid file:
+A complete, valid file — `template/architecture.yaml` in this folder:
 
 ```yaml
-version: 1
+# Template: every key the viewer reads, once, with what it does. Copy the file, replace the
+# IDs and names with your own, and delete what you do not need. Required are "version" and
+# "domains"; "id" and "name" of a row, a node and a flow; "id", "from", "to" and "kind" of an
+# edge; "url" of a link; "name" and "label" of a preset. The full reference is README.md.
+version: 1 # the format version: always 1
 
-rows: # optional: horizontal bands, listed top → bottom
-  - id: ui
-    name: User interface
-    description: What people click on
-  - id: services
-    name: Services
-  - id: storage
-    name: Storage
+rows: # horizontal bands, top → bottom; without this key the map is laid out by its edges
+  - id: front # what a node's "row:" names: one lowercase segment, unique among the rows
+    name: Front end # the band's name, in the left gutter and in a box's detail panel
+    description: What people use # checked and kept, not displayed: a note for readers of the file
+  - id: back
+    name: Back end
 
-domains:
-  - id: shop
-    name: Web Shop
-    description: Everything a customer sees
-    row: ui # the whole domain, and everything in it, sits in this band
-    owner: Storefront team # owner / status / tech are inherited by everything inside
-    status: live
-    tech: React
-    components:
-      - id: shop.catalog
+domains: # the top-level boxes; three levels: domains → components → subcomponents
+  - id: shop # the stable key: edges, flows and comp: tags name it; found by the search
+    name: Web Shop # the text of the box; found by the search
+    description: Everything a customer sees # tooltip of the box, and its detail panel
+    row: front # the band of this box and of everything inside it
+    owner: Shop team # owner, status and tech hold for everything inside, unless set there;
+    status: live # the detail panel lists them and says where each comes from;
+    tech: TypeScript # Lenses → Colour by gives each of their values a colour
+    labels: # your own name: value pairs; they behave like owner, status and tech
+      zone: public
+      tier: 1 # a number or true/false is kept as written
+    links: # listed in the detail panel; opened in a new tab
+      - label: Source # the link's text; without it, the address
+        url: https://example.com/shop # must be http(s), or the link is left out
+    metrics: # numbers by name: detail panel, and Colour by (light → dark); not inherited
+      loc: 12000
+    components: # the boxes inside a domain
+      - id: shop.catalog # a child's ID: its parent's ID, a dot, one more segment
         name: Catalog
-        description: Product pages and search (src/web/catalog)
-        links:
-          - label: Source
-            url: https://git.example.com/shop/tree/main/src/web/catalog
-        metrics: # any numbers; "Colour by" can show each
-          loc: 12400
-          churn: 31
-        subcomponents:
-          - id: shop.catalog.search
-            name: Search
-          - id: shop.catalog.product-page
-            name: Product Page
       - id: shop.checkout
         name: Checkout
+        labels: { zone: payment } # replaces the domain's value, here and inside
+        subcomponents: # the boxes inside a component: the last level
+          - id: shop.checkout.basket
+            name: Basket
+          - id: shop.checkout.payment
+            name: Payment
 
   - id: orders
-    name: Order Processing # no row: it spans the rows its components use
+    name: Orders # no row: the box spans the rows its components are in
+    owner: Order team
+    status: planned
+    labels: { zone: internal }
     components:
       - id: orders.api
         name: Orders API
-        row: services
-      - id: orders.db
-        name: Orders Database
-        row: storage
+        row: back
+      - id: orders.jobs
+        name: Nightly jobs
+        row: back
+      - id: orders.settings
+        name: Settings
+        row: front
 
-edges:
-  - id: checkout-places-order
-    from: shop.checkout
-    to: orders.api
-    kind: dataflow # dataflow | dependency | control | config
-    label: place order # optional, short
-    protocol: REST # optional, free text
-    description: Sends the basket as an order # optional
-  - id: api-uses-db
-    from: orders.api
-    to: orders.db
-    kind: dependency
+edges: # the lines; the arrowhead is at "to"
+  - id: payment-places-order # unique among the edges; what a flow lists
+    from: shop.checkout.payment # a node of any level
+    to: orders.api # another node of any level
+    kind: dataflow # dataflow | dependency | control | config: the line's style, the kind buttons
+    label: place order # text on the line
+    protocol: REST # shown after the label: place order [REST]
+    description: Sends the basket as an order # hover text of the line, and its detail panel
+  - { id: basket-needs-catalog, from: shop.checkout.basket, to: shop.catalog, kind: dependency }
+  - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
+  - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
 
-flows: # optional: stories told through the edges (Focus, on the Visibility tab)
-  - id: place-order
-    name: Place an order
-    kind: workflow # workflow | dataflow
-    description: From the basket to a stored order
-    edges: [checkout-places-order, api-uses-db] # the steps, in order
-    nodes: [shop.catalog] # further nodes it involves (optional)
+flows: # stories told through the edges: Visibility → Focus lights one and pales the rest
+  - id: place-order # unique among the flows; what a saved view remembers
+    name: Place an order # its entry in the focus list, the title of its panel
+    kind: workflow # workflow (the default) or dataflow: its group in the focus list
+    description: From the basket to a stored order # shown in its panel
+    edges: [payment-places-order, jobs-run-api] # the steps, in order
+    nodes: [shop.checkout.basket] # further nodes it involves
+  - { id: prices, name: Prices reach the shop, kind: dataflow, edges: [settings-set-prices] }
+
+presets: # named colourings, offered first under Lenses → Colour by
+  - name: Zones # unique: its entry in the list, the title of the legend, what a view remembers
+    label: zone # the label whose values it colours; owner, status and tech work too
+    description: Who may reach it # shown under the list and on the legend's title
+    values: # value: colour, in the order of the legend; other values get the next free colour
+      public: orange # a palette name: blue orange teal yellow pink green purple red grey
+      payment: '#b3261e' # a hex colour, in quotes (an unquoted # starts a comment)
+      internal: { light: '#0d6b5e', dark: '#5fd1bf' } # one hex colour for each scheme
+      partner: # no colour: the next free one of the palette
+  - { name: Teams, label: owner } # no values: every owner gets a colour of the palette
 ```
+
+It opens in the viewer as it is, together with `template/workitems.json`. The sections below
+describe every key.
 
 ### Top level
 
@@ -146,6 +177,7 @@ flows: # optional: stories told through the edges (Focus, on the Visibility tab)
 | `rows`    | no       | List of rows (bands), top → bottom                                |
 | `edges`   | no       | List of edges                                                     |
 | `flows`   | no       | List of flows (see below)                                         |
+| `presets` | no       | List of colour presets (see below)                                |
 
 ### Nodes: domains, components, subcomponents
 
@@ -153,25 +185,29 @@ There are exactly **three levels**. A domain lists its children under `component
 lists its children under `subcomponents`, a subcomponent has no children. Nothing nests deeper,
 and a list under the wrong key (for example `subcomponents` directly in a domain) is an error.
 
-| Key             | Required | Value                                             |
-| --------------- | -------- | ------------------------------------------------- |
-| `id`            | yes      | Text; see the ID rules below                      |
-| `name`          | yes      | Text, not empty: what the box shows               |
-| `description`   | no       | Text: shown in the detail panel and as a tooltip  |
-| `row`           | no       | ID of a row from `rows`                           |
-| `owner`         | no       | Text: the team or person responsible              |
-| `status`        | no       | Text: `planned`, `live`, `deprecated`, … (free)   |
-| `tech`          | no       | Text: the main technology                         |
-| `links`         | no       | List of `{ label, url }`; `url` must be `http(s)` |
-| `metrics`       | no       | Mapping of name → number (`loc: 12400`)           |
-| `components`    | no       | Domains only: list of components                  |
-| `subcomponents` | no       | Components only: list of subcomponents            |
+| Key             | Required | Value                                                |
+| --------------- | -------- | ---------------------------------------------------- |
+| `id`            | yes      | Text; see the ID rules below                         |
+| `name`          | yes      | Text, not empty: what the box shows                  |
+| `description`   | no       | Text: shown in the detail panel and as a tooltip     |
+| `row`           | no       | ID of a row from `rows`                              |
+| `owner`         | no       | Text: the team or person responsible                 |
+| `status`        | no       | Text: `planned`, `live`, `deprecated`, … (free)      |
+| `tech`          | no       | Text: the main technology                            |
+| `labels`        | no       | Mapping of name → value (`zone: public`); see Labels |
+| `links`         | no       | List of `{ label, url }`; `url` must be `http(s)`    |
+| `metrics`       | no       | Mapping of name → number (`loc: 12400`)              |
+| `components`    | no       | Domains only: list of components                     |
+| `subcomponents` | no       | Components only: list of subcomponents               |
 
-`owner`, `status` and `tech` are **inherited**: a node without one has its nearest ancestor's
-(the panel says where it comes from). Set them on a domain and override where a component
-differs. **Lenses → Colour by** tints the boxes by any of them (one colour per value, with a
-legend) or by any metric (light to dark). Metrics are not inherited. A link that is not an
-`http(s)` address is left out with a warning; a metric that is not a number is an error.
+`owner`, `status` and `tech` are **inherited**, and so is every label (see [Labels](#labels)):
+a node without one has its nearest ancestor's (the panel says where it comes from). Set them on
+a domain and override where a component differs. A key left empty, or given an empty text, is
+the same as no entry: it does not clear a value that comes from a group around the node.
+**Lenses → Colour by** tints the boxes by any of them (one colour per value, with a legend), by
+a colour preset of the file (see [Colour presets](#colour-presets)) or by any metric (light to
+dark). Metrics are not inherited. A link that is not an `http(s)` address is left out with a
+warning; a metric that is not a number is an error.
 
 **ID rules** (all are checked; a violation is an error):
 
@@ -192,11 +228,11 @@ Rows are optional horizontal bands (tiers), for example _UI / Services / Storage
 _Engineering / Middle / Hardware_. Without a `rows` section the map is laid out as a plain
 graph by its connections.
 
-| Key           | Required | Value                                                  |
-| ------------- | -------- | ------------------------------------------------------ |
-| `id`          | yes      | One segment (same rule as a domain ID), unique in rows |
-| `name`        | yes      | Text, not empty: shown in the left gutter              |
-| `description` | no       | Text                                                   |
+| Key           | Required | Value                                                           |
+| ------------- | -------- | --------------------------------------------------------------- |
+| `id`          | yes      | One segment (same rule as a domain ID), unique in rows          |
+| `name`        | yes      | Text, not empty: shown in the left gutter                       |
+| `description` | no       | Text: kept for readers of the file; the viewer does not show it |
 
 - `row:` may be set on any node; everything inside inherits it. A node inside may repeat the
   same row, but naming a **different** row than an ancestor is an error.
@@ -263,7 +299,9 @@ stop it. Unknown keys are warnings and are ignored — check them, they are usua
 (`subcomponent:` for `subcomponents:`).
 
 Every value listed as "Text" must be a YAML string. Plain YAML turns some unquoted values into
-other types, which is then an error ("must be text"). Quote when in doubt:
+other types, which is then an error ("must be text") — except for the values under `labels` and
+the values a preset lists, where a number or true/false is taken as written. Quote when in
+doubt:
 
 | Written like this           | YAML reads            | Write instead                |
 | --------------------------- | --------------------- | ---------------------------- |
@@ -273,6 +311,7 @@ other types, which is then an error ("must be text"). Quote when in doubt:
 | `description: Reads: fast`  | a syntax error (`: `) | `description: 'Reads: fast'` |
 | `label: [async]`            | a list                | `label: '[async]'`           |
 | `name: # todo`              | nothing (a comment)   | `name: '# todo'`             |
+| `live: #1baf7a` (a colour)  | nothing (a comment)   | `live: '#1baf7a'`            |
 
 Use spaces for indentation (never tabs), one document per file (no `---` separators), UTF-8.
 An empty optional key (`edges:` with nothing after it) is treated as absent.
@@ -318,8 +357,11 @@ a map of more than roughly 300 nodes makes the page hang for a noticeable time o
    repository are the most telling: `loc` (lines of code in the component's folder), `churn`
    (commits touching it in the last 90 days: `git log --since=90.days --oneline -- <path> | wc -l`),
    `contributors`, `coverage` from the test report. Keep the names short and the same on every
-   node. Then write 2–4 `flows` for the stories everyone asks about — how a request is served,
-   how a release goes out, where the data comes from.
+   node. Use `labels` for what the three attributes do not cover — a zone, a tier, a lifecycle,
+   the group a team belongs to: a few names, set on a domain and replaced where a part differs.
+   Add a preset where a colour has to mean the same on every map (`deprecated` always grey,
+   for example). Then write 2–4 `flows` for the stories everyone asks about — how a request is
+   served, how a release goes out, where the data comes from.
 8. **Write the file, generate, open, read the Diagnostics**, and look at the picture: does
    **Fit view** show something a person would recognise? Merge or drop what is noise. The
    Diagnostics panel ends with **hints** (nodes without a description or without any
@@ -330,29 +372,55 @@ the person you work for which parts of the map are inferred.
 
 ## `workitems.json` — the work items
 
+A complete, valid file — `template/workitems.json` in this folder. JSON has no comments: the
+titles and the description of its items say what the viewer does with them.
+
 ```json
 {
   "version": 1,
   "items": [
     {
-      "id": 1010,
-      "type": "User Story",
-      "title": "Customers can pay by invoice",
+      "id": 1,
+      "type": "Epic",
+      "title": "An epic: id, type, title and state are required",
       "state": "Active",
-      "assignedTo": "Robin Patel",
-      "iteration": "Shop\\Sprint 13",
-      "tags": "comp:shop.checkout; comp:orders.api; payments",
-      "parentId": 1001,
-      "description": "As a business customer I want to …",
-      "url": "https://dev.azure.com/contoso/Shop/_workitems/edit/1010",
-      "fields": { "Story Points": 8, "Priority": 1, "Area": "Shop\\Checkout" }
+      "tags": "comp:shop"
     },
     {
-      "id": 1011,
+      "id": 2,
+      "type": "Feature",
+      "title": "A feature: parentId names another item of this file",
+      "state": "Active",
+      "tags": "comp:shop.checkout",
+      "parentId": 1
+    },
+    {
+      "id": 3,
+      "type": "User Story",
+      "title": "A user story with every key",
+      "state": "Active",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Release 1\\Sprint 1",
+      "tags": "comp:shop.checkout.payment; comp:orders.api; payments",
+      "parentId": 2,
+      "description": "Plain text for the work-item panel. Each comp: tag puts the item on that box; the other tags are listed. The iteration feeds the filter, and Release 1 can be chosen as a whole.",
+      "url": "https://example.com/items/3",
+      "fields": { "Story Points": 5, "Area": "Checkout" }
+    },
+    {
+      "id": 4,
       "type": "Task",
-      "title": "Add the invoice option to the payment step",
+      "title": "A task: listed under its parent; Closed, Done, Resolved and Removed count as completed",
+      "state": "Closed",
+      "iteration": "Shop\\Release 1\\Sprint 1",
+      "parentId": 3
+    },
+    {
+      "id": 5,
+      "type": "Bug",
+      "title": "A bug: counted on its box like a story",
       "state": "New",
-      "parentId": 1010
+      "tags": "comp:orders.api"
     }
   ]
 }
@@ -643,7 +711,7 @@ The version of the viewer stands beside its name at the top of the control panel
 | Follow one story through the map      | **Visibility → Focus**: a flow, an epic or a feature; or **Focus** in the panel of a work item or flow |
 | Draw only what a focus involves       | The **Focus / Filter** switch: on the **Visibility** tab, and in the bar above the map                 |
 | See where the work is                 | **Lenses → Heat by work**, **Progress bars**                                                           |
-| Colour the boxes                      | **Lenses → Colour by**: owner, status, tech or a metric (legend top left)                              |
+| Colour the boxes                      | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric (legend top left)           |
 | Calm the overview                     | **Visibility → Edges on demand**                                                                       |
 | Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                             |
 | Lay out without the row bands         | **Layout → Arrange in rows**                                                                           |
@@ -783,6 +851,8 @@ The version of the viewer stands beside its name at the top of the control panel
 - **Detail panel** (right): for a node its description, parent path, children, incoming and
   outgoing edges and all its work items; for an edge its ends, kind, protocol and description;
   for a work item everything in the file, its parent, its tasks and the nodes it is tagged to.
+  The panel of a node lists Owner, Status and Tech and then every label that holds for the
+  node, each followed by "(from _name_)" when the node has it from a group around it.
   Everything underlined is a link that selects that thing and brings it on screen.
 - **Focus** answers "what does this involve": choose a flow, an epic or a feature under
   **Visibility → Focus**, or press **Focus** in the panel of any work item or flow (a story, a
@@ -858,10 +928,35 @@ The version of the viewer stands beside its name at the top of the control panel
   what it shows: "On the map: 2 open items · 1 of 3 done on this box; the rest is on the boxes
   drawn inside it" (only the lenses that are on), or "On the map: all of it is on the boxes
   drawn inside it" when the box has neither a strip nor a bar.
-- **Colour by** tints every box by an attribute or a metric and shows a legend, below the edge
-  legend. Attribute colours are given in the order the values first appear; from the ninth
-  value on everything is "Other". A metric is drawn light (its smallest value) to dark (its
-  largest).
+- **Colour by** tints every box that has a value — a stripe along its top in the colour, and
+  its background lightly — and shows a legend, below the edge legend. A label, like owner,
+  status and tech, holds for everything inside the box that carries it, so a box without a
+  value of its own has the colour of the nearest group around it that has one. A box with no
+  value anywhere, or without the metric, is not tinted.
+  - _The list_ has three groups, each left out when the file has nothing for it. **Presets**:
+    the colourings the file names (see [Colour presets](#colour-presets)), in the order of the
+    file; while one with a description is chosen, the description stands under the list.
+    **Labels**: Owner, Status and Tech, each when some node has one, and then the labels of the
+    file as they are written, in the order of first use. **Metrics**: the metrics of the file.
+    **Nothing** switches the colours off.
+  - _The colours_ of a label, and of Owner, Status and Tech, are given in the order the values
+    first appear in the file; from the ninth value on everything is "Other". They can change
+    when the file does: only a preset fixes a colour. A metric is drawn light (its smallest
+    value) to dark (its largest).
+  - _The legend_ is headed by the name of what is chosen. Under the name of a preset stands
+    "by _label_" (left out when that is its name too), and its description is the tooltip of
+    the title. Then one line for each value: its colour, the value, and the number of boxes
+    that have it. The values a preset lists come first, in its order, then the others in the
+    order of the file. "Other" stands for the values that share the grey, and its tooltip names
+    them: the first twenty, then "… and _n_ more". "No value" counts the boxes that have none.
+    A long legend scrolls. The legend of a metric is its scale, with the two ends.
+  - _The counts_ are of the whole structure: the boxes of every level, drawn or not. Filter,
+    the level of detail and closed groups do not change them, so the legend can list a value
+    that no box on screen shows — its boxes are inside closed groups.
+  - _A group_, open or closed, shows its own value, whatever the boxes inside it have. A closed
+    group without a value is not tinted, even when boxes inside it are.
+  - _On the dark colour scheme_ the boxes and the legend have the dark variant of each colour
+    of the palette, and of a colour the file gives as a pair.
 - **Edges on demand** hides the edges, at every level of detail, except at the box under the
   pointer, at the selected box or edge, and those of the focus. Pointing at the frame of an open
   group shows the edges at the group and at everything drawn inside it; pointing at a box inside
@@ -892,6 +987,18 @@ The version of the viewer stands beside its name at the top of the control panel
     filtered map needs version 0.2.0 or later: an older one shows the focus in Focus mode,
     with the view at the wrong place. A link copied with the map closed up needs a viewer newer
     than 0.2.0: an older one shows the full map, with the view at the wrong place.
+  - A view remembers its colouring by name: a preset by its `name`, a label or a metric by its
+    own. When the file that is loaded has nothing of that name — the preset was renamed or
+    removed, its label is on no node any more — the view is applied in every other respect, the
+    boxes are not coloured, and a notice above the map says so: "This view is coloured by
+    preset "Risk", which this file does not have: the boxes are not coloured." The notice goes
+    when a colouring is chosen under **Lenses → Colour by** (choose one and then **Nothing** to
+    have none), when another view is applied and when a file is opened or read again. A link in
+    the address bar is applied again with every reload, and says so again. The view itself
+    stays as it was saved: once the file has the preset again, it colours again. A link carries
+    the name of a preset, never its colours — those come from the file of whoever opens the
+    link. A link coloured by a preset or a label needs a viewer that has them: one of version
+    0.2.0 or earlier shows the view uncoloured.
 - **Remembered in the browser** (`localStorage`): collapsed groups, the view of the whole map,
   hidden edge kinds, hand-moved positions (per arrangement: rows on or off, each story mode,
   each filtered map and each closed-up arrangement have their own) and saved views per
@@ -961,6 +1068,9 @@ The viewer works on a computer or a network without internet access. What that r
 | Items missing                                              | Skipped for a format problem (Diagnostics), or hidden by **Visibility → Work items shown**                                                              |
 | No stories in the boxes                                    | They are listed at the **Everything** level only (zoom in, or click **Everything**); **Work items on the map** not Off                                  |
 | Only a part of the map is drawn                            | The **Focus / Filter** switch stands on Filter and a focus is chosen: set it to Focus, or **Clear focus** (bar above the map)                           |
+| A preset is missing from **Colour by**                     | Its `label` is on no node, so the preset is left out. The Diagnostics panel has the warning, with the label it may have meant                           |
+| A value has another colour than the preset gives it        | The colour was not read: a hex colour without quotes, or a name that is none of the nine. See the warnings in the Diagnostics panel                     |
+| A view or a link opens uncoloured, with a notice           | The file has no preset, label or metric of the name the view remembers (renamed, removed). Choose a colouring and save the view again                   |
 | The controls are gone, only a strip of icons is left       | The body of the control panel is hidden: **Show** at the foot of that strip, or click one of its tabs                                                   |
 | The left of the map is under the controls                  | In a window narrower than 1400 px the open control panel lies over the left of the map: **Hide**, or click the tab that is shown                        |
 | The page hangs after loading                               | The map is too large (hundreds of nodes). Reduce subcomponents; see the target size above                                                               |

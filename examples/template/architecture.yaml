@@ -1,0 +1,88 @@
+# Template: every key the viewer reads, once, with what it does. Copy the file, replace the
+# IDs and names with your own, and delete what you do not need. Required are "version" and
+# "domains"; "id" and "name" of a row, a node and a flow; "id", "from", "to" and "kind" of an
+# edge; "url" of a link; "name" and "label" of a preset. The full reference is README.md.
+version: 1 # the format version: always 1
+
+rows: # horizontal bands, top → bottom; without this key the map is laid out by its edges
+  - id: front # what a node's "row:" names: one lowercase segment, unique among the rows
+    name: Front end # the band's name, in the left gutter and in a box's detail panel
+    description: What people use # checked and kept, not displayed: a note for readers of the file
+  - id: back
+    name: Back end
+
+domains: # the top-level boxes; three levels: domains → components → subcomponents
+  - id: shop # the stable key: edges, flows and comp: tags name it; found by the search
+    name: Web Shop # the text of the box; found by the search
+    description: Everything a customer sees # tooltip of the box, and its detail panel
+    row: front # the band of this box and of everything inside it
+    owner: Shop team # owner, status and tech hold for everything inside, unless set there;
+    status: live # the detail panel lists them and says where each comes from;
+    tech: TypeScript # Lenses → Colour by gives each of their values a colour
+    labels: # your own name: value pairs; they behave like owner, status and tech
+      zone: public
+      tier: 1 # a number or true/false is kept as written
+    links: # listed in the detail panel; opened in a new tab
+      - label: Source # the link's text; without it, the address
+        url: https://example.com/shop # must be http(s), or the link is left out
+    metrics: # numbers by name: detail panel, and Colour by (light → dark); not inherited
+      loc: 12000
+    components: # the boxes inside a domain
+      - id: shop.catalog # a child's ID: its parent's ID, a dot, one more segment
+        name: Catalog
+      - id: shop.checkout
+        name: Checkout
+        labels: { zone: payment } # replaces the domain's value, here and inside
+        subcomponents: # the boxes inside a component: the last level
+          - id: shop.checkout.basket
+            name: Basket
+          - id: shop.checkout.payment
+            name: Payment
+
+  - id: orders
+    name: Orders # no row: the box spans the rows its components are in
+    owner: Order team
+    status: planned
+    labels: { zone: internal }
+    components:
+      - id: orders.api
+        name: Orders API
+        row: back
+      - id: orders.jobs
+        name: Nightly jobs
+        row: back
+      - id: orders.settings
+        name: Settings
+        row: front
+
+edges: # the lines; the arrowhead is at "to"
+  - id: payment-places-order # unique among the edges; what a flow lists
+    from: shop.checkout.payment # a node of any level
+    to: orders.api # another node of any level
+    kind: dataflow # dataflow | dependency | control | config: the line's style, the kind buttons
+    label: place order # text on the line
+    protocol: REST # shown after the label: place order [REST]
+    description: Sends the basket as an order # hover text of the line, and its detail panel
+  - { id: basket-needs-catalog, from: shop.checkout.basket, to: shop.catalog, kind: dependency }
+  - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
+  - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
+
+flows: # stories told through the edges: Visibility → Focus lights one and pales the rest
+  - id: place-order # unique among the flows; what a saved view remembers
+    name: Place an order # its entry in the focus list, the title of its panel
+    kind: workflow # workflow (the default) or dataflow: its group in the focus list
+    description: From the basket to a stored order # shown in its panel
+    edges: [payment-places-order, jobs-run-api] # the steps, in order
+    nodes: [shop.checkout.basket] # further nodes it involves
+  - { id: prices, name: Prices reach the shop, kind: dataflow, edges: [settings-set-prices] }
+
+presets: # named colourings, offered first under Lenses → Colour by
+  - name: Zones # unique: its entry in the list, the title of the legend, what a view remembers
+    label: zone # the label whose values it colours; owner, status and tech work too
+    description: Who may reach it # shown under the list and on the legend's title
+    values: # value: colour, in the order of the legend; other values get the next free colour
+      public: orange # a palette name: blue orange teal yellow pink green purple red grey
+      payment: '#b3261e' # a hex colour, in quotes (an unquoted # starts a comment)
+      internal: { light: '#0d6b5e', dark: '#5fd1bf' } # one hex colour for each scheme
+      partner: # no colour: the next free one of the palette
+  - { name: Teams, label: owner } # no values: every owner gets a colour of the palette

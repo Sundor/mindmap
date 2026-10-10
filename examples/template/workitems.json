@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": 1,
+      "type": "Epic",
+      "title": "An epic: id, type, title and state are required",
+      "state": "Active",
+      "tags": "comp:shop"
+    },
+    {
+      "id": 2,
+      "type": "Feature",
+      "title": "A feature: parentId names another item of this file",
+      "state": "Active",
+      "tags": "comp:shop.checkout",
+      "parentId": 1
+    },
+    {
+      "id": 3,
+      "type": "User Story",
+      "title": "A user story with every key",
+      "state": "Active",
+      "assignedTo": "Robin Patel",
+      "iteration": "Shop\\Release 1\\Sprint 1",
+      "tags": "comp:shop.checkout.payment; comp:orders.api; payments",
+      "parentId": 2,
+      "description": "Plain text for the work-item panel. Each comp: tag puts the item on that box; the other tags are listed. The iteration feeds the filter, and Release 1 can be chosen as a whole.",
+      "url": "https://example.com/items/3",
+      "fields": { "Story Points": 5, "Area": "Checkout" }
+    },
+    {
+      "id": 4,
+      "type": "Task",
+      "title": "A task: listed under its parent; Closed, Done, Resolved and Removed count as completed",
+      "state": "Closed",
+      "iteration": "Shop\\Release 1\\Sprint 1",
+      "parentId": 3
+    },
+    {
+      "id": 5,
+      "type": "Bug",
+      "title": "A bug: counted on its box like a story",
+      "state": "New",
+      "tags": "comp:orders.api"
+    }
+  ]
+}

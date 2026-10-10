@@ -103,7 +103,8 @@ export interface WorkItemsParseResult {
   readonly warnings: Diagnostic[];
 }
 
-const ITEM_KEYS = new Set([
+/** The keys of a work item in the data file; any other key is reported and ignored. */
+export const WORK_ITEM_KEYS = [
   'id',
   'type',
   'title',
@@ -115,7 +116,8 @@ const ITEM_KEYS = new Set([
   'description',
   'url',
   'fields',
-]);
+] as const;
+const ITEM_KEYS: ReadonlySet<string> = new Set(WORK_ITEM_KEYS);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

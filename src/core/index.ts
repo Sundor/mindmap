@@ -32,3 +32,4 @@ export * from './colorBy';
 export * from './hints';
 export * from './savedViews';
 export * from './recentMaps';
+export * from './template';

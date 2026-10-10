@@ -10,6 +10,8 @@
 #   - platform: cross-cutting domain with no row anywhere in its subtree (Unassigned area).
 # It also has owner / status / tech on nodes (inherited down the tree), links, metrics
 # (Colour by, on the Lenses tab), and flows (Focus, on the Visibility tab).
+# The label "exposure" says who can reach a part: set on four domains, replaced on
+# storefront.payment, absent on platform. The presets at the end colour by it and by status.
 version: 1
 
 rows:
@@ -31,6 +33,8 @@ domains:
     owner: Tooling team
     status: live
     tech: C# / WPF
+    labels:
+      exposure: staff
     components:
       - id: backoffice.studio
         name: Merchandise Studio
@@ -80,6 +84,8 @@ domains:
     description: Running the shop day to day
     owner: Shop IT
     status: live
+    labels:
+      exposure: staff
     components:
       - id: operations.console
         name: Duty Console
@@ -126,6 +132,8 @@ domains:
     owner: Web team
     status: live
     tech: TypeScript / React
+    labels:
+      exposure: public
     components:
       - id: storefront.web
         name: Web Shop
@@ -153,6 +161,8 @@ domains:
             description: Self-service terminal in the shops
       - id: storefront.payment
         name: Payment Page
+        labels:
+          exposure: partner
       - id: storefront.gateway
         name: Edge Gateway
         description: Connects the customer channels to the services
@@ -176,6 +186,8 @@ domains:
     owner: Data team
     status: live
     tech: Python
+    labels:
+      exposure: internal
     components:
       - id: data.ingest
         name: Telemetry Ingest
@@ -513,3 +525,19 @@ flows:
     edges:
       - rules-stored
       - released-rules
+
+presets:
+  - name: Exposure
+    label: exposure
+    description: Who can reach each part of the shop
+    values:
+      public: red
+      partner: '#8e44ad'
+      staff: { light: '#0d6b5e', dark: '#5fd1bf' }
+      internal:
+  - name: Lifecycle
+    label: status
+    values:
+      planned: blue
+      live: green
+      deprecated: grey

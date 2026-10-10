@@ -18,9 +18,14 @@ reference of the format, with every optional key, is `docs/viewer-README.md` (sh
 its path and line. Node IDs are lowercase dot-separated segments, each child prefixed by its
 parent's ID (`ingest.reader.parser`). Node, edge, row and flow IDs are separate namespaces.
 Besides name, description and row, a node may carry `owner`, `status` and `tech` (free text,
-inherited by everything inside), `links` (`{ label, url }`, http(s) only) and `metrics`
+inherited by everything inside), `labels` (name → value, under names the file chooses;
+inherited the same way), `links` (`{ label, url }`, http(s) only) and `metrics`
 (name → number). A top-level `flows:` list names stories told through the edges (`id`, `name`,
-`kind: workflow | dataflow`, `description`, `edges` in step order, `nodes`).
+`kind: workflow | dataflow`, `description`, `edges` in step order, `nodes`). A top-level
+`presets:` list names colourings, offered under **Lenses → Colour by** (`name`, the `label`
+whose values it colours, `description`, `values`: a colour for a value). `examples/template/`
+holds a short structure file and its work items in which every key occurs once, with what it
+does.
 
 ## Requirements
 
@@ -37,7 +42,8 @@ npm run dev          # opens http://localhost:5173/viewer.html
 In dev, the raw structure file `examples/architecture.yaml` is served at `/architecture.yaml`
 (re-read on every request; editing it reloads the page): the viewer's loader fetches it, as it
 does on any web server (see "Where the viewer gets its data"). The dummy work items,
-`fixtures/workitems.json`, are served the same way at `/workitems.json`.
+`fixtures/workitems.json`, are served the same way at `/workitems.json`. The template files
+(`examples/template/`) are not served in dev: the build copies them beside the viewer.
 
 | Script              | What it does                                                              |
 | ------------------- | ------------------------------------------------------------------------- |
@@ -61,8 +67,11 @@ selection and dimming (including a click on the line of every single edge and me
 detail panel and its links, search, the control panel (its tabs, hiding its body, the search
 while it is hidden), aggregate → member edge, going to a long edge in a small window, the
 edge-kind filter, the focus in both of its modes (Focus and Filter), edges on demand, the map
-closed up around its closed groups (what keeps its place, the level of detail, fitting), the
-work items (loaded, diagnosed, room reserved per story mode) and persistence across a reload.
+closed up around its closed groups (what keeps its place, the level of detail, fitting), open
+groups resized and dragged by their title bar while positions are unlocked, the heat and
+progress of open groups, Colour by with labels and presets (the legend on both colour schemes,
+a view whose colouring the file lacks, the template files), the work items (loaded, diagnosed,
+room reserved per story mode) and persistence across a reload.
 It uses Node built-ins only (Node 22+), finds the browser in its usual install location (set
 `BROWSER` to the executable to override), and closes the browser when done. The browser
 profile is one directory in the temp directory,
@@ -79,7 +88,8 @@ must (see [Offline use and security](#offline-use-and-security)).
 
 Layout: `src/core` (pure, unit-tested logic — no React), `src/ui` (React), `src/providers`
 (data sources: the structure loader, the work-item source and its mock provider), `fixtures`
-(the dummy work items), `examples`, `scripts`.
+(the dummy work items), `examples` (the shipped example; in `examples/template/` the template
+files), `scripts`.
 
 ## Build and share
 
@@ -89,13 +99,15 @@ npm run build
 
 produces:
 
-| File                           | Purpose                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| `dist/viewer.html`             | The whole app in one file (JS and CSS inlined); works offline, `file://`     |
-| `dist/architecture.yaml`       | The structure file (the example): opened from disk, fetched over HTTP        |
-| `dist/workitems.json`          | The work-items file (the dummy data), likewise                               |
-| `dist/README.md`               | Guide to the viewer and to writing both data files (`docs/viewer-README.md`) |
-| `dist/THIRD-PARTY-NOTICES.txt` | The open-source software inside `viewer.html` and its licence texts          |
+| File                              | Purpose                                                                                      |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `dist/viewer.html`                | The whole app in one file (JS and CSS inlined); works offline, `file://`                     |
+| `dist/architecture.yaml`          | The structure file (the example): opened from disk, fetched over HTTP                        |
+| `dist/workitems.json`             | The work-items file (the dummy data), likewise                                               |
+| `dist/template/architecture.yaml` | A short structure file with every key once and what it does: the file to copy and start from |
+| `dist/template/workitems.json`    | The matching work items: one of each type                                                    |
+| `dist/README.md`                  | Guide to the viewer and to writing both data files (`docs/viewer-README.md`)                 |
+| `dist/THIRD-PARTY-NOTICES.txt`    | The open-source software inside `viewer.html` and its licence texts                          |
 
 `dist/` is a folder that can be handed on **without the repo**: its `README.md` describes the
 viewer, the full format of `architecture.yaml` and `workitems.json`, how to derive them from a
@@ -103,6 +115,15 @@ repository and from Azure DevOps, and how to check the result — enough for a p
 to make a map for another project. Nothing is generated from the data files: they are edited
 and opened as they are. When the formats or the viewer's behaviour change, update
 `docs/viewer-README.md` with them.
+
+`dist/template/` holds the files to start a map from: every key the viewer reads occurs in
+them once — in the structure file with a comment that says what it does, in the work items
+with a title that says it. The build copies them from `examples/template/` (the list is
+`TEMPLATE_FILES` in `src/core/template.ts`); the viewer names them on the **Files** tab and on
+the start page, and neither links to them nor fetches them. Two unit tests keep them true:
+`src/core/template.test.ts` fails when a key the viewer reads is missing from them, and
+`src/core/docs.test.ts` when the two complete files shown in `docs/viewer-README.md` are not
+these files word for word.
 
 The viewer reads data files only (YAML and JSON) and loads no script next to it. To share:
 
@@ -195,7 +216,8 @@ only a MAJOR release may break.
 `npm run installer` makes the two downloads of a release, each with a `.sha256` file:
 
 - `release/architecture-map-<version>-viewer.zip` (under 1 MB): the built folder — the viewer,
-  the example data files, the guide and the notices. All that is needed to **use** the map.
+  the example data files, the template files, the guide and the notices. All that is needed to
+  **use** the map.
 - `release/architecture-map-<version>-build-kit-win-x64.zip` (about 66 MB): everything a
   Windows computer needs to **build** the viewer, with no internet access, no administrator
   rights and nothing installed system-wide. The rest of this section is about it.
@@ -249,7 +271,9 @@ name of the file in use stands at the top of the control panel. In order:
 2. Opened from `file://`: **the map opened last**, if the browser lets its files be read
    without asking (Edge and Chrome, when the user has allowed it for every visit).
 3. Otherwise the start page: the **recent maps** to open again with a click, an **Open YAML…**
-   button, and a drop of a `.yaml`/`.yml` file (with its `.json`) anywhere on the page.
+   button, and a drop of a `.yaml`/`.yml` file (with its `.json`) anywhere on the page. The
+   page also says where the template files are (`template/` in the viewer's folder), as the
+   **Files** tab does under **Open YAML…**.
 
 **Recent maps** (`src/core/recentMaps.ts`, `src/providers/recentFiles.ts`, `RecentList.tsx`).
 A page cannot learn or use the path of a file, but Edge and Chrome hand out a _reference_ to a
@@ -342,8 +366,9 @@ name IDs of your `architecture.yaml`) and either open it with **Open work items�
 the page — opened together with the structure it is remembered with it — or put it next to
 the viewer as `workitems.json` when it is served over HTTP (or name it with
 `?workitems=<path>`).
-`fixtures/workitems.json` is the file to copy from. How they are shown is described under
-[Work items on the map](#work-items-on-the-map).
+`examples/template/workitems.json` is the short file to copy from — one item of each type, one
+of them with every key; `fixtures/workitems.json` is the dummy set of the example. How they are
+shown is described under [Work items on the map](#work-items-on-the-map).
 
 The buttons under **Work items on the map** on the **Detail** tab (shown when there are work
 items) choose what the map shows of them — the story mode: **Off**, **Stories only** (the
@@ -640,7 +665,7 @@ items.
 | Follow one story through the map        | **Visibility → Focus**: a flow, an epic or a feature; or **Focus** in a work item's panel  |
 | Draw only what a focus involves         | the **Focus / Filter** switch (**Visibility** tab, or in the focus bar above the canvas)   |
 | See where the work is                   | **Lenses → Heat by work**, **Progress bars**                                               |
-| Colour the boxes                        | **Lenses → Colour by**: owner, status, tech or a metric (legend at the top left)           |
+| Colour the boxes                        | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric, with a legend  |
 | Calm the overview                       | **Visibility → Edges on demand**                                                           |
 | Keep or share an arrangement            | **Views** tab: save under a name, apply, delete, **Copy link**                             |
 | Lay out without the row bands           | **Layout → Arrange in rows**                                                               |
@@ -675,10 +700,10 @@ The **Detail** tab is headed "Level of detail" in the body, so that it is not ta
 detail panel at the right. A control is offered when it has something to act on: the story
 mode, **Work items shown**, Heat by work and Progress bars when work items are loaded, the
 focus chooser when the structure has flows or work items are loaded, Colour by when the
-structure has attributes or metrics, **Recent maps** when there are any. A tab whose controls
-need a map says "Nothing is drawn yet." until one is drawn. While no structure is loaded (the
-start page, a file with errors) only **Files** can be chosen; the tab chosen before comes back
-with the map.
+structure has presets, labels, attributes or metrics, **Recent maps** when there are any. A
+tab whose controls need a map says "Nothing is drawn yet." until one is drawn. While no
+structure is loaded (the start page, a file with errors) only **Files** can be chosen; the tab
+chosen before comes back with the map.
 
 The tabs say on the rail what is behind them: **Detail** the level being drawn, **Visibility**
 a dot while something is hidden, paled or filtered (an edge kind hidden, a focus set, Edges on
@@ -702,10 +727,10 @@ detail: Components — follows the zoom"), and that of **Files** names the files
 - **Search with the body hidden.** **/**, **Ctrl+K** and **Search** on the rail show the search
   box alone, as a small card beside the rail. It goes when the cursor leaves it: a match
   chosen, **Esc** twice, a click elsewhere.
-- **Not on any tab**, so there whichever tab is shown: above the canvas a file error and the
-  focus bar; on the canvas the legends (top left), the zoom controls (bottom left) and the
-  minimap (bottom right); the detail panel at the right and the Diagnostics panel below the
-  map.
+- **Not on any tab**, so there whichever tab is shown: above the canvas a file error, the
+  notice of a view whose colouring the file does not have, and the focus bar; on the canvas
+  the legends (top left), the zoom controls (bottom left) and the minimap (bottom right); the
+  detail panel at the right and the Diagnostics panel below the map.
 
 The tab shown and whether the body is hidden are remembered in the browser, once for the
 viewer.
@@ -930,11 +955,29 @@ switched on the **Visibility** tab. The legend of **Colour by** sits below it.
   items · 1 of 3 done on this box; the rest is on the boxes drawn inside it", naming only the
   lenses that are on, or "On the map: all of it is on the boxes drawn inside it" when the box
   has neither a strip nor a bar.
-- **Colour by** (**Lenses** tab): the boxes tinted by `owner`, `status` or `tech` (one colour
-  per value, in the order the values first appear; from the ninth value on "Other") or by a
-  metric (light = smallest, dark = largest); its legend sits at the top left of the canvas,
-  below the edge legend. The node panel shows the attributes (saying where an inherited one
-  comes from), the metrics and the links.
+- **Colour by** (**Lenses** tab): the boxes tinted by a preset of the file, by a label, by
+  `owner`, `status` or `tech`, or by a metric (light = smallest, dark = largest).
+  - _The list_ is grouped: **Presets** (the `presets` of the file by name, in file order),
+    **Labels** (Owner, Status and Tech, each when some node has one, then the labels of the
+    file in the order of first use) and **Metrics**. A group with nothing in it is left out;
+    **Nothing** switches the colours off. While a preset with a description is chosen, the
+    description stands under the list.
+  - _The colours._ A label, like an attribute, holds for everything inside the box that
+    carries it. Taken as it is, it gets one colour of the palette per value, in the order the
+    values first appear in the file, and from the ninth value on the grey "Other". A preset
+    gives the values it lists the colours the file names — a palette name, a hex colour, or a
+    pair of hex colours for the light and the dark scheme — and the other values the next free
+    colours of the palette. A box without a value is not tinted.
+  - _The legend_ sits at the top left of the canvas, below the edge legend. It is headed by
+    the name of what is chosen; under the name of a preset stands "by _label_", and the
+    description of the preset is the tooltip of the title. Then each value with its colour and
+    the number of boxes that have it: the values a preset lists first, in its order, then the
+    others in the order of the file, "Other" (its tooltip names the values behind it, the first
+    twenty) and "No value" with the number of boxes that have none. The numbers count the whole
+    structure, whatever is drawn; a long legend scrolls. The legend of a metric is its scale
+    with the two ends.
+  - _The node panel_ shows the attributes and then every label that holds for the node (saying
+    where an inherited one comes from), the metrics and the links.
 - **Edges on demand** (**Visibility** tab): at every level of detail the edges are hidden
   except at the box under the pointer, at the selected box (or the boxes that list the selected
   work item), the selected edge, and those of the focus. A box is what is drawn of it: a leaf
@@ -957,6 +1000,17 @@ switched on the **Visibility** tab. The legend of **Colour by** sits below it.
   view saved before the option existed is one of the full map and switches it off. A link
   copied with the map closed up needs a viewer that has the option: an older one (0.2.0 or
   before) shows the full map, with the view at the wrong place.
+- **A view and its colouring.** A saved view and a link remember the colouring by name: a
+  preset by its `name`, a label or a metric by its own. When the file that is loaded has
+  nothing of that name — the preset was renamed or removed, its label is on no node any more —
+  the view is applied in every other respect, the boxes are not coloured, and a notice above
+  the canvas says so: "This view is coloured by preset "Risk", which this file does not have:
+  the boxes are not coloured." The notice goes when a colouring is chosen under **Lenses →
+  Colour by**, when another view is applied and when a file is opened or read again; a link in
+  the address bar is applied again with every reload, and says so again. The saved view is not
+  changed: once the file has the preset again, it colours again. A link carries the name of a
+  preset, never its colours, and needs a viewer that has presets and labels to be coloured: an
+  older one (0.2.0 or before) shows the view uncoloured.
 - **Hints** at the end of the Diagnostics panel say what an author could add: nodes without a
   description or without any connection, domains without work items, no flows. They are
   neither errors nor warnings.

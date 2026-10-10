@@ -1385,6 +1385,15 @@ async function run(viewerPath, browserPath) {
         firstStart.nodes === 0,
       firstStart,
     );
+    // Where the template is, as the page without a map says it: on the empty page, and on the
+    // Files tab, which the control panel shows then.
+    const templateAtStart = await evaluate(`({
+      hint: document.querySelector('#empty-state #template-hint')?.textContent ?? null,
+      hintShown: (document.querySelector('#template-hint')?.getClientRects().length ?? 0) > 0,
+      note: document.querySelector('#template-note')?.textContent ?? null,
+      noteShown: (document.querySelector('#template-note')?.getClientRects().length ?? 0) > 0,
+      viewNotes: document.querySelectorAll('#view-note').length,
+    })`);
     await dropFiles(dataFiles);
     await mapShown();
     check(
@@ -4247,6 +4256,683 @@ async function run(viewerPath, browserPath) {
     await chooseOption('#color-by', 'none');
     await until(`window.__smoke.attr('data-color-by') === 'none'`, 'colour by nothing');
     check('colour by nothing tints nothing', (await countOf('.arch-tinted')) === 0);
+
+    // --- Labels and presets: the list, the legend, the boxes, the panel, views and links -------
+    // The example gives `exposure` to four domains and one component (staff, public, partner,
+    // internal; Platform Services and what is in it have none) and has two presets: Exposure, on
+    // that label, and Lifecycle, on the status.
+    /**
+     * The legend of Colour by as the page states it, with what stands under the list of choices.
+     * @typedef {object} ColourLegend
+     * @property {string | null} colorBy
+     * @property {string | null} title
+     * @property {string | null} tooltip the description, on the title
+     * @property {string[]} subtitles
+     * @property {string[]} values the values and "Other", in the order shown
+     * @property {string[]} kinds
+     * @property {number[]} counts
+     * @property {number[]} none the count of "No value", when it is listed
+     * @property {string | null} lastTitle the tooltip of the last entry
+     * @property {string | null} note the description under the list
+     * @property {string | null} describedBy what the list says describes it
+     */
+    const LABELS_VIEW = 'Before the labels';
+    const labelsStart = {
+      tab: await attr('data-panel-tab'),
+      hash: await evaluate(`window.location.hash`),
+      focusMode: await attr('data-focus-mode'),
+      heat: (await attr('data-heat')) === 'true',
+      lodMode: await attr('data-lod-mode'),
+      collapsed: await attr('data-collapsed-count'),
+      colorBy: await attr('data-color-by'),
+    };
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    // The level, the closed groups, the place and the colouring come back with this view.
+    await saveView(LABELS_VIEW);
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${LABELS_VIEW}"]') === 1`,
+      'the view to come back to',
+    );
+    // No link in the address: the one copied below is then the only one.
+    await evaluate(`window.history.replaceState(null, '', window.location.href.split('#')[0])`);
+    /**
+     * Chooses under Colour by. Whether the map then says that it is coloured so: false when it
+     * does not in time.
+     * @param {string} value
+     */
+    const colourBy = async (value) => {
+      await chooseOption('#color-by', value);
+      return eventually(
+        `window.__smoke.attr('data-color-by') === ${JSON.stringify(value)}`,
+        `colour by ${value}`,
+      );
+    };
+    /** @returns {Promise<ColourLegend | null>} */
+    const colourLegend = () =>
+      evaluate(`(() => {
+        const legend = document.querySelector('#color-legend');
+        if (!legend) return null;
+        const title = legend.querySelector('.color-legend-title');
+        const entries = [...legend.querySelectorAll('li[data-legend-value]')];
+        return {
+          colorBy: legend.getAttribute('data-color-by'),
+          title: title?.textContent ?? null,
+          tooltip: title?.getAttribute('title') ?? null,
+          subtitles: [...legend.querySelectorAll('.color-legend-subtitle')].map((e) => e.textContent),
+          values: entries.map((e) => e.dataset.legendValue),
+          kinds: entries.map((e) => e.dataset.legendKind),
+          counts: entries.map((e) => Number(e.dataset.legendCount)),
+          none: [...legend.querySelectorAll('li[data-legend-kind="none"]')].map((e) => Number(e.dataset.legendCount)),
+          lastTitle: entries.at(-1)?.getAttribute('title') ?? null,
+          note: document.querySelector('#color-by-note')?.textContent ?? null,
+          describedBy: document.querySelector('#color-by')?.getAttribute('aria-describedby') ?? null,
+        };
+      })()`);
+    /**
+     * The light colour of every tinted box drawn, by the ID of its node.
+     * @returns {Promise<Record<string, string>>}
+     */
+    const boxTints = () =>
+      evaluate(`Object.fromEntries(
+        [...document.querySelectorAll('.react-flow__node .arch-tinted')]
+          .map((box) => [box.closest('.react-flow__node').dataset.id, getComputedStyle(box).getPropertyValue('--tint-light').trim()])
+          .sort(([a], [b]) => (a < b ? -1 : 1)),
+      )`);
+    /** The background of the chip of a value in the legend. @param {string} value */
+    const chipColour = (value) =>
+      evaluate(`(() => {
+        const chip = document.querySelector(${JSON.stringify(`#color-legend li[data-legend-value="${value}"] .color-legend-chip`)});
+        return chip ? getComputedStyle(chip).backgroundColor : null;
+      })()`);
+    /** The sum of the counts of a legend. @param {readonly number[]} counts */
+    const boxesOf = (counts) => counts.reduce((sum, count) => sum + count, 0);
+    /**
+     * The light colour the preset Exposure gives a node of the example: the colours of the file
+     * for public, partner and staff, and the first free one of the palette for internal.
+     * @param {string} id
+     */
+    const exposureColour = (id) => {
+      if (id === 'storefront.payment') return '#8e44ad';
+      const domain = id.split('.')[0];
+      if (domain === 'storefront') return '#e34948';
+      if (domain === 'backoffice' || domain === 'operations') return '#0d6b5e';
+      return domain === 'data' ? '#2a78d6' : undefined;
+    };
+    /**
+     * Closes or opens a group with a click on its chevron; nothing to do for one that is so
+     * already. A chevron that cannot be clicked where it is — off the canvas, or under a legend —
+     * is brought there: the map is fitted, and the group moved towards the middle of the canvas.
+     * @param {string} id @param {boolean} closed
+     */
+    const setClosed = async (id, closed) => {
+      const box = `.react-flow__node[data-id="${id}"]`;
+      const chevron = JSON.stringify(`${box} .arch-chevron`);
+      const free = async () => (await evaluate(`window.__smoke.clickPoint(${chevron})`)) !== null;
+      await settled();
+      if ((await countOf(`${box} [data-collapsed="${closed}"]`)) === 1) return;
+      if (!(await free())) {
+        await click('#fit-view');
+        await settled();
+      }
+      for (let turn = 0; turn < 3; turn++) {
+        if (await free()) break;
+        const offset = await evaluate(`window.__smoke.centreOffset(${JSON.stringify(box)})`);
+        if (offset === null) break;
+        const plan = await evaluate(`window.__smoke.panPlan(${-offset.dx}, ${-offset.dy})`);
+        if (plan === null) break;
+        await drag(plan.from, plan.to);
+        await settled();
+      }
+      await click(`${box} .arch-chevron`);
+      await until(
+        `window.__smoke.count(${JSON.stringify(`${box} [data-collapsed="${closed}"]`)}) === 1 && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        `${id} ${closed ? 'closed' : 'open'}`,
+      );
+      await settled();
+    };
+    /** Goes to a node by its ID in the search box, which selects it. @param {string} id */
+    const selectById = async (id) => {
+      await openSearch();
+      await client.send('Input.insertText', { text: id });
+      await until(
+        `document.querySelector('#search-results [role="option"]')?.dataset.nodeId === ${JSON.stringify(id)}`,
+        `${id} first among the search results`,
+      );
+      await press('Enter', { keyCode: 13, text: '\r' });
+      await untilSelection(`node:${id}`);
+      await settled();
+    };
+
+    const colourChoices = await evaluate(`(() => {
+      const values = (parent) => [...parent.querySelectorAll('option')].map((option) => option.value);
+      const list = document.querySelector('#color-by');
+      return {
+        groups: [...list.querySelectorAll('optgroup')].map((group) => group.label),
+        grouped: [...list.querySelectorAll('optgroup')].map((group) => values(group).join(' ')),
+        values: values(list),
+        texts: [...list.querySelectorAll('option')].map((option) => option.textContent),
+      };
+    })()`);
+    check(
+      'Colour by groups its choices',
+      same(colourChoices.groups, ['Presets', 'Labels', 'Metrics']) &&
+        same(colourChoices.values, [
+          'none',
+          'preset:Exposure',
+          'preset:Lifecycle',
+          'owner',
+          'status',
+          'tech',
+          'label:exposure',
+          'metric:loc',
+          'metric:churn',
+        ]) &&
+        same(colourChoices.grouped, [
+          'preset:Exposure preset:Lifecycle',
+          'owner status tech label:exposure',
+          'metric:loc metric:churn',
+        ]) &&
+        same(colourChoices.texts.slice(0, 7), [
+          'Nothing',
+          'Exposure',
+          'Lifecycle',
+          'Owner',
+          'Status',
+          'Tech',
+          'exposure',
+        ]),
+      colourChoices,
+    );
+
+    // At a level that draws every box, with every group open: the canvas keeps every node in
+    // the page, in view or not.
+    await pinLod('subcomponents');
+    if ((await attr('data-collapsed-count')) !== '0') {
+      await click('#expand-all');
+      await until(`window.__smoke.attr('data-collapsed-count') === '0'`, 'everything expanded');
+    }
+    await until(`window.__smoke.nodeIds().length === 45`, 'every box of the example');
+    const exposureChosen = await colourBy('preset:Exposure');
+    const exposure = await colourLegend();
+    check(
+      'a preset colours by its label, in its order, with its counts',
+      exposureChosen &&
+        exposure !== null &&
+        exposure.colorBy === 'preset:Exposure' &&
+        exposure.title === 'Exposure' &&
+        exposure.tooltip === 'Who can reach each part of the shop' &&
+        same(exposure.subtitles, ['by exposure']) &&
+        exposure.note === 'Who can reach each part of the shop' &&
+        exposure.describedBy === 'color-by-note' &&
+        // The file writes staff first: a legend in the order of the file fails here.
+        same(exposure.values, ['public', 'partner', 'staff', 'internal']) &&
+        same(exposure.kinds, ['value', 'value', 'value', 'value']) &&
+        same(exposure.counts, [13, 1, 18, 9]) &&
+        same(exposure.none, [4]),
+      exposure,
+    );
+    const exposureTints = await boxTints();
+    const partnerChip = await chipColour('partner');
+    const tintsOff = Object.entries(exposureTints)
+      .filter(([id, tint]) => tint !== exposureColour(id))
+      .map(([id, tint]) => `${id} ${tint}`);
+    check(
+      'a colour of the file reaches the box',
+      exposureTints['storefront.payment'] === '#8e44ad' &&
+        exposureTints['storefront.gateway'] === '#e34948' &&
+        (await countOf('.react-flow__node[data-id="platform"]')) === 1 &&
+        (await countOf('.react-flow__node[data-id="platform"] .arch-tinted')) === 0 &&
+        tintsOff.length === 0 &&
+        partnerChip === 'rgb(142, 68, 173)',
+      { payment: exposureTints['storefront.payment'], tintsOff, partnerChip },
+    );
+    const tintedBoxes = await countOf('.arch-tinted');
+    const drawnForCounts = {
+      lodMode: await attr('data-lod-mode'),
+      collapsed: await attr('data-collapsed-count'),
+      nodes: await attr('data-drawn-nodes'),
+      bands: await countOf('.react-flow__node-band .arch-tinted'),
+    };
+    check(
+      'the counts are the boxes',
+      exposure !== null &&
+        ['subcomponents', 'detail'].includes(drawnForCounts.lodMode) &&
+        drawnForCounts.collapsed === '0' &&
+        drawnForCounts.nodes === '45' &&
+        drawnForCounts.bands === 0 &&
+        tintedBoxes === 41 &&
+        tintedBoxes === boxesOf(exposure.counts) &&
+        tintedBoxes === 45 - boxesOf(exposure.none),
+      { tintedBoxes, ...drawnForCounts, counts: exposure?.counts, none: exposure?.none },
+    );
+
+    // The colour of each scheme, where the file gives two: the scheme is set, light and then
+    // dark, since a headless browser may take the one of the machine it runs on.
+    const darkAtStart = await evaluate(`window.matchMedia('(prefers-color-scheme: dark)').matches`);
+    /** @param {'light' | 'dark' | null} scheme null: the scheme of the browser again */
+    const emulateScheme = async (scheme) => {
+      await client.send('Emulation.setEmulatedMedia', {
+        features: scheme === null ? [] : [{ name: 'prefers-color-scheme', value: scheme }],
+      });
+      await until(
+        `window.matchMedia('(prefers-color-scheme: dark)').matches === ${scheme === null ? darkAtStart : scheme === 'dark'}`,
+        scheme === null ? 'the scheme of the browser' : `the ${scheme} scheme`,
+      );
+    };
+    // The chip of "staff", the stripe of a box that has the value, and the colour of the names:
+    // the kinds of box (group or leaf, its level, closed or not) that have tinted and untinted
+    // boxes, and those of them whose names differ in colour.
+    const schemeColours = () =>
+      evaluate(`(() => {
+        const chip = document.querySelector('#color-legend li[data-legend-value="staff"] .color-legend-chip');
+        const box = document.querySelector('.react-flow__node[data-id="backoffice"] .arch-tinted');
+        const kinds = new Map();
+        for (const node of document.querySelectorAll('.react-flow__node .arch-node')) {
+          const name = node.querySelector('.arch-node-name');
+          if (!name) continue;
+          const kind = [...node.classList].filter((c) => c !== 'arch-tinted').sort().join(' ');
+          const seen = kinds.get(kind) ?? { tinted: new Set(), plain: new Set() };
+          (node.classList.contains('arch-tinted') ? seen.tinted : seen.plain).add(getComputedStyle(name).color);
+          kinds.set(kind, seen);
+        }
+        const both = [...kinds].filter(([, seen]) => seen.tinted.size > 0 && seen.plain.size > 0);
+        return {
+          chip: chip ? getComputedStyle(chip).backgroundColor : null,
+          stripe: box ? getComputedStyle(box, '::before').backgroundColor : null,
+          namesCompared: both.length,
+          namesOff: both
+            .filter(([, seen]) => seen.tinted.size !== 1 || seen.plain.size !== 1 || [...seen.tinted][0] !== [...seen.plain][0])
+            .map(([kind]) => kind),
+        };
+      })()`);
+    await emulateScheme('light');
+    const inLight = await schemeColours();
+    await emulateScheme('dark');
+    const inDark = await schemeColours();
+    await emulateScheme(null);
+    check(
+      'the dark scheme has the dark colour, in the legend as on the box',
+      inLight.chip === 'rgb(13, 107, 94)' &&
+        inLight.stripe === inLight.chip &&
+        inDark.chip === 'rgb(95, 209, 191)' &&
+        inDark.stripe === inDark.chip &&
+        inLight.namesCompared > 0 &&
+        inLight.namesOff.length === 0 &&
+        inDark.namesCompared > 0 &&
+        inDark.namesOff.length === 0,
+      { inLight, inDark },
+    );
+
+    // Heat by work and a focus draw over the colour and pale it; they do not take it away.
+    await setSetting('heat', true);
+    const heatOnTint = await eventually(
+      `window.__smoke.count('.arch-tinted .arch-heat') > 0`,
+      'heat strips on a tinted box',
+    );
+    const tintsWithHeat = await boxTints();
+    if ((await attr('data-focus-mode')) !== 'focus') {
+      await click('#focus-mode');
+      await until(`window.__smoke.attr('data-focus-mode') === 'focus'`, 'Focus mode');
+    }
+    await chooseOption('#focus-select', 'flow:telemetry-to-dashboards');
+    await until(
+      `window.__smoke.attr('data-focus') === 'flow:telemetry-to-dashboards'`,
+      'the focus on the flow',
+    );
+    await untilSelection('flow:telemetry-to-dashboards');
+    await settled();
+    const fadedTints = await evaluate(
+      `[...document.querySelectorAll('.react-flow__node.arch-faded .arch-tinted')].map((box) => [box.closest('.react-flow__node').dataset.id, getComputedStyle(box).getPropertyValue('--tint-light').trim()])`,
+    );
+    const tintsWithFocus = await boxTints();
+    check(
+      'Focus and heat leave the colour where it is',
+      Object.keys(exposureTints).length === 41 &&
+        heatOnTint &&
+        same(tintsWithHeat, exposureTints) &&
+        fadedTints.length > 0 &&
+        fadedTints.every(
+          (/** @type {[string, string]} */ [id, tint]) => tint === exposureColour(id),
+        ) &&
+        same(tintsWithFocus, exposureTints),
+      {
+        heatOnTint,
+        heated: Object.keys(tintsWithHeat).length,
+        focused: Object.keys(tintsWithFocus).length,
+        faded: fadedTints.slice(0, 6),
+      },
+    );
+    await click('#focus-clear');
+    await until(`window.__smoke.attr('data-focus') === null`, 'the focus cleared');
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    await setSetting('heat', labelsStart.heat);
+    await until(
+      `(window.__smoke.count('.arch-heat') > 0) === ${labelsStart.heat}`,
+      'the heat as it was',
+    );
+    if ((await attr('data-focus-mode')) !== labelsStart.focusMode) {
+      await click('#focus-mode');
+      await until(
+        `window.__smoke.attr('data-focus-mode') === '${labelsStart.focusMode}'`,
+        'the Focus / Filter switch as it was',
+      );
+    }
+
+    // The label itself: the colours of the palette, in the order the values come in the file.
+    const labelChosen = await colourBy('label:exposure');
+    const byLabel = await colourLegend();
+    const paymentByLabel = (await boxTints())['storefront.payment'];
+    check(
+      'a label colours with the palette, in the order of the file',
+      labelChosen &&
+        byLabel !== null &&
+        byLabel.colorBy === 'label:exposure' &&
+        byLabel.title === 'exposure' &&
+        byLabel.tooltip === null &&
+        byLabel.subtitles.length === 0 &&
+        byLabel.note === null &&
+        byLabel.describedBy === null &&
+        same(byLabel.values, ['staff', 'public', 'partner', 'internal']) &&
+        same(byLabel.counts, [18, 13, 1, 9]) &&
+        same(byLabel.none, [4]) &&
+        paymentByLabel === '#1baf7a',
+      { byLabel, paymentByLabel },
+    );
+    const ownerChosen = await colourBy('owner');
+    const byOwner = await colourLegend();
+    const techChosen = await colourBy('tech');
+    const byTech = await colourLegend();
+    check(
+      'the legend of an attribute counts too',
+      ownerChosen &&
+        byOwner !== null &&
+        same(byOwner.values, ['Tooling team', 'Shop IT', 'Web team', 'Data team']) &&
+        same(byOwner.counts, [9, 13, 14, 9]) &&
+        byOwner.none.length === 0 &&
+        techChosen &&
+        byTech !== null &&
+        byTech.values.length === 7 &&
+        boxesOf(byTech.counts) === 36 &&
+        same(byTech.none, [9]),
+      { byOwner, byTech },
+    );
+
+    // The detail panel of a node: its labels after Owner / Status / Tech and before the metrics,
+    // with the node a value comes from when that is another.
+    const labelFields = () =>
+      evaluate(`(() => {
+        const before = (a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        const panel = document.querySelector('#detail-panel');
+        return [...panel.querySelectorAll('[data-label]')].map((value) => ({
+          label: value.dataset.label,
+          name: value.parentElement.previousElementSibling?.textContent ?? null,
+          value: value.textContent,
+          field: value.parentElement.textContent,
+          placed:
+            [...panel.querySelectorAll('[data-attribute]')].every((other) => before(other, value)) &&
+            [...panel.querySelectorAll('[data-metric]')].every((other) => before(value, other)),
+        }));
+      })()`);
+    await selectById('storefront.gateway.api');
+    const labelsInherited = await labelFields();
+    await selectById('storefront.payment');
+    const labelsOwn = await labelFields();
+    await selectById('platform.logging');
+    const labelsNone = {
+      fields: await labelFields(),
+      owner: await text('#detail-panel [data-attribute="owner"]'),
+    };
+    check(
+      'the detail panel lists the labels that hold',
+      labelsInherited.length === 1 &&
+        labelsInherited[0].label === 'exposure' &&
+        labelsInherited[0].name === 'exposure' &&
+        labelsInherited[0].value === 'public' &&
+        labelsInherited[0].field.includes('(from Storefront)') &&
+        labelsInherited[0].placed &&
+        labelsOwn.length === 1 &&
+        labelsOwn[0].value === 'partner' &&
+        !labelsOwn[0].field.includes('(from') &&
+        // A node no label holds for: its other fields are there, and no label.
+        labelsNone.owner === 'Shop IT' &&
+        labelsNone.fields.length === 0,
+      { labelsInherited, labelsOwn, labelsNone },
+    );
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+
+    // The summary of a closed group is written in the muted colour; on a tint it is darker.
+    const exposureAgain = await colourBy('preset:Exposure');
+    await setClosed('storefront', true);
+    await setClosed('platform', true);
+    const summaryColours = () =>
+      evaluate(`['storefront', 'platform'].map((id) => {
+        const body = document.querySelector('.react-flow__node[data-id="' + id + '"] .arch-collapsed-body');
+        return body ? getComputedStyle(body).color : null;
+      })`);
+    const summariesTinted = await summaryColours();
+    await colourBy('none');
+    await until(`window.__smoke.count('.arch-tinted') === 0`, 'nothing tinted');
+    const summariesPlain = await summaryColours();
+    check(
+      'the summary of a tinted closed group is not in the muted colour',
+      exposureAgain &&
+        summariesTinted[0] !== null &&
+        summariesTinted[1] !== null &&
+        summariesTinted[0] !== summariesTinted[1] &&
+        summariesPlain[0] !== null &&
+        summariesPlain[0] === summariesPlain[1] &&
+        summariesPlain[1] === summariesTinted[1],
+      { summariesTinted, summariesPlain },
+    );
+
+    // A saved view and a link carry the name of the preset. Each is applied where nothing is
+    // coloured and no group is closed, so that what the map shows then comes from it: the view
+    // is saved with Platform Services closed.
+    await setClosed('storefront', false);
+    const lifecycleChosen = await colourBy('preset:Lifecycle');
+    await saveView('Lifecycle');
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="Lifecycle"]') === 1`,
+      'the view with the preset saved',
+    );
+    const lifecycleShown = `window.__smoke.attr('data-color-by') === 'preset:Lifecycle' && window.__smoke.attr('data-collapsed-count') === '1' && window.__smoke.count('.react-flow__node[data-id="platform"] [data-collapsed="true"]') === 1 && window.__smoke.attr('data-lines-laid-out') === 'true'`;
+    /** Holds in the page once no closed Platform Services is kept in the browser. */
+    const platformNotKept = `Object.keys(localStorage).every((key) => !key.startsWith('architecture-map.collapsed:') || !(localStorage.getItem(key) ?? '').includes('"platform"'))`;
+    const colourKept = () =>
+      evaluate(
+        `JSON.parse(localStorage.getItem('architecture-map.settings') ?? '{}').colorBy ?? null`,
+      );
+    await colourBy('none');
+    await setClosed('platform', false);
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="Lifecycle"] .views-apply').click()`,
+    );
+    const viewApplied = await eventually(
+      lifecycleShown,
+      'the preset and the closed group of the view',
+    );
+    await settled();
+    const legendOfView = await colourLegend();
+    await evaluate(`document.querySelector('#copy-view-link').click()`);
+    await until(`window.location.hash.startsWith('#view=')`, 'the link in the address bar');
+    /** @type {string} */
+    const lifecycleHash = await evaluate(`window.location.hash`);
+    const lifecycleLink = JSON.parse(
+      Buffer.from(lifecycleHash.slice('#view='.length), 'base64url').toString('utf8'),
+    );
+    /**
+     * Reloads the page with the fragment in its address and gives it its files again, as
+     * `reloadWith` does, and returns what the page shows before it has them: the notice of a
+     * view (none: there is no map to say it of) and where the template is.
+     * @param {string} hash
+     */
+    const reloadSeeingStart = async (hash) => {
+      await evaluate(
+        `window.history.replaceState(null, '', window.location.href.split('#')[0] + ${JSON.stringify(hash)})`,
+      );
+      await client.send('Page.reload');
+      await startPage();
+      const seen = await evaluate(`({
+        viewNotes: document.querySelectorAll('#view-note').length,
+        hint: document.querySelector('#empty-state #template-hint')?.textContent ?? null,
+      })`);
+      await dropFiles(dataFiles);
+      await until(
+        `document.readyState === 'complete' && document.querySelectorAll('.react-flow__node').length > 0`,
+        'the map after the reload',
+      );
+      await evaluate(PAGE_HELPERS);
+      await until(`window.__smoke.attr('data-lines-laid-out') === 'true'`, 'the reloaded layout');
+      return seen;
+    };
+    await colourBy('none');
+    await setClosed('platform', false);
+    await until(
+      `${platformNotKept} && JSON.parse(localStorage.getItem('architecture-map.settings') ?? '{}').colorBy === 'none'`,
+      'nothing coloured and nothing closed kept in the browser',
+    );
+    const startOfLink = await reloadSeeingStart(lifecycleHash);
+    const linkApplied = await eventually(
+      lifecycleShown,
+      'the preset and the closed group of the link',
+    );
+    await settled();
+    const legendOfLink = await colourLegend();
+    const notesOnMap = await countOf('#view-note');
+    check(
+      'a saved view and a link keep the preset',
+      lifecycleChosen &&
+        viewApplied &&
+        legendOfView !== null &&
+        legendOfView.colorBy === 'preset:Lifecycle' &&
+        same(legendOfView.values, ['planned', 'live', 'deprecated']) &&
+        lifecycleLink.colorBy === 'preset:Lifecycle' &&
+        linkApplied &&
+        legendOfLink !== null &&
+        legendOfLink.title === 'Lifecycle' &&
+        same(legendOfLink.values, ['planned', 'live', 'deprecated']),
+      { viewApplied, legendOfView, linked: lifecycleLink.colorBy, linkApplied, legendOfLink },
+    );
+
+    // The same link with a preset the file does not have: the rest of the view is applied, the
+    // boxes are not coloured, and a notice above the map says why. It is opened where the
+    // preset of the link before is still the colouring, and no group is closed.
+    await setClosed('platform', false);
+    await until(platformNotKept, 'no closed group kept in the browser');
+    const keptBeforeNope = await colourKept();
+    const startOfNope = await reloadSeeingStart(
+      linkOf({ ...lifecycleLink, colorBy: 'preset:Nope' }),
+    );
+    await until(
+      `window.__smoke.attr('data-collapsed-count') === '1' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the closed group of the link without its preset',
+    );
+    const noteComes = await eventually(
+      `window.__smoke.count('#view-note') === 1 && window.__smoke.attr('data-color-by') === 'none'`,
+      'the notice of the view',
+    );
+    await settled();
+    const nope = await evaluate(`({
+      note: window.__smoke.text('#view-note'),
+      status: window.__smoke.count('p#view-note.notice[role="status"]'),
+      colorBy: window.__smoke.attr('data-color-by'),
+      chosen: document.querySelector('#color-by')?.value ?? null,
+      tinted: window.__smoke.count('.arch-tinted'),
+      legends: window.__smoke.count('#color-legend'),
+      closed: window.__smoke.count('.react-flow__node[data-id="platform"] [data-collapsed="true"]'),
+      lodMode: window.__smoke.attr('data-lod-mode'),
+      kept: JSON.parse(localStorage.getItem('architecture-map.settings') ?? '{}').colorBy ?? null,
+    })`);
+    const ownerAfterNote = await colourBy('owner');
+    const notesColoured = await countOf('#view-note');
+    await colourBy('none');
+    await evaluate(`window.__smoke.frames()`);
+    const notesAfterwards = await countOf('#view-note');
+    check(
+      'a view whose colouring the file does not have says so',
+      templateAtStart.viewNotes === 0 &&
+        startOfLink.viewNotes === 0 &&
+        notesOnMap === 0 &&
+        startOfNope.viewNotes === 0 &&
+        keptBeforeNope === 'preset:Lifecycle' &&
+        noteComes &&
+        nope.note ===
+          'This view is coloured by preset "Nope", which this file does not have: the boxes are not coloured.' &&
+        nope.status === 1 &&
+        nope.colorBy === 'none' &&
+        nope.chosen === 'none' &&
+        nope.tinted === 0 &&
+        nope.legends === 0 &&
+        nope.closed === 1 &&
+        nope.lodMode === lifecycleLink.lodMode &&
+        nope.kept === 'none' &&
+        ownerAfterNote &&
+        notesColoured === 0 &&
+        notesAfterwards === 0,
+      {
+        atStart: [templateAtStart.viewNotes, startOfLink.viewNotes, startOfNope.viewNotes],
+        notesOnMap,
+        keptBeforeNope,
+        nope,
+        notesColoured,
+        notesAfterwards,
+      },
+    );
+
+    // Where the template is: the same sentence on the empty page and on the Files tab, there
+    // with and without a map.
+    const templateWithMap = {
+      note: await text('#template-note'),
+      hints: await countOf('#template-hint'),
+    };
+    check(
+      'the viewer says where the template is',
+      typeof templateAtStart.hint === 'string' &&
+        templateAtStart.hint.includes('template/architecture.yaml') &&
+        templateAtStart.hint.includes('template/workitems.json') &&
+        templateAtStart.hintShown &&
+        templateAtStart.note === templateAtStart.hint &&
+        templateAtStart.noteShown &&
+        startOfLink.hint === templateAtStart.hint &&
+        templateWithMap.note === templateAtStart.hint &&
+        templateWithMap.hints === 0,
+      { templateAtStart, again: startOfLink.hint, templateWithMap },
+    );
+
+    // Back to the map as it was: no link in the address, no view of these checks, the level, the
+    // groups, the place and the colouring of the view saved at the start, and the tab.
+    await evaluate(
+      `window.history.replaceState(null, '', window.location.href.split('#')[0] + ${JSON.stringify(labelsStart.hash)})`,
+    );
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="Lifecycle"] .views-delete').click()`,
+    );
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${LABELS_VIEW}"] .views-apply').click()`,
+    );
+    await until(
+      `window.__smoke.attr('data-lod-mode') === ${JSON.stringify(labelsStart.lodMode)} && window.__smoke.attr('data-collapsed-count') === ${JSON.stringify(labelsStart.collapsed)} && window.__smoke.attr('data-color-by') === ${JSON.stringify(labelsStart.colorBy)} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the map as it was before the labels',
+    );
+    await settled();
+    await evaluate(
+      `document.querySelector('#views-list li[data-view-name="${LABELS_VIEW}"] .views-delete').click()`,
+    );
+    await until(
+      `window.__smoke.count('#views-list li[data-view-name="${LABELS_VIEW}"], #views-list li[data-view-name="Lifecycle"]') === 0`,
+      'the views of the labels deleted',
+    );
+    if ((await attr('data-panel-tab')) !== labelsStart.tab) {
+      await click(`#tab-${labelsStart.tab}`);
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${labelsStart.tab}'`,
+        'the tab shown before the labels',
+      );
+    }
+
     // Edges on demand, at every level of detail.
     await setSetting('edges-on-demand', true);
     await until(`window.__smoke.attr('data-edges-held-back') === 'true'`, 'edges on demand');
@@ -7905,6 +8591,331 @@ async function run(viewerPath, browserPath) {
         (await selection()) === 'flow:all',
       { offBeforePart, partNodes, shownOnceBack, view: await viewNow() },
     );
+
+    // --- Labels and presets in other files: a long legend, a slip in a colour, the template ----
+    // The files are dropped on the page; the example and its work items are dropped again at
+    // the end.
+    await press('Escape', { keyCode: 27 });
+    await untilSelection(null);
+    const filesStart = {
+      tab: await attr('data-panel-tab'),
+      panelCollapsed: await attr('data-panel-collapsed'),
+    };
+    scratch ??= await mkdtemp(path.join(os.tmpdir(), 'arch-map-smoke-data-'));
+    /**
+     * Whether the map of a structure file comes to be drawn: its name at the head of the page,
+     * its number of nodes on the Files tab. False when it does not in time.
+     * @param {string} name @param {number} nodes
+     */
+    const mapComes = async (name, nodes) => {
+      const drawn = await eventually(
+        `window.__smoke.text('#source-name') === ${JSON.stringify(name)} && document.querySelector('#model-summary')?.dataset.nodes === '${nodes}' && window.__smoke.count('.react-flow__node') > 0 && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+        `the map of ${name}`,
+      );
+      if (drawn) await settled();
+      return drawn;
+    };
+    /**
+     * What is wrong with the place of the colour legend in a window of 1024 × 768 (nothing
+     * should be), with the body of the control panel open — it lies over the left of the canvas
+     * there, and the legends begin beside it — and collapsed. The window and the body are put
+     * back.
+     * @param {string} map
+     */
+    const legendRoom = async (map) => {
+      const before = {
+        panelCollapsed: await attr('data-panel-collapsed'),
+        window: await evaluate(`({ width: window.innerWidth, height: window.innerHeight })`),
+      };
+      await client.send('Emulation.setDeviceMetricsOverride', {
+        width: 1024,
+        height: 768,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await until(`window.innerWidth === 1024 && window.innerHeight === 768`, 'the small window');
+      /** @type {string[]} */
+      const problems = [];
+      for (const collapsed of [false, true]) {
+        if ((await attr('data-panel-collapsed')) !== String(collapsed)) {
+          await togglePanel(collapsed);
+        }
+        await settled();
+        await evaluate(`window.__smoke.frames()`);
+        const room = await evaluate(`(() => {
+          const box = (selector) => {
+            const el = document.querySelector(selector);
+            if (!el || el.getClientRects().length === 0) return null;
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+          };
+          return {
+            legend: box('#color-legend'),
+            row: box('.map-row'),
+            controls: box('.react-flow__controls'),
+            minimap: box('.arch-minimap'),
+            body: box('#control-panel-body'),
+            page: document.documentElement.scrollWidth,
+            window: window.innerWidth,
+          };
+        })()`);
+        const where = `${map}, the panel ${collapsed ? 'collapsed' : 'open'}`;
+        const { legend, row, controls, minimap, body } = room;
+        if (!legend || !row || !controls || !minimap || (!collapsed && !body)) {
+          problems.push(`${where}: not on the page — ${JSON.stringify(room)}`);
+          continue;
+        }
+        if (
+          legend.left < row.left - 0.5 ||
+          legend.right > row.right + 0.5 ||
+          legend.top < row.top - 0.5 ||
+          legend.bottom > row.bottom + 0.5
+        ) {
+          problems.push(`${where}: the legend leaves the map — ${JSON.stringify({ legend, row })}`);
+        }
+        if (legend.bottom > controls.top) {
+          problems.push(
+            `${where}: the legend ends at ${Math.round(legend.bottom)}, below the top of the zoom buttons at ${Math.round(controls.top)}`,
+          );
+        }
+        if (
+          legend.left < minimap.right &&
+          legend.right > minimap.left &&
+          legend.top < minimap.bottom &&
+          legend.bottom > minimap.top
+        ) {
+          problems.push(`${where}: the legend lies over the minimap`);
+        }
+        if (!collapsed && legend.left < body.right - 0.5) {
+          problems.push(
+            `${where}: the legend begins at ${Math.round(legend.left)}, under the body of the control panel, which ends at ${Math.round(body.right)}`,
+          );
+        }
+        if (room.page > room.window) {
+          problems.push(`${where}: the page is ${room.page} wide in a window of ${room.window}`);
+        }
+      }
+      await client.send('Emulation.clearDeviceMetricsOverride');
+      await until(
+        `window.innerWidth === ${before.window.width} && window.innerHeight === ${before.window.height}`,
+        'the window as it was',
+      );
+      if ((await attr('data-panel-collapsed')) !== before.panelCollapsed) {
+        await togglePanel(before.panelCollapsed === 'true');
+      }
+      await settled();
+      return problems;
+    };
+
+    // Thirty boxes with thirty values of one label, and a preset that gives each a colour, in
+    // the opposite order: the legend of the preset has them all and scrolls; the legend of the
+    // label has the eight of the palette, and "Other" for the rest.
+    const batches = Array.from(
+      { length: 30 },
+      (_, index) => `v${String(index + 1).padStart(2, '0')}`,
+    );
+    const manyFile = path.join(scratch, 'many.yaml');
+    await writeFile(
+      manyFile,
+      [
+        'version: 1',
+        'domains:',
+        ...[0, 1, 2, 3, 4].flatMap((domain) => [
+          `  - id: d${domain + 1}`,
+          `    name: Domain ${domain + 1}`,
+          `    labels: { batch: ${batches[domain * 6]} }`,
+          '    components:',
+          ...[1, 2, 3, 4, 5].map(
+            (part) =>
+              `      - { id: d${domain + 1}.c${part}, name: Part ${domain + 1}.${part}, labels: { batch: ${batches[domain * 6 + part]} } }`,
+          ),
+        ]),
+        'presets:',
+        '  - name: Batches',
+        '    label: batch',
+        '    values:',
+        ...batches
+          .map((value, index) => `      ${value}: '#${(0x203040 + index * 0x070503).toString(16)}'`)
+          .reverse(),
+        '',
+      ].join('\n'),
+    );
+    await dropFiles([manyFile]);
+    const manyDrawn = await mapComes('many.yaml', 30);
+    const batchesChosen = await colourBy('preset:Batches');
+    const longLegend = await colourLegend();
+    const longSize = await evaluate(`(() => {
+      const legend = document.querySelector('#color-legend');
+      const list = legend?.querySelector('.color-legend-list');
+      return list ? { scroll: list.scrollHeight, client: list.clientHeight, height: legend.getBoundingClientRect().height } : null;
+    })()`);
+    const roomProblems = await legendRoom('thirty values');
+    const batchChosen = await colourBy('label:batch');
+    const foldedLegend = await colourLegend();
+    check(
+      'a long legend scrolls, and "Other" names what it stands for',
+      manyDrawn &&
+        batchesChosen &&
+        longLegend !== null &&
+        same(longLegend.values, [...batches].reverse()) &&
+        longLegend.none.length === 0 &&
+        longSize !== null &&
+        longSize.scroll > longSize.client &&
+        longSize.height <= 300 &&
+        batchChosen &&
+        foldedLegend !== null &&
+        same(foldedLegend.values, [...batches.slice(0, 8), 'Other']) &&
+        same(foldedLegend.kinds, [...batches.slice(0, 8).map(() => 'value'), 'other']) &&
+        foldedLegend.counts.at(-1) === 22 &&
+        boxesOf(foldedLegend.counts) === 30 &&
+        foldedLegend.none.length === 0 &&
+        // Twenty of the twenty-two values behind "Other" are named.
+        foldedLegend.lastTitle === `${batches.slice(8, 28).join(', ')} … and 2 more`,
+      { manyDrawn, long: longLegend?.values.length, longSize, foldedLegend },
+    );
+
+    // A colour that is none and a hex colour without its quotes: two warnings, and the map.
+    const slipFile = path.join(scratch, 'slip.yaml');
+    await writeFile(
+      slipFile,
+      [
+        'version: 1',
+        'domains:',
+        '  - { id: one, name: One, status: live }',
+        '  - { id: two, name: Two, status: old }',
+        'presets:',
+        '  - name: Life',
+        '    label: status',
+        '    values:',
+        '      live: gren',
+        '      old: #1baf7a',
+        '',
+      ].join('\n'),
+    );
+    await dropFiles([slipFile]);
+    const slipDrawn = await mapComes('slip.yaml', 2);
+    const slip = await diagnosticsState();
+    const slipChosen = await colourBy('preset:Life');
+    const slipLegend = await colourLegend();
+    const slipWarnings = [
+      `Unknown colour "gren" for value "live" of preset "Life"; did you mean "green"? Use blue, orange, teal, yellow, pink, green, purple, red, grey, or a hex colour in quotes such as '#1baf7a'. The next free colour is used`,
+      `Value "old" of preset "Life" has no colour: YAML reads the unquoted #1baf7a as a comment; write '#1baf7a' in quotes. The next free colour is used`,
+    ];
+    check(
+      'a mistake in a colour does not stop the map',
+      slipDrawn &&
+        (await countOf('.react-flow__node[data-id="one"]')) === 1 &&
+        slip !== null &&
+        slipWarnings.every(
+          (warning) =>
+            slip.messages.filter((/** @type {string} */ message) => message === warning).length ===
+            1,
+        ) &&
+        slipChosen &&
+        slipLegend !== null &&
+        same(slipLegend.values, ['live', 'old']),
+      { slipDrawn, slip, slipLegend },
+    );
+
+    // The template: the build puts its two files beside the viewer as they are in the
+    // repository, and they open without a complaint.
+    const templateNames = ['architecture.yaml', 'workitems.json'];
+    const templateFiles = templateNames.map((name) =>
+      path.join(path.dirname(viewerPath), 'template', name),
+    );
+    const templateSame = await Promise.all(
+      templateNames.map(async (name, index) => {
+        const built = await readFile(templateFiles[index] ?? name).catch(() => undefined);
+        const source = await readFile(
+          new URL(`../examples/template/${name}`, import.meta.url),
+        ).catch(() => undefined);
+        return built !== undefined && source !== undefined && built.equals(source);
+      }),
+    );
+    check('the build delivers the template', same(templateSame, [true, true]), templateSame);
+    // The wait is for the nodes of the template: its structure file has the name of the example.
+    const templateThere = templateFiles.every((file) => existsSync(file));
+    if (templateThere) await dropFiles(templateFiles);
+    const templateDrawn =
+      templateThere &&
+      (await mapComes('architecture.yaml', 9)) &&
+      (await eventually(
+        `document.querySelector('#workitems-summary')?.dataset.items === '5'`,
+        'the work items of the template',
+      ));
+    const template = await evaluate(`(() => {
+      const data = (selector) => ({ ...document.querySelector(selector)?.dataset });
+      return {
+        source: window.__smoke.text('#source-name'),
+        structure: data('#model-summary'),
+        items: data('#workitems-summary').items ?? null,
+        diagnostics: data('#diagnostics'),
+        offered: [...document.querySelectorAll('#color-by option')].map((option) => option.value),
+      };
+    })()`);
+    const zonesChosen = templateDrawn && (await colourBy('preset:Zones'));
+    const zones = await colourLegend();
+    check(
+      'the template opens clean',
+      templateDrawn &&
+        template.source === 'architecture.yaml' &&
+        template.structure.nodes === '9' &&
+        template.structure.edges === '4' &&
+        template.structure.rows === '2' &&
+        template.items === '5' &&
+        template.diagnostics.errors === '0' &&
+        template.diagnostics.warnings === '0' &&
+        template.diagnostics.hints === '1' &&
+        template.offered.includes('preset:Zones') &&
+        zonesChosen &&
+        zones !== null &&
+        zones.title === 'Zones' &&
+        same(zones.values, ['public', 'payment', 'internal']),
+      { templateThere, template, zones },
+    );
+
+    // The example again, and the room of its legend under the preset with a subtitle.
+    await dropFiles(dataFiles);
+    if (!(await mapComes('architecture.yaml', 45))) {
+      throw new Error('the example did not come back');
+    }
+    const exposureInSmall = await colourBy('preset:Exposure');
+    roomProblems.push(...(await legendRoom('the example')));
+    check(
+      'the legend has room in a small window',
+      manyDrawn && batchesChosen && exposureInSmall && roomProblems.length === 0,
+      roomProblems,
+    );
+    await colourBy('none');
+    // The maps of these checks are forgotten. The template has the file names of the example:
+    // its entry is the one whose hint begins with its first domain.
+    for (const [recent, domain] of [
+      ['many.yaml', 'Domain 1'],
+      ['slip.yaml', 'One'],
+      ['architecture.yaml + workitems.json', 'Web Shop'],
+    ]) {
+      /** @type {number} */
+      const place = await evaluate(
+        `[...document.querySelectorAll('#recent-list li')].findIndex((li) => li.dataset.recent === ${JSON.stringify(recent)} && (li.querySelector('.recent-hint')?.textContent ?? '').startsWith(${JSON.stringify(domain)})) + 1`,
+      );
+      if (place === 0) continue;
+      const entries = await countOf('#recent-list li');
+      await click(`#recent-list li:nth-child(${place}) .recent-forget`);
+      await until(
+        `window.__smoke.count('#recent-list li') === ${entries - 1}`,
+        `the map ${recent} forgotten`,
+      );
+    }
+    if ((await attr('data-panel-tab')) !== filesStart.tab) {
+      await click(`#tab-${filesStart.tab}`);
+      await until(
+        `window.__smoke.attr('data-panel-tab') === '${filesStart.tab}'`,
+        'the tab shown before the files',
+      );
+    }
+    if ((await attr('data-panel-collapsed')) !== filesStart.panelCollapsed) {
+      await togglePanel(filesStart.panelCollapsed === 'true');
+    }
 
     // --- Offline: nothing left the folder, and the policy would not have let it ---------------
     const policy = await evaluate(

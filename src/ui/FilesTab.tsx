@@ -4,6 +4,7 @@
 import {
   NODE_LEVEL_NAMES,
   plural,
+  TEMPLATE_NOTE,
   type ArchitectureModel,
   type RecentMap,
   type TagCoverage,
@@ -78,6 +79,9 @@ export function FilesTab({
           Open YAML…
         </button>
       </div>
+      <small className="settings-note" id="template-note">
+        {TEMPLATE_NOTE}
+      </small>
       <h3 className="cp-section-title">Work items</h3>
       {workItems && (
         <span

@@ -2202,6 +2202,13 @@ input:focus-visible {
   --tint: var(--tint-light);
 }
 
+/* The chips and the ramp of the legend. Before the dark block: of equal weight, the later wins. */
+.color-legend-chip,
+.color-legend-gradient {
+  --tint: var(--tint-light);
+  --tint-end: var(--tint-light-end);
+}
+
 @media (prefers-color-scheme: dark) {
   .arch-tinted,
   .color-legend-chip,
@@ -2239,6 +2246,11 @@ input:focus-visible {
   background:
     repeating-linear-gradient(135deg, var(--collapsed-hatch) 0 2px, transparent 2px 12px),
     color-mix(in srgb, var(--tint) 14%, var(--collapsed-bg));
+}
+
+/* The summary of a closed group stays readable on the tint: half-way from muted to the text. */
+.arch-group.arch-collapsed.arch-tinted .arch-collapsed-body {
+  color: color-mix(in srgb, var(--fg) 50%, var(--muted));
 }
 
 /* The legends over the canvas, at its top left: the edge kinds, and what "Colour by" shows. */
@@ -2298,9 +2310,18 @@ input:focus-visible {
   font-weight: 600;
 }
 
+/* Under a preset: the label it colours by. */
+.color-legend-subtitle {
+  margin: -0.15rem 0 0.25rem;
+  color: var(--muted);
+}
+
+/* About twelve entries, then the list scrolls inside the legend. */
 .color-legend-list {
+  max-height: 13rem;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 
@@ -2308,23 +2329,45 @@ input:focus-visible {
   display: flex;
   gap: 0.4rem;
   align-items: center;
+}
+
+/* A long value is cut with an ellipsis; its count stays at the right. */
+.color-legend-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.color-legend-chip,
-.color-legend-gradient {
-  --tint: var(--tint-light);
-  --tint-end: var(--tint-light-end);
+.color-legend-count {
+  flex: none;
+  margin-left: 0.6rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
+/* "Other" and "No value" are not values of the label. */
+.color-legend-list li[data-legend-kind='other'] .color-legend-label,
+.color-legend-list li[data-legend-kind='none'] .color-legend-label {
+  font-style: italic;
+}
+
+/* The border keeps a colour close to the panel's a square. */
 .color-legend-chip {
+  box-sizing: border-box;
   flex: none;
   width: 12px;
   height: 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
   border-radius: 3px;
   background: var(--tint);
+}
+
+/* The boxes without a value are not tinted: a hollow swatch. */
+.color-legend-chip-none {
+  border: 1px dashed var(--muted);
+  background: none;
 }
 
 .color-legend-ramp {

@@ -307,6 +307,27 @@ describe('submodel', () => {
       expect({ whole, placement }).toEqual(before);
     }
   });
+
+  it('keeps the labels of the nodes that are left, and the presets of the file', () => {
+    const labelled = parseOk(`version: 1
+domains:
+  - id: a
+    name: A
+    labels: { zone: public }
+    components:
+      - { id: a.x, name: X, labels: { zone: payment } }
+      - { id: a.y, name: Y }
+  - { id: b, name: B, labels: { tier: 1 } }
+presets:
+  - { name: Zones, label: zone }
+  - { name: Tiers, label: tier }
+`);
+    const { model: reduced } = submodel(labelled, keeping(['a', 'a.x']));
+    expect([...reduced.nodes.keys()]).toEqual(['a', 'a.x']);
+    expect(reduced.nodes.get('a.x')?.labels).toEqual(new Map([['zone', 'payment']]));
+    // The presets are the file's, also the one whose label no node of the part carries.
+    expect(reduced.presets).toBe(labelled.presets);
+  });
 });
 
 describe('submodel with rows', () => {

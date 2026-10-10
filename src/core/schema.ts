@@ -27,6 +27,7 @@ export const FileSchema = z.object({
   domains: z.array(z.unknown()),
   edges: nestedList,
   flows: nestedList,
+  presets: nestedList,
 });
 
 export const RowSchema = z.object({
@@ -46,6 +47,8 @@ const nodeFields = {
   links: nestedList,
   /** Numbers by name; a value that is not a finite number is an error (checked by the parser). */
   metrics: optional(z.record(z.string(), z.unknown())),
+  /** Values by name; what a value may be is checked by the parser. */
+  labels: optional(z.record(z.string(), z.unknown())),
 };
 
 /** One entry of a node's `links`. */
@@ -61,6 +64,17 @@ export const FlowSchema = z.object({
   description: optionalText,
   edges: nestedList,
   nodes: nestedList,
+});
+
+/**
+ * One entry of `presets`. What a colour may be is checked by the parser: a wrong one is a
+ * warning, not an error.
+ */
+export const PresetSchema = z.object({
+  name: requiredText,
+  label: requiredText,
+  description: optionalText,
+  values: optional(z.record(z.string(), z.unknown())),
 });
 
 export const DomainSchema = z.object({ ...nodeFields, components: nestedList });
@@ -85,6 +99,7 @@ export type SubcomponentEntry = z.infer<typeof SubcomponentSchema>;
 export type EdgeEntry = z.infer<typeof EdgeSchema>;
 export type LinkEntry = z.infer<typeof LinkSchema>;
 export type FlowEntry = z.infer<typeof FlowSchema>;
+export type PresetEntry = z.infer<typeof PresetSchema>;
 
 /** Keys a schema accepts; anything else in the YAML mapping is reported as an unknown key. */
 export function knownKeys(schema: { shape: Record<string, unknown> }): readonly string[] {

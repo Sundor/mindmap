@@ -121,7 +121,9 @@ import {
   readSavedViews,
   rowPlacement,
   sameFocus,
+  TEMPLATE_NOTE,
   usableColorBy,
+  viewColorBy,
   viewFromLinkHash,
   viewLinkHash,
   viewportToCenter,
@@ -1774,6 +1776,12 @@ function Viewer() {
     readonly model: ArchitectureModel;
     readonly text: string;
   }>();
+  // A view coloured by a preset or label this file does not have: the note says so until a
+  // colouring is chosen.
+  const [colorNote, setColorNote] = useState<{
+    readonly model: ArchitectureModel;
+    readonly text: string;
+  }>();
   const select = useCallback(
     (next: Selection | undefined) => {
       if (!model) return;
@@ -2329,6 +2337,11 @@ function Viewer() {
     [workLoad, coverage, tagWarnings],
   );
   const chooseStoryMode = (mode: StoryMode) => changeSettings({ ...settings, storyMode: mode });
+  // Choosing a colouring answers what a view could not show: its notice goes.
+  const changeLenses = (next: DisplaySettings) => {
+    if (next.colorBy !== settings.colorBy) setColorNote(undefined);
+    changeSettings(next);
+  };
 
   // Saved views: per structure in the browser; a link carries one in its fragment.
   const storedViews = useMemo(
@@ -2396,7 +2409,9 @@ function Viewer() {
           ? previous
           : { model, focus: view.focus },
       );
-      const nextColor = view.colorBy === undefined ? 'none' : usableColorBy(model, view.colorBy);
+      const viewColor = viewColorBy(model, view.colorBy);
+      const nextColor = viewColor.colorBy;
+      setColorNote(viewColor.note === undefined ? undefined : { model, text: viewColor.note });
       const nextStory = view.storyMode ?? settings.storyMode;
       // A view with a focus says how it is shown: one without the mode was saved on the whole
       // map, and its place only means something there. Without a focus the mode is left alone.
@@ -2777,7 +2792,7 @@ function Viewer() {
             <LensesTab
               drawn={mapDrawn}
               settings={settings}
-              onChange={changeSettings}
+              onChange={changeLenses}
               colorChoices={colorChoices}
               hasWorkItems={workItems.length > 0}
             />
@@ -2833,6 +2848,11 @@ function Viewer() {
             {fileError}
           </p>
         )}
+        {model && colorNote?.model === model && colorBy === 'none' && (
+          <p id="view-note" className="notice" role="status">
+            {colorNote.text}
+          </p>
+        )}
         {focus && model && (
           <FocusBar
             filterOn={filterOn}
@@ -2879,6 +2899,9 @@ function Viewer() {
               </p>
               <p className="hint">
                 or drop an architecture.yaml file — with its workitems.json — anywhere on this page.
+              </p>
+              <p className="hint" id="template-hint">
+                {TEMPLATE_NOTE}
               </p>
             </div>
           )}

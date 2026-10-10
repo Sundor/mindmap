@@ -5,6 +5,7 @@ import { useContext, useState, type ReactNode } from 'react';
 import {
   edgeLabelText,
   effectiveAttribute,
+  effectiveLabels,
   flowsOfEdge,
   flowsOfNode,
   formatMetric,
@@ -456,6 +457,14 @@ function NodeDetail({
             </Field>
           );
         })}
+        {effectiveLabels(model, id).map((label) => (
+          <Field key={`label:${label.name}`} label={label.name}>
+            <span data-label={label.name}>{label.value}</span>
+            {label.from !== id && (
+              <span className="detail-inherited"> (from {name(model, label.from)})</span>
+            )}
+          </Field>
+        ))}
         {node.metrics &&
           [...node.metrics].map(([metric, value]) => (
             <Field key={`metric:${metric}`} label={metric}>

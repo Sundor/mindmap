@@ -35,6 +35,12 @@ export interface ArchLink {
   readonly url: string;
 }
 
+/** A colour in both schemes, each as `#rrggbb`. */
+export interface SchemeColor {
+  readonly light: string;
+  readonly dark: string;
+}
+
 /**
  * The attributes a node may carry besides its name and description. Each is free text; a node
  * without one inherits its nearest ancestor's (see `effectiveAttribute`), so an owner set on a
@@ -42,6 +48,15 @@ export interface ArchLink {
  */
 export const NODE_ATTRIBUTES = ['owner', 'status', 'tech'] as const;
 export type NodeAttribute = (typeof NODE_ATTRIBUTES)[number];
+
+export function isNodeAttribute(value: unknown): value is NodeAttribute {
+  return typeof value === 'string' && (NODE_ATTRIBUTES as readonly string[]).includes(value);
+}
+
+/** Longest name of a label: it is carried in a `ColorBy` text, which storage keeps up to 200. */
+export const LABEL_NAME_MAX = 80;
+/** Longest name of a colour preset, for the same reason. */
+export const PRESET_NAME_MAX = 80;
 
 export interface ArchNode {
   readonly id: string;
@@ -56,6 +71,12 @@ export interface ArchNode {
   readonly links?: readonly ArchLink[];
   /** Numbers about the node (code size, churn, coverage …), by the name the file gives them. */
   readonly metrics?: ReadonlyMap<string, number>;
+  /**
+   * The labels written on this node, by name, in file order: free `name: value` pairs of the
+   * file. Never empty, and no value is empty. A node without one has its nearest ancestor's
+   * (see `effectiveLabel`).
+   */
+  readonly labels?: ReadonlyMap<string, string>;
   readonly level: NodeLevel;
   /** Undefined for domains. */
   readonly parentId?: string;
@@ -107,6 +128,27 @@ export interface ArchFlow {
   readonly nodeIds: readonly string[];
 }
 
+/** One value a colour preset lists: its place in the legend, and its colour when it gives one. */
+export interface PresetValue {
+  readonly value: string;
+  /** Absent: the next free colour of the palette. */
+  readonly color?: SchemeColor;
+}
+
+/**
+ * A colour preset of the file: a named colouring of the boxes by one label, with the colour of
+ * each value it lists.
+ */
+export interface ColorPreset {
+  /** Unique among the presets: what "Colour by" lists, the legend is headed with, a view keeps. */
+  readonly name: string;
+  /** A label some node carries, or one of `NODE_ATTRIBUTES`. */
+  readonly label: string;
+  readonly description?: string;
+  /** The values the file lists, in its order (the order of the legend), each once. */
+  readonly values: readonly PresetValue[];
+}
+
 /**
  * Validated architecture. Node IDs and edge IDs are separate namespaces: a node and an edge may
  * share an ID (consumers that mix them, e.g. a selection, must tag which one they mean). Row IDs
@@ -124,6 +166,48 @@ export interface ArchitectureModel {
   readonly edges: readonly ArchEdge[];
   /** Flows in YAML order; empty when the file has none. */
   readonly flows: readonly ArchFlow[];
+  /**
+   * Colour presets in YAML order; empty when the file has none. Each names a label some node
+   * has (one that does not is left out when the file is read).
+   */
+  readonly presets: readonly ColorPreset[];
+}
+
+/** What the label functions read of a node. The parser's own records fit as well. */
+export interface LabelledNode {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly owner?: string;
+  readonly status?: string;
+  readonly tech?: string;
+  readonly labels?: ReadonlyMap<string, string>;
+}
+
+/** The nodes by ID, in document order: an `ArchitectureModel`, or the parser's records. */
+export interface LabelledNodes {
+  readonly nodes: ReadonlyMap<string, LabelledNode>;
+}
+
+/**
+ * The value of label `name` that holds for node `id`: its own, else the nearest ancestor's. An
+ * attribute (`owner`, `status`, `tech`) is a label by that name. Undefined when no node up the
+ * chain has one, or `id` is unknown.
+ */
+export function effectiveLabel(
+  model: LabelledNodes,
+  id: string,
+  name: string,
+): { readonly value: string; readonly from: string } | undefined {
+  const attribute = isNodeAttribute(name) ? name : undefined;
+  for (let node = model.nodes.get(id); node; node = nodeParent(model, node)) {
+    const value = attribute ? node[attribute] : node.labels?.get(name);
+    if (value !== undefined) return { value, from: node.id };
+  }
+  return undefined;
+}
+
+function nodeParent(model: LabelledNodes, node: LabelledNode): LabelledNode | undefined {
+  return node.parentId === undefined ? undefined : model.nodes.get(node.parentId);
 }
 
 /**
@@ -131,17 +215,54 @@ export interface ArchitectureModel {
  * Undefined when no node up the chain has one, or `id` is unknown.
  */
 export function effectiveAttribute(
-  model: ArchitectureModel,
+  model: LabelledNodes,
   id: string,
   key: NodeAttribute,
 ): { readonly value: string; readonly from: string } | undefined {
-  for (let node = model.nodes.get(id); node; node = nodeParent(model, node)) {
-    const value = node[key];
-    if (value !== undefined) return { value, from: node.id };
-  }
-  return undefined;
+  return effectiveLabel(model, id, key);
 }
 
-function nodeParent(model: ArchitectureModel, node: ArchNode): ArchNode | undefined {
-  return node.parentId === undefined ? undefined : model.nodes.get(node.parentId);
+/** The names of the labels the nodes carry, in the order they first occur (document order). */
+export function labelNames(model: LabelledNodes): string[] {
+  const names = new Set<string>();
+  for (const node of model.nodes.values()) {
+    for (const name of node.labels?.keys() ?? []) names.add(name);
+  }
+  return [...names];
+}
+
+/**
+ * Every label that holds for node `id` — its own and the inherited ones — in the order of
+ * `labelNames`, each with the node it comes from. The attributes are not among them.
+ */
+export function effectiveLabels(
+  model: LabelledNodes,
+  id: string,
+): { readonly name: string; readonly value: string; readonly from: string }[] {
+  if (!model.nodes.has(id)) return [];
+  const found: { name: string; value: string; from: string }[] = [];
+  for (const name of labelNames(model)) {
+    const label = effectiveLabel(model, id, name);
+    if (label) found.push({ name, ...label });
+  }
+  return found;
+}
+
+/** A value of a label and the number of nodes it holds for (own or inherited). */
+export interface ValueCount {
+  readonly value: string;
+  readonly count: number;
+}
+
+/**
+ * The values label `name` (or the attribute of that name) has over the nodes, inherited ones
+ * included, in the order of their first node (document order), each with its number of nodes.
+ */
+export function labelValueCounts(model: LabelledNodes, name: string): ValueCount[] {
+  const counts = new Map<string, number>();
+  for (const id of model.nodes.keys()) {
+    const found = effectiveLabel(model, id, name);
+    if (found) counts.set(found.value, (counts.get(found.value) ?? 0) + 1);
+  }
+  return [...counts].map(([value, count]) => ({ value, count }));
 }

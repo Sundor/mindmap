@@ -69,6 +69,8 @@ const ROW_KEYS: ReadonlySet<string> = new Set<keyof ArchNode>(['row', 'effective
  *   without a node is dropped, so the bands close up; `rowRange` is derived again for the rows
  *   that remain.
  * - Flows: their kept edges and nodes; a flow left with neither is dropped.
+ * - Presets: the file's, unchanged — also one whose label no kept node carries. Nothing reads
+ *   the presets of a part: colours, legend and the list of "Colour by" come from the whole model.
  *
  * When nothing is left out, the result holds `model` itself. `placement` is the row placement of
  * `model` (`rowPlacement`), computed here when it is not given.
@@ -147,6 +149,7 @@ export function submodel(
       rootIds: model.rootIds.filter((id) => keptIds.has(id)),
       edges,
       flows,
+      presets: model.presets,
     },
     placedRow,
   };

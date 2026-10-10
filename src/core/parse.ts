@@ -4,23 +4,32 @@
 // references, rows. Each malformed entry is salvaged as far as possible (its ID and children are
 // still registered) so one mistake does not cascade into spurious "unknown ID" errors elsewhere.
 
-import { isMap, isNode, isScalar, LineCounter, parseDocument, type Document } from 'yaml';
+import { isAlias, isMap, isNode, isScalar, LineCounter, parseDocument, type Document } from 'yaml';
 import type { z } from './zod';
+import { COLOR_NAMES, colorFromFile, GREY_NAMES } from './colorBy';
 import { formatPath, type Diagnostic, type DocPath, type Severity } from './diagnostics';
 import { didYouMean, ID_RULE, isValidId, isValidSegment, suggest } from './ids';
 import {
   EDGE_KINDS,
   FLOW_KINDS,
   isEdgeKind,
+  isNodeAttribute,
+  LABEL_NAME_MAX,
+  labelNames,
+  labelValueCounts,
   NODE_ATTRIBUTES,
   NODE_LEVEL_NAMES,
+  PRESET_NAME_MAX,
   type ArchEdge,
   type ArchFlow,
   type ArchitectureModel,
   type ArchLink,
   type ArchNode,
   type ArchRow,
+  type ColorPreset,
   type NodeLevel,
+  type PresetValue,
+  type SchemeColor,
 } from './model';
 import { rowRanges } from './rows';
 import {
@@ -31,6 +40,7 @@ import {
   FlowSchema,
   knownKeys,
   LinkSchema,
+  PresetSchema,
   RowSchema,
   SubcomponentSchema,
 } from './schema';
@@ -75,6 +85,7 @@ interface NodeRecord {
   tech?: string;
   links?: ArchLink[];
   metrics?: Map<string, number>;
+  labels?: Map<string, string>;
   row?: string;
   level: NodeLevel;
   parentId?: string;
@@ -94,6 +105,16 @@ interface ParentInfo {
   /** ID of the node that set `effectiveRow` (the parent itself or one of its ancestors). */
   readonly effectiveRowFrom?: string;
 }
+
+/**
+ * Where each label name was first written, by the name in lower case, and the other spellings
+ * that were reported already: two names that differ only in letter case are two labels, and
+ * most often a slip — said once per spelling, not once per node.
+ */
+type LabelUse = Map<
+  string,
+  { readonly name: string; readonly path: DocPath; readonly reported: Set<string> }
+>;
 
 interface Located {
   line: number;
@@ -221,16 +242,18 @@ function run(
   const rows = readRows(out, root);
   const nodes = new Map<string, NodeRecord>();
   const rootIds: string[] = [];
+  const labelUse: LabelUse = new Map();
   const domains = listAt(root, 'domains');
   domains.forEach((raw, i) => {
-    const record = walkNode(out, raw, ['domains', i], 0, undefined, nodes, rows);
+    const record = walkNode(out, raw, ['domains', i], 0, undefined, nodes, rows, labelUse);
     if (record) rootIds.push(record.id);
   });
   const edges = readEdges(out, root, nodes);
   const flows = readFlows(out, root, nodes, edges);
+  const presets = readPresets(out, root, nodes);
 
   if (out.errors.length > 0) return null;
-  return buildModel(rows.list, nodes, rootIds, edges, flows);
+  return buildModel(rows.list, nodes, rootIds, edges, flows, presets);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -292,6 +315,7 @@ function walkNode(
   parent: ParentInfo | undefined,
   nodes: Map<string, NodeRecord>,
   rows: RowsInfo,
+  labelUse: LabelUse,
 ): NodeRecord | undefined {
   const levelName = NODE_LEVEL_NAMES[level];
   const obj = isPlainObject(raw) ? raw : {};
@@ -326,6 +350,8 @@ function walkNode(
       if (links.length > 0) record.links = links;
       const metrics = readMetrics(out, obj, path, label);
       if (metrics.size > 0) record.metrics = metrics;
+      const labels = readLabels(out, obj, path, label, levelName, labelUse);
+      if (labels.size > 0) record.labels = labels;
       if (parent?.id !== undefined) record.parentId = parent.id;
       nodes.set(id, record);
       parent?.record?.childIds.push(id);
@@ -381,6 +407,7 @@ function walkNode(
         childInfo,
         nodes,
         rows,
+        labelUse,
       );
     });
   }
@@ -433,6 +460,83 @@ function readMetrics(
     }
   }
   return metrics;
+}
+
+/**
+ * A node's `labels`: values by name, in file order. A value is text, or a number or true/false,
+ * which is kept as the file writes it (`1.10` stays "1.10"). An entry without a value, or with
+ * an empty text, is the same as no entry. A value that is a list or a mapping, an empty or
+ * overlong name and the name of an attribute (in any letter case) are errors: a label that
+ * vanished would give a wrong picture.
+ */
+function readLabels(
+  out: Collector,
+  obj: PlainObject,
+  path: DocPath,
+  label: string,
+  levelName: string,
+  labelUse: LabelUse,
+): Map<string, string> {
+  const labels = new Map<string, string>();
+  const raw = obj['labels'];
+  if (!isPlainObject(raw)) return labels;
+  for (const entry of entriesInFileOrder(out.doc, [...path, 'labels'], raw)) {
+    const name = entry.key.trim();
+    const at: DocPath = [...path, 'labels', entry.pathKey];
+    if (name === '') {
+      out.error(at, `A label of ${label} has an empty name`, true);
+      continue;
+    }
+    if (name.length > LABEL_NAME_MAX) {
+      out.error(
+        at,
+        `Label name "${truncate(name, 40)}" of ${label} is longer than ${LABEL_NAME_MAX} characters`,
+        true,
+      );
+      continue;
+    }
+    // In any letter case: a label "Owner" would stand beside the attribute as a second "Owner".
+    const attribute = name.toLowerCase();
+    if (isNodeAttribute(attribute)) {
+      out.error(
+        at,
+        `Label "${name}" of ${label} is a key of its own: write "${attribute}:" on the ${levelName} itself, not under "labels"`,
+        true,
+      );
+      continue;
+    }
+    const { value } = entry;
+    if (value === null || value === undefined) continue;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+      out.error(
+        at,
+        `Label "${name}" of ${label} must be text, a number or true/false, but got ${describeValue(value)}`,
+      );
+      continue;
+    }
+    const text = (typeof value === 'string' ? value : (entry.written ?? String(value))).trim();
+    if (text === '') continue;
+    const first = labelUse.get(name.toLowerCase());
+    if (!first) labelUse.set(name.toLowerCase(), { name, path: at, reported: new Set() });
+    else if (first.name !== name && !first.reported.has(name)) {
+      first.reported.add(name);
+      out.warning(
+        at,
+        `Label "${name}" of ${label} differs only in letter case from "${first.name}" (first used at ${formatPath(first.path)}); they are two labels`,
+        true,
+      );
+    }
+    if (labels.has(name)) {
+      out.warning(
+        at,
+        `Label "${name}" of ${label} is written twice; the first value is kept`,
+        true,
+      );
+      continue;
+    }
+    labels.set(name, text);
+  }
+  return labels;
 }
 
 function checkNodeId(
@@ -627,6 +731,265 @@ function readFlows(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Colour presets
+
+/** How a message says what a colour may be. */
+const COLOR_HELP = `Use ${[...COLOR_NAMES, GREY_NAMES[0]].join(', ')}, or a hex colour in quotes such as '#1baf7a'`;
+/** What happens to a value whose colour could not be read. */
+const COLOR_FALLBACK = 'The next free colour is used';
+/**
+ * The hex colour a comment was meant as: an unquoted `#1baf7a` after a key is a comment to YAML.
+ * The comment must begin, right after its `#`, with three or six hex digits, and either end
+ * there or have a numeral among them — `#fff` and `#1baf7a the green` are colours, `#decade of
+ * work` and `# fff` (a space first) are comments. Only the first line counts: the YAML library
+ * joins the comment lines that follow directly to the comment of an empty value.
+ */
+function hexInComment(comment: string | undefined): string | undefined {
+  const onTheLine = (comment ?? '').split(/\r?\n/, 1)[0] ?? '';
+  const match = /^([0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-z])(.*)$/i.exec(onTheLine);
+  const hex = match?.[1];
+  if (hex === undefined) return undefined;
+  return (match?.[2] ?? '').trim() === '' || /[0-9]/.test(hex) ? hex : undefined;
+}
+
+/**
+ * True when `a` and `b` are the same text around different numerals: two members of a series
+ * (tier-2 and tier-9, 1.10 and 1.11), which resemble each other without one being a slip.
+ */
+function sameSeries(a: string, b: string): boolean {
+  const frame = (text: string): string => text.toLowerCase().replace(/[0-9]+/g, '#');
+  const numerals = (text: string): string => (text.match(/[0-9]+/g) ?? []).join(' ');
+  return frame(a) === frame(b) && numerals(a) !== numerals(b);
+}
+
+/**
+ * The edit distance of `a` and `b` as `editDistance` counts it when it is at most `limit`,
+ * undefined when it is more. What the two texts begin and end with alike costs nothing and is
+ * left out. Of the rest, each row is filled only as far from the diagonal as `limit` (beginnings
+ * whose lengths differ by more are further apart than that), and a row with no cell within the
+ * limit ends the comparison: the cost grows with the length of the texts, not with its square.
+ */
+function distanceWithin(a: string, b: string, limit: number): number | undefined {
+  if (Math.abs(a.length - b.length) > limit) return undefined;
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let rows = a.length - start;
+  let columns = b.length - start;
+  while (rows > 0 && columns > 0 && a[start + rows - 1] === b[start + columns - 1]) {
+    rows--;
+    columns--;
+  }
+  const beyond = limit + 1;
+  const width = 2 * limit + 1;
+  // Cell k of row i: the distance between the first i letters of the rest of `a` and the first
+  // j of the rest of `b`, j = i - limit + k. Three rows are kept: i - 2, i - 1 and i.
+  let before = new Array<number>(width).fill(beyond);
+  let above = new Array<number>(width).fill(beyond);
+  let row = new Array<number>(width).fill(beyond);
+  for (let j = 0; j <= limit; j++) above[limit + j] = j;
+  for (let i = 1; i <= rows; i++) {
+    let least = beyond;
+    for (let k = 0; k < width; k++) {
+      const j = i - limit + k;
+      let best = beyond;
+      if (j === 0) {
+        best = i;
+      } else if (j > 0 && j <= columns) {
+        const inA = start + i - 1;
+        const inB = start + j - 1;
+        best = Math.min(
+          (above[k + 1] ?? beyond) + 1,
+          (row[k - 1] ?? beyond) + 1,
+          (above[k] ?? beyond) + (a[inA] === b[inB] ? 0 : 1),
+        );
+        if (i > 1 && j > 1 && a[inA] === b[inB - 1] && a[inA - 1] === b[inB]) {
+          best = Math.min(best, (before[k] ?? beyond) + 1);
+        }
+      }
+      row[k] = Math.min(best, beyond);
+      least = Math.min(least, best);
+    }
+    if (least > limit) return undefined;
+    [before, above, row] = [above, row, before];
+  }
+  const distance = above[columns - rows + limit] ?? beyond;
+  return distance > limit ? undefined : distance;
+}
+
+/**
+ * The value among `candidates` that `value`, which no node has, was probably meant as: what
+ * `suggest` answers once the members of the series of `value` are set aside, for texts that may
+ * be long and many. A label has no limit on the length or the number of its values, and
+ * `suggest` fills a table of one length by the other for every pair.
+ */
+function nearMiss(value: string, candidates: readonly string[]): string | undefined {
+  const needle = value.toLowerCase();
+  const maxDistance = Math.min(3, Math.floor(needle.length / 3));
+  let best: string | undefined;
+  let bestScore = Infinity;
+  for (const candidate of candidates) {
+    const hay = candidate.toLowerCase();
+    const score =
+      distanceWithin(needle, hay, maxDistance) ??
+      (hay.slice(hay.lastIndexOf('.') + 1) === needle ? maxDistance + 0.5 : Infinity);
+    if (score < bestScore && !sameSeries(candidate, value)) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** Why `value` is no colour, for the value `what` names; a whole sentence. */
+function colorProblem(value: unknown, what: string): string {
+  if (typeof value === 'string') {
+    const names = [...COLOR_NAMES, ...GREY_NAMES];
+    const meant = suggest(value.trim().toLowerCase(), names);
+    return `Unknown colour ${JSON.stringify(truncate(value, 40))} for ${what}${meant === undefined ? '.' : `; did you mean "${meant}"?`}`;
+  }
+  if (isPlainObject(value)) {
+    return `The colour for ${what} must give "light" and "dark", each a hex colour in quotes, and nothing else.`;
+  }
+  return `The colour for ${what} must be a colour name or a hex colour in quotes, but got ${describeValue(value)}.`;
+}
+
+/**
+ * The `presets:` section: named colourings of the boxes by a label. Each has a name of its own
+ * (a name used twice is an error) and names the label it reads — a label some node carries, or
+ * owner, status or tech; one that no node has is a warning and the preset is left out, since it
+ * would colour nothing. `values` lists values with their colours, in the order of the legend.
+ * What only costs a colour is a warning, and the map is drawn: a colour that is none (the value
+ * then takes the next free colour of the palette), and a listed value that no node has but that
+ * resembles one a node has.
+ */
+function readPresets(
+  out: Collector,
+  root: PlainObject,
+  nodes: ReadonlyMap<string, NodeRecord>,
+): ColorPreset[] {
+  const presets: ColorPreset[] = [];
+  const firstByName = new Map<string, DocPath>();
+  const model = { nodes };
+  const known: string[] = [
+    ...NODE_ATTRIBUTES.filter((key) => [...nodes.values()].some((node) => node[key] !== undefined)),
+    ...labelNames(model),
+  ];
+  listAt(root, 'presets').forEach((raw, i) => {
+    const path: DocPath = ['presets', i];
+    const obj = isPlainObject(raw) ? raw : {};
+    const written = stringField(obj, 'name')?.trim();
+    const what =
+      written === undefined || written === ''
+        ? `preset ${formatPath(path)}`
+        : `preset "${truncate(written, 40)}"`;
+    const data = checkEntry(out, PresetSchema, raw, path, what);
+
+    let usable = true;
+    if (written !== undefined && written !== '') {
+      if (written.length > PRESET_NAME_MAX) {
+        out.error(
+          [...path, 'name'],
+          `"name" of ${what} is longer than ${PRESET_NAME_MAX} characters`,
+        );
+        usable = false;
+      }
+      const first = firstByName.get(written);
+      if (first) {
+        out.error(
+          [...path, 'name'],
+          `Duplicate preset name "${truncate(written, 40)}" (first defined at ${formatPath(first)})`,
+        );
+        usable = false;
+      } else {
+        firstByName.set(written, path);
+      }
+    }
+    if (!data || !usable) return;
+
+    const label = data.label;
+    if (!known.includes(label)) {
+      out.warning(
+        [...path, 'label'],
+        `${capitalize(what)} colours by label "${truncate(label, 40)}", which no node has, so it is left out${didYouMean(label, known)}`,
+      );
+      return;
+    }
+
+    const values: PresetValue[] = [];
+    const listed = new Set<string>();
+    const pathKeys = new Map<string, string>();
+    const rawValues = obj['values'];
+    const entries = isPlainObject(rawValues)
+      ? entriesInFileOrder(out.doc, [...path, 'values'], rawValues)
+      : [];
+    for (const entry of entries) {
+      const value = entry.key.trim();
+      const at: DocPath = [...path, 'values', entry.pathKey];
+      if (value === '') {
+        out.warning(at, `${capitalize(what)} lists an empty value (ignored)`, true);
+        continue;
+      }
+      if (listed.has(value)) {
+        out.warning(
+          at,
+          `${capitalize(what)} lists value "${truncate(value, 40)}" twice; the first is kept`,
+          true,
+        );
+        continue;
+      }
+      listed.add(value);
+      pathKeys.set(value, entry.pathKey);
+      const of = `value "${truncate(value, 40)}" of ${what}`;
+      let color: SchemeColor | undefined;
+      if (entry.value === null || entry.value === undefined) {
+        const hex = hexInComment(entry.comment);
+        if (hex !== undefined) {
+          out.warning(
+            at,
+            `${capitalize(of)} has no colour: YAML reads the unquoted #${hex} as a comment; write '#${hex}' in quotes. ${COLOR_FALLBACK}`,
+            true,
+          );
+        }
+      } else {
+        color = colorFromFile(entry.value);
+        if (color === undefined) {
+          out.warning(at, `${colorProblem(entry.value, of)} ${COLOR_HELP}. ${COLOR_FALLBACK}`);
+        }
+      }
+      values.push(color === undefined ? { value } : { value, color });
+    }
+
+    // A listed value nobody has is no mistake (a vocabulary may be ahead of the map) unless it
+    // resembles one somebody has and the preset does not list. Two values that differ only in
+    // their numerals (tier-2 and tier-9, 1.10 and 1.11) are a series, not a slip.
+    const present = labelValueCounts(model, label).map((entry) => entry.value);
+    const unlisted = present.filter((value) => !listed.has(value));
+    for (const { value } of values) {
+      if (present.includes(value)) continue;
+      const meant = nearMiss(value, unlisted);
+      if (meant !== undefined) {
+        out.warning(
+          [...path, 'values', pathKeys.get(value) ?? value],
+          `${capitalize(what)} lists value "${truncate(value, 40)}", which no node has as its "${truncate(label, 40)}"; did you mean "${truncate(meant, 40)}"?`,
+          true,
+        );
+      }
+    }
+
+    const description = data.description?.trim();
+    presets.push(
+      compact({
+        name: data.name,
+        label,
+        description: description === '' ? undefined : description,
+        values,
+      }),
+    );
+  });
+  return presets;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Model
 
 function buildModel(
@@ -635,6 +998,7 @@ function buildModel(
   rootIds: readonly string[],
   edges: readonly ArchEdge[],
   flows: readonly ArchFlow[],
+  presets: readonly ColorPreset[],
 ): ArchitectureModel {
   const ranges = rowRanges(rows, records.values());
   const nodes = new Map<string, ArchNode>();
@@ -650,6 +1014,7 @@ function buildModel(
         tech: record.tech,
         links: record.links,
         metrics: record.metrics,
+        labels: record.labels,
         level: record.level,
         parentId: record.parentId,
         childIds: record.childIds,
@@ -659,7 +1024,7 @@ function buildModel(
       }),
     );
   }
-  return { version: 1, rows, nodes, rootIds, edges, flows };
+  return { version: 1, rows, nodes, rootIds, edges, flows, presets };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -777,6 +1142,7 @@ function issueMessage(issue: z.core.$ZodIssue, label: string): string {
 function expectedText(expected: string): string {
   switch (expected) {
     case 'object':
+    case 'record':
       return 'a mapping (key: value pairs)';
     case 'array':
       return 'a list';
@@ -797,6 +1163,72 @@ function describeValue(value: unknown): string {
 
 function isPlainObject(value: unknown): value is PlainObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** One entry of a mapping of the file, as `entriesInFileOrder` gives it. */
+interface FileEntry {
+  /** The key as the file writes it (`1.10`, not `1.1`). */
+  readonly key: string;
+  /** The key as the plain object has it: what a `DocPath` to the entry ends with. */
+  readonly pathKey: string;
+  /** The value as JavaScript has it. */
+  readonly value: unknown;
+  /** A number or true/false as the file writes it. */
+  readonly written?: string;
+  /** For an empty value: the comment that follows it on its line, without the `#`. */
+  readonly comment?: string;
+}
+
+/**
+ * The entries of the mapping at `path`, in the order of the file and with keys, numbers and
+ * true/false as they are written. The plain object the rest of the parser reads gives neither:
+ * JavaScript moves keys that look like whole numbers to the front, and `1.10` has become 1.1.
+ * Falls back to the entries of `obj` where the document has no mapping of its own at the path
+ * (below an alias), and where a key of the mapping is a list or a mapping: such a key has no text
+ * of its own, the plain object has the one the YAML library gives it, and no entry is dropped.
+ */
+function entriesInFileOrder(
+  doc: Document | undefined,
+  path: DocPath,
+  obj: PlainObject,
+): FileEntry[] {
+  let node: unknown = doc?.getIn(path, true);
+  if (doc && isAlias(node)) node = node.resolve(doc);
+  if (!doc || !isMap(node) || node.items.some((pair) => !isScalar(pair.key))) {
+    return Object.entries(obj).map(([key, value]) => ({ key, pathKey: key, value }));
+  }
+  const entries: FileEntry[] = [];
+  for (const pair of node.items) {
+    if (!isScalar(pair.key)) continue;
+    const keyValue: unknown = pair.key.value;
+    const key =
+      typeof keyValue === 'string'
+        ? keyValue
+        : keyValue === null
+          ? ''
+          : (pair.key.source ?? String(keyValue));
+    const pathKey = keyValue === null ? '' : String(keyValue);
+    const valueNode = isAlias(pair.value) ? pair.value.resolve(doc) : pair.value;
+    if (isScalar(valueNode)) {
+      const value: unknown = valueNode.value;
+      const asWritten = typeof value === 'number' || typeof value === 'boolean';
+      entries.push({
+        key,
+        pathKey,
+        value,
+        ...(asWritten && valueNode.source !== undefined ? { written: valueNode.source } : {}),
+        ...(value === null && typeof valueNode.comment === 'string'
+          ? { comment: valueNode.comment }
+          : {}),
+      });
+    } else {
+      const value: unknown = isNode(valueNode)
+        ? valueNode.toJS(doc, { maxAliasCount: MAX_ALIAS_COUNT })
+        : null;
+      entries.push({ key, pathKey, value });
+    }
+  }
+  return entries;
 }
 
 /** The list stored under `key`, or [] when absent or not a list (zod reports the latter). */

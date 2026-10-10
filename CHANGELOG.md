@@ -75,6 +75,48 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
   counted with everything inside it — so no other strip changes when a group opens or closes.
   The tooltips say when a box holds more than it shows, and the detail panel still states the
   totals of a node with everything inside it, and adds what the box on the map shows.
+- **Labels.** A node of the structure file can carry `labels`: name → value pairs under names
+  of your own (`zone: public`, `tier: 1`), on a domain, a component or a subcomponent, and
+  inherited by everything inside like `owner`, `status` and `tech`. A number or true/false is
+  kept as written (`release: 1.10` is "1.10"). Every label is an entry under **Lenses → Colour
+  by**, and the detail panel of a node lists the labels that hold for it and says where an
+  inherited one comes from. A file without labels loads as before, and `version` stays `1`.
+- **Colour presets.** A top-level `presets:` list of the structure file names colourings: each
+  has a `name`, the `label` it colours by (a label, or `owner`, `status` or `tech`), and
+  optionally a `description` and `values` — a colour for a value, written as one of nine names
+  (`blue`, `orange`, `teal`, `yellow`, `pink`, `green`, `purple`, `red`, `grey`), as a hex
+  colour in quotes, or as a pair of hex colours for the light and the dark scheme. The presets
+  stand first under **Colour by**, and the legend lists the values in the order of the preset.
+  A value the file gives no colour takes the next free colour of the palette. A mistake in a
+  colour is a warning and does not stop the map; a preset on a label that no node has is left
+  out, with a warning.
+- **Changed behaviour — `labels` on a node and `presets` at the top level are keys of the
+  format.** A structure file that already had one of them for something of its own was told
+  "Unknown key … (ignored)" and is now read: `labels` has to be a mapping of name → value and
+  `presets` a list of presets, or the file has errors and no map is drawn. Give such a key
+  another name.
+- **The list under Colour by is grouped** into Presets, Labels (Owner, Status and Tech, then
+  the labels of the file) and Metrics; a group with nothing in it is left out.
+- **The legend of Colour by** shows beside each value how many boxes have it, names in the
+  tooltip of "Other" the values that share it, and ends with "No value" and the number of boxes
+  that have none — for owner, status and tech too. The numbers count the whole structure,
+  whatever is drawn. A long legend scrolls. The summary text of a closed group that is tinted
+  is darker than before, so that it reads on the tint.
+- **A saved view or a link whose colouring the file does not have** — a preset that was renamed
+  or removed, a label or a metric that no node has any more — is applied uncoloured and says so
+  in a notice above the map: "This view is coloured by preset "Risk", which this file does not
+  have: the boxes are not coloured." Before, it was applied uncoloured without a word. A link
+  coloured by a preset or a label needs this version: an older viewer shows the view
+  uncoloured.
+- **Template files.** The viewer folder has a folder `template/` with an `architecture.yaml`
+  and a `workitems.json`: two short files in which every key the viewer reads occurs once, with
+  what it does — the files to copy and start a map from. The guide shows them as its two
+  complete files, and the **Files** tab and the start page of the viewer say where they are.
+- The error for a list where `metrics` expects a mapping reads "must be a mapping (key: value
+  pairs), but got a list"; it read "must be record".
+- **Fixed — the legend of Colour by on the dark colour scheme.** Its chips, and the scale of a
+  metric, showed the colours of the light scheme while the boxes had the dark ones; legend and
+  boxes now show the same colour.
 
 ## 0.2.0 — 2026-10-08
 

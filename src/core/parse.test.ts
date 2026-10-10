@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveAttribute, parseArchitecture, type Diagnostic, type ParseResult } from './index';
+import {
+  CATEGORICAL_COLORS,
+  editDistance,
+  effectiveAttribute,
+  labelNames,
+  OTHER_COLOR,
+  parseArchitecture,
+  suggest,
+  type Diagnostic,
+  type ParseResult,
+} from './index';
 
 /** Strips the common leading indentation so YAML can be written inline in tests. */
 function yaml(strings: TemplateStringsArray, ...values: unknown[]): string {
@@ -1049,5 +1059,752 @@ describe('parseArchitecture: flows', () => {
 
   it('is an empty list when the file has none', () => {
     expect(expectClean(parseArchitecture(file(DOMAINS))).flows).toEqual([]);
+  });
+});
+
+/** A file with one domain `a` (component `a.x`, subcomponent `a.x.k`) and what `rest` adds. */
+function withDomain(domainLines: string, rest = ''): string {
+  return `version: 1
+domains:
+  - id: a
+    name: A
+${domainLines}
+    components:
+      - id: a.x
+        name: X
+        subcomponents:
+          - { id: a.x.k, name: K }
+${rest}`;
+}
+
+/** The labels written on node `id`, in the order the model holds them. */
+function labelsOf(model: ParseResult['model'], id: string): [string, string][] {
+  return [...(model?.nodes.get(id)?.labels ?? [])];
+}
+
+function messages(list: readonly Diagnostic[]): string[] {
+  return list.map((d) => d.message);
+}
+
+describe('parseArchitecture: labels', () => {
+  it('reads labels at every level, in file order, block or flow style', () => {
+    const model = expectClean(
+      parseArchitecture(`version: 1
+domains:
+  - id: a
+    name: A
+    labels:
+      zone: public
+      team: Shop
+    components:
+      - id: a.x
+        name: X
+        labels: { team: Core, risk: high }
+        subcomponents:
+          - id: a.x.k
+            name: K
+            labels: { zone: internal }
+`),
+    );
+    expect(labelsOf(model, 'a')).toEqual([
+      ['zone', 'public'],
+      ['team', 'Shop'],
+    ]);
+    expect(labelsOf(model, 'a.x')).toEqual([
+      ['team', 'Core'],
+      ['risk', 'high'],
+    ]);
+    expect(labelsOf(model, 'a.x.k')).toEqual([['zone', 'internal']]);
+    expect(labelNames(model)).toEqual(['zone', 'team', 'risk']);
+  });
+
+  it('keeps a number and true/false as the file writes them', () => {
+    const model = expectClean(
+      parseArchitecture(
+        withDomain(`    labels:
+      release: 1.10
+      next: 1.1
+      hex: 0x1F
+      exp: 1e3
+      pii: true
+      public: False
+      quoted: '1.10'
+      2: two
+      1: one`),
+      ),
+    );
+    expect(labelsOf(model, 'a')).toEqual([
+      ['release', '1.10'],
+      ['next', '1.1'],
+      ['hex', '0x1F'],
+      ['exp', '1e3'],
+      ['pii', 'true'],
+      ['public', 'False'],
+      ['quoted', '1.10'],
+      // Number-like names stay where the file has them (a plain object would put 1 before 2).
+      ['2', 'two'],
+      ['1', 'one'],
+    ]);
+  });
+
+  it('trims names and values; an entry without a value or with an empty text is no entry', () => {
+    const model = expectClean(
+      parseArchitecture(
+        withDomain(`    labels:
+      ' team ': '  Shop  '
+      empty:
+      tilde: ~
+      blank: ''
+      spaces: '   '`),
+      ),
+    );
+    expect(labelsOf(model, 'a')).toEqual([['team', 'Shop']]);
+  });
+
+  it('gives a node whose labels are all empty no labels at all', () => {
+    const model = expectClean(parseArchitecture(withDomain(`    labels: { a: , b: '' }`)));
+    expect(model.nodes.get('a')?.labels).toBeUndefined();
+    expect(labelNames(model)).toEqual([]);
+  });
+
+  it('reads labels given through a YAML alias', () => {
+    const model = expectClean(
+      parseArchitecture(`version: 1
+domains:
+  - id: a
+    name: A
+    labels: &base { zone: public, tier: 1.0 }
+  - id: b
+    name: B
+    labels: *base
+`),
+    );
+    expect(labelsOf(model, 'b')).toEqual([
+      ['zone', 'public'],
+      ['tier', '1.0'],
+    ]);
+    // A single value given through an alias is the text its anchor writes.
+    const single = expectClean(
+      parseArchitecture(withDomain('    labels: { first: &release 1.10, second: *release }')),
+    );
+    expect(labelsOf(single, 'a')).toEqual([
+      ['first', '1.10'],
+      ['second', '1.10'],
+    ]);
+  });
+
+  it('a name that is a list or a mapping is taken as the YAML library writes it, not dropped', () => {
+    const model = expectClean(
+      parseArchitecture(
+        withDomain(
+          '    labels: { tier: 1.10, [a, b]: c }',
+          'presets:\n  - { name: P, label: "[ a, b ]" }\n',
+        ),
+      ),
+    );
+    // The whole mapping is then read from the plain object: a number as JavaScript prints it.
+    expect(labelsOf(model, 'a')).toEqual([
+      ['tier', '1.1'],
+      ['[ a, b ]', 'c'],
+    ]);
+    expect(model.presets.map((preset) => preset.label)).toEqual(['[ a, b ]']);
+  });
+
+  it('leaves a file without labels and presets as it was', () => {
+    const model = expectClean(parseArchitecture(withDomain('    owner: Me')));
+    expect(model.presets).toEqual([]);
+    for (const node of model.nodes.values()) expect('labels' in node).toBe(false);
+  });
+
+  it('an empty "labels:" and an empty "presets:" are the same as leaving them out', () => {
+    const model = expectClean(parseArchitecture(withDomain('    labels:', 'presets:\n')));
+    expect(model.presets).toEqual([]);
+    for (const node of model.nodes.values()) expect('labels' in node).toBe(false);
+  });
+});
+
+describe('parseArchitecture: mistakes in labels', () => {
+  const errorsOf = (domainLines: string): string[] =>
+    messages(parseArchitecture(withDomain(domainLines)).errors);
+
+  it('a list where the mapping belongs — for metrics too', () => {
+    expect(errorsOf('    labels: [a, b]')).toEqual([
+      '"labels" of domain "a" must be a mapping (key: value pairs), but got a list',
+    ]);
+    expect(errorsOf('    labels: text')).toEqual([
+      '"labels" of domain "a" must be a mapping (key: value pairs), but got text "text"',
+    ]);
+    expect(errorsOf('    metrics: [1]')).toEqual([
+      '"metrics" of domain "a" must be a mapping (key: value pairs), but got a list',
+    ]);
+  });
+
+  it('a value that is a list or a mapping', () => {
+    expect(errorsOf('    labels: { team: [x, y] }')).toEqual([
+      'Label "team" of domain "a" must be text, a number or true/false, but got a list',
+    ]);
+    expect(errorsOf('    labels: { zone: { a: 1 } }')).toEqual([
+      'Label "zone" of domain "a" must be text, a number or true/false, but got a mapping',
+    ]);
+  });
+
+  it('an attribute written as a label says where it goes', () => {
+    const result = parseArchitecture(`version: 1
+domains:
+  - id: a
+    name: A
+    components:
+      - id: a.x
+        name: X
+        labels: { status: live }
+`);
+    expect(messages(result.errors)).toEqual([
+      'Label "status" of component "a.x" is a key of its own: write "status:" on the component itself, not under "labels"',
+    ]);
+    expect(result.errors[0]).toMatchObject({
+      path: 'domains[0].components[0].labels.status',
+      line: 8,
+    });
+    expect(result.model).toBeNull();
+    // In any letter case: "Owner" would stand in the list beside the attribute's "Owner".
+    expect(errorsOf('    labels: { Owner: Me, TECH: Go, ownership: fine }')).toEqual([
+      'Label "Owner" of domain "a" is a key of its own: write "owner:" on the domain itself, not under "labels"',
+      'Label "TECH" of domain "a" is a key of its own: write "tech:" on the domain itself, not under "labels"',
+    ]);
+  });
+
+  it('an empty name and a name that is too long', () => {
+    expect(errorsOf("    labels: { '': x }")).toEqual(['A label of domain "a" has an empty name']);
+    expect(errorsOf('    labels: { ~: x }')).toEqual(['A label of domain "a" has an empty name']);
+    const long = 'n'.repeat(81);
+    expect(errorsOf(`    labels: { ${long}: x }`)).toEqual([
+      `Label name "${'n'.repeat(39)}…" of domain "a" is longer than 80 characters`,
+    ]);
+    expect(errorsOf(`    labels: { ${'n'.repeat(80)}: x }`)).toEqual([]);
+  });
+
+  it('warns about names that differ only in letter case — once per spelling — and keeps both', () => {
+    const result = parseArchitecture(`version: 1
+domains:
+  - id: a
+    name: A
+    labels: { Team: Shop }
+    components:
+      - id: a.x
+        name: X
+        labels: { team: Core }
+      - id: a.y
+        name: Y
+        labels: { Team: Other }
+      - id: a.z
+        name: Z
+        labels: { team: Again }
+      - id: a.w
+        name: W
+        labels: { TEAM: Loud }
+`);
+    expect(result.errors).toEqual([]);
+    // The second node that writes "team" is not told again: a slip on the first node of a
+    // hundred would otherwise be reported on the ninety-nine that are right.
+    expect(messages(result.warnings)).toEqual([
+      'Label "team" of component "a.x" differs only in letter case from "Team" (first used at domains[0].labels.Team); they are two labels',
+      'Label "TEAM" of component "a.w" differs only in letter case from "Team" (first used at domains[0].labels.Team); they are two labels',
+    ]);
+    expect(result.model ? labelNames(result.model) : []).toEqual(['Team', 'team', 'TEAM']);
+  });
+
+  it('the same name twice is the YAML library’s error; twice after trimming is a warning', () => {
+    expect(errorsOf('    labels:\n      team: A\n      team: B')).toEqual([
+      'Map keys must be unique',
+    ]);
+    const result = parseArchitecture(withDomain("    labels:\n      team: A\n      ' team': B"));
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      'Label "team" of domain "a" is written twice; the first value is kept',
+    ]);
+    expect(labelsOf(result.model, 'a')).toEqual([['team', 'A']]);
+  });
+});
+
+describe('parseArchitecture: presets', () => {
+  const LABELLED = `    owner: Shop team
+    labels: { lifecycle: live, tier: 2 }`;
+  const withPresets = (presets: string): string => withDomain(LABELLED, `presets:\n${presets}`);
+
+  it('reads name, label, description and the values in the order of the file', () => {
+    const model = expectClean(
+      parseArchitecture(
+        withPresets(`  - name: Lifecycle
+    label: lifecycle
+    description: '  Where each part is in its life  '
+    values:
+      planned: blue
+      live: GREEN
+      beta:
+      deprecated: '#E34'
+      gone: { light: '#C2410C', dark: '#fb923c' }
+      rest: gray
+  - { name: Teams, label: owner }
+  - name: Tiers
+    label: tier
+    values: { 3: red, 2: orange, 10: teal, 1.10: pink }
+`),
+      ),
+    );
+    expect(model.presets).toEqual([
+      {
+        name: 'Lifecycle',
+        label: 'lifecycle',
+        description: 'Where each part is in its life',
+        values: [
+          { value: 'planned', color: CATEGORICAL_COLORS[0] },
+          { value: 'live', color: CATEGORICAL_COLORS[5] },
+          { value: 'beta' },
+          { value: 'deprecated', color: { light: '#ee3344', dark: '#ee3344' } },
+          { value: 'gone', color: { light: '#c2410c', dark: '#fb923c' } },
+          { value: 'rest', color: OTHER_COLOR },
+        ],
+      },
+      { name: 'Teams', label: 'owner', values: [] },
+      {
+        name: 'Tiers',
+        label: 'tier',
+        // Not 2, 3, 10, 1.1: the order and the spelling of the file.
+        values: [
+          { value: '3', color: CATEGORICAL_COLORS[7] },
+          { value: '2', color: CATEGORICAL_COLORS[1] },
+          { value: '10', color: CATEGORICAL_COLORS[2] },
+          { value: '1.10', color: CATEGORICAL_COLORS[4] },
+        ],
+      },
+    ]);
+    // A description that is empty or only spaces is none.
+    const blank = expectClean(
+      parseArchitecture(
+        withPresets(`  - { name: Empty, label: tier, description: '' }
+  - { name: Spaces, label: tier, description: '   ' }
+`),
+      ),
+    );
+    expect(blank.presets.map((preset) => Object.keys(preset))).toEqual([
+      ['name', 'label', 'values'],
+      ['name', 'label', 'values'],
+    ]);
+  });
+
+  it('shape mistakes are errors, in the words of the other sections', () => {
+    const result = parseArchitecture(
+      withPresets(`  - { label: tier }
+  - just text
+  - { name: '', label: tier }
+  - { name: 12, label: tier }
+  - { name: NoLabel }
+  - { name: V, label: tier, values: [a] }
+  - { name: D, label: tier, description: [a] }
+  - { name: ${'p'.repeat(81)}, label: tier }
+`),
+    );
+    expect(messages(result.errors)).toEqual([
+      'Missing required field "name" in preset presets[0]',
+      'Preset presets[1] must be a mapping (key: value pairs), but got text "just text"',
+      '"name" of preset presets[2] must not be empty',
+      '"name" of preset presets[3] must be text, but got number 12',
+      'Missing required field "label" in preset "NoLabel"',
+      '"values" of preset "V" must be a mapping (key: value pairs), but got a list',
+      '"description" of preset "D" must be text, but got a list',
+      `"name" of preset "${'p'.repeat(39)}…" is longer than 80 characters`,
+    ]);
+    expect(result.model).toBeNull();
+    expect(
+      messages(parseArchitecture(withDomain(LABELLED, 'presets: { name: X }\n')).errors),
+    ).toEqual(['"presets" of the file must be a list, but got a mapping']);
+    // A name of exactly 80 characters is one.
+    expect(
+      parseArchitecture(withPresets(`  - { name: ${'p'.repeat(80)}, label: tier }\n`)).errors,
+    ).toEqual([]);
+  });
+
+  it('a name used twice is an error', () => {
+    const result = parseArchitecture(
+      withPresets(`  - { name: Life, label: lifecycle }
+  - { name: Other, label: tier }
+  - { name: ' Life ', label: tier }
+`),
+    );
+    expect(messages(result.errors)).toEqual([
+      'Duplicate preset name "Life" (first defined at presets[0])',
+    ]);
+    expect(result.errors[0]).toMatchObject({ path: 'presets[2].name', line: 15 });
+  });
+
+  it('a preset on a label no node has is a warning and is left out', () => {
+    const result = parseArchitecture(
+      withPresets(`  - { name: Typo, label: lifecycel }
+  - { name: Status, label: status }
+  - { name: Kept, label: lifecycle }
+`),
+    );
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      'Preset "Typo" colours by label "lifecycel", which no node has, so it is left out; did you mean "lifecycle"?',
+      // No node of this file has a status, although the key exists.
+      'Preset "Status" colours by label "status", which no node has, so it is left out',
+    ]);
+    expect(result.model?.presets.map((preset) => preset.name)).toEqual(['Kept']);
+  });
+
+  it('what is no colour is a warning; the value keeps its place and takes a free colour', () => {
+    const result = parseArchitecture(
+      withPresets(`  - name: Life
+    label: lifecycle
+    values:
+      a: gren
+      b: 'url(https://example.com/x)'
+      c: 123456
+      d: { light: '#fff' }
+      e: { light: red, dark: blue }
+      f: [red]
+      g: none
+      live: red
+`),
+    );
+    const help =
+      "Use blue, orange, teal, yellow, pink, green, purple, red, grey, or a hex colour in quotes such as '#1baf7a'. The next free colour is used";
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      `Unknown colour "gren" for value "a" of preset "Life"; did you mean "green"? ${help}`,
+      `Unknown colour "url(https://example.com/x)" for value "b" of preset "Life". ${help}`,
+      `The colour for value "c" of preset "Life" must be a colour name or a hex colour in quotes, but got number 123456. ${help}`,
+      `The colour for value "d" of preset "Life" must give "light" and "dark", each a hex colour in quotes, and nothing else. ${help}`,
+      `The colour for value "e" of preset "Life" must give "light" and "dark", each a hex colour in quotes, and nothing else. ${help}`,
+      `The colour for value "f" of preset "Life" must be a colour name or a hex colour in quotes, but got a list. ${help}`,
+      `Unknown colour "none" for value "g" of preset "Life". ${help}`,
+    ]);
+    expect(result.model?.presets[0]?.values).toEqual([
+      { value: 'a' },
+      { value: 'b' },
+      { value: 'c' },
+      { value: 'd' },
+      { value: 'e' },
+      { value: 'f' },
+      { value: 'g' },
+      { value: 'live', color: CATEGORICAL_COLORS[7] },
+    ]);
+  });
+
+  it('an unquoted hex colour is a comment to YAML: said so; a real comment is not', () => {
+    const result = parseArchitecture(
+      withPresets(`  - name: Life
+    label: lifecycle
+    values:
+      planned: #1baf7a
+      short: #1b7
+      commented: #1baf7a the green
+      beta: # not decided yet
+      word: #decade of work
+      letters: #abc later
+      seven: #1baf7a1
+      bare: #fff
+      live: '#1baf7a' # quoted: fine
+`),
+    );
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      'Value "planned" of preset "Life" has no colour: YAML reads the unquoted #1baf7a as a comment; write \'#1baf7a\' in quotes. The next free colour is used',
+      'Value "short" of preset "Life" has no colour: YAML reads the unquoted #1b7 as a comment; write \'#1b7\' in quotes. The next free colour is used',
+      'Value "commented" of preset "Life" has no colour: YAML reads the unquoted #1baf7a as a comment; write \'#1baf7a\' in quotes. The next free colour is used',
+      'Value "bare" of preset "Life" has no colour: YAML reads the unquoted #fff as a comment; write \'#fff\' in quotes. The next free colour is used',
+    ]);
+    expect(result.warnings[0]).toMatchObject({ path: 'presets[0].values.planned', line: 16 });
+    expect(result.model?.presets[0]?.values).toEqual([
+      { value: 'planned' },
+      { value: 'short' },
+      { value: 'commented' },
+      { value: 'beta' },
+      { value: 'word' },
+      { value: 'letters' },
+      { value: 'seven' },
+      { value: 'bare' },
+      { value: 'live', color: { light: '#1baf7a', dark: '#1baf7a' } },
+    ]);
+  });
+
+  it('an unquoted hex colour is said whatever stands on the line below it', () => {
+    const unquoted = (value: string, hex: string): string =>
+      `Value "${value}" of preset "Life" has no colour: YAML reads the unquoted #${hex} as a comment; write '#${hex}' in quotes. The next free colour is used`;
+    const said = (values: string, after = ''): string[] =>
+      messages(
+        parseArchitecture(
+          withPresets(`  - name: Life\n    label: lifecycle\n    values:\n${values}${after}`),
+        ).warnings,
+      );
+    // YAML joins a comment line to the comment of the empty value above it.
+    const commentBelow = `      planned: #1baf7a
+      # the next one
+      live: green
+`;
+    expect(said(commentBelow)).toEqual([unquoted('planned', '1baf7a')]);
+    expect(said(commentBelow.replace(/\n/g, '\r\n'))).toEqual([unquoted('planned', '1baf7a')]);
+    // A value that is commented out, and words after the colour on its own line.
+    expect(
+      said(`      planned: #1baf7a the green
+      # deprecated: red
+      short: #1b7
+      # beta: '#abc'
+      live: green
+`),
+    ).toEqual([unquoted('planned', '1baf7a'), unquoted('short', '1b7')]);
+    // The last value of the list: before the next preset, and before the end of the file.
+    expect(
+      said(
+        `      live: green
+      planned: #1baf7a
+`,
+        '  # the second preset\n  - { name: Tiers, label: tier }\n',
+      ),
+    ).toEqual([unquoted('planned', '1baf7a')]);
+    expect(said('      live: green\n      planned: #1baf7a\n# the end\n')).toEqual([
+      unquoted('planned', '1baf7a'),
+    ]);
+    // Letters in either case, as the file has them.
+    expect(said('      planned: #1BAF7A\n      short: #FfF\n')).toEqual([
+      unquoted('planned', '1BAF7A'),
+      unquoted('short', 'FfF'),
+    ]);
+    // What follows a real comment is a comment too, hex digits or not.
+    expect(
+      said(`      beta: # not decided yet
+      #1baf7a was the colour before
+      word: #decade of work
+      #fff
+      live: green
+`),
+    ).toEqual([]);
+  });
+
+  it('a listed value nobody has is said only when it resembles one somebody has', () => {
+    const result = parseArchitecture(`version: 1
+domains:
+  - { id: a, name: A, labels: { lifecycle: deprecated } }
+  - { id: b, name: B, labels: { lifecycle: live } }
+presets:
+  - name: Life
+    label: lifecycle
+    values: { planned: blue, depricated: red, Live: green }
+  - name: Both
+    label: lifecycle
+    values: { deprecated: red, depricated: red }
+`);
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      'Preset "Life" lists value "depricated", which no node has as its "lifecycle"; did you mean "deprecated"?',
+      'Preset "Life" lists value "Live", which no node has as its "lifecycle"; did you mean "live"?',
+    ]);
+    // A value some node has is no slip, whatever else on the map resembles it.
+    expectClean(
+      parseArchitecture(`version: 1
+domains:
+  - { id: a, name: A, labels: { lifecycle: live } }
+  - { id: b, name: B, labels: { lifecycle: Live } }
+presets:
+  - { name: Life, label: lifecycle, values: { live: green } }
+`),
+    );
+  });
+
+  it('values that differ only in their numerals are a series, not a slip', () => {
+    const result = parseArchitecture(`version: 1
+domains:
+  - { id: a, name: A, labels: { tier: tier-1, release: '1.10' } }
+  - { id: b, name: B, labels: { tier: tier-9, release: '1.9' } }
+presets:
+  - name: Tiers
+    label: tier
+    values: { tier-2: red, tier-3: blue, Tier-1: green }
+  - name: Releases
+    label: release
+    values: { '1.11': red, '2.0': blue }
+`);
+    expect(result.errors).toEqual([]);
+    // tier-2 and tier-3 are ahead of the map; "Tier-1" is tier-1 in another letter case.
+    expect(messages(result.warnings)).toEqual([
+      'Preset "Tiers" lists value "Tier-1", which no node has as its "tier"; did you mean "tier-1"?',
+    ]);
+  });
+
+  it('messages cut a value and a label they quote to 40 characters', () => {
+    const cut = (text: string): string => `${text.slice(0, 39)}…`;
+    const label = 'l'.repeat(60);
+    const onMap = 'word '.repeat(12).trim();
+    const slip = `${onMap}s`;
+    const twice = 't'.repeat(60);
+    const result = parseArchitecture(`version: 1
+domains:
+  - { id: a, name: A, labels: { ${label}: ${onMap} } }
+presets:
+  - name: P
+    label: ${label}
+    values:
+      ${slip}: gren
+      ${twice}: red
+      ' ${twice}': blue
+  - { name: Q, label: ${'m'.repeat(60)} }
+`);
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      `Preset "P" lists value "${cut(slip)}", which no node has as its "${cut(label)}"; did you mean "${cut(onMap)}"?`,
+      `Unknown colour "gren" for value "${cut(slip)}" of preset "P"; did you mean "green"? Use blue, orange, teal, yellow, pink, green, purple, red, grey, or a hex colour in quotes such as '#1baf7a'. The next free colour is used`,
+      `Preset "P" lists value "${cut(twice)}" twice; the first is kept`,
+      `Preset "Q" colours by label "${cut('m'.repeat(60))}", which no node has, so it is left out`,
+    ]);
+    // 40 characters are quoted whole.
+    const whole = 'v'.repeat(40);
+    expect(
+      messages(
+        parseArchitecture(`version: 1
+domains:
+  - { id: a, name: A, labels: { kind: ${whole} } }
+presets:
+  - { name: P, label: kind, values: { ${whole.toUpperCase()}: red } }
+`).warnings,
+      ),
+    ).toEqual([
+      `Preset "P" lists value "${whole.toUpperCase()}", which no node has as its "kind"; did you mean "${whole}"?`,
+    ]);
+  });
+
+  it('the hint for a listed value is the one the other hints would give (seeded)', () => {
+    let state = 11;
+    const random = (): number => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const below = (count: number): number => Math.floor(random() * count);
+    const letters = 'abAB.';
+    const letter = (): string => letters.charAt(below(letters.length));
+    const text = (): string => Array.from({ length: 1 + below(12) }, letter).join('');
+    // One slip of the hand: a letter replaced, added or dropped, or two neighbours swapped.
+    const slip = (value: string): string => {
+      const at = below(value.length);
+      const kind = below(4);
+      if (kind === 0) return value.slice(0, at) + letter() + value.slice(at + 1);
+      if (kind === 1) return value.slice(0, at) + letter() + value.slice(at);
+      if (kind === 2) return value.slice(0, at) + value.slice(at + 1);
+      return value.slice(0, at) + value.charAt(at + 1) + value.charAt(at) + value.slice(at + 2);
+    };
+    const hints = new Map<number, number>();
+    let byLastSegment = 0;
+    let silent = 0;
+    for (let round = 0; round < 300; round++) {
+      const onMap = Array.from({ length: 1 + below(6) }, text);
+      const listed = new Set<string>();
+      for (let i = 0; i < 1 + below(8); i++) {
+        let value = random() < 0.2 ? text() : (onMap[below(onMap.length)] ?? text());
+        if (random() < 0.2) value = value.slice(value.lastIndexOf('.') + 1);
+        for (let slips = below(6); slips > 0; slips--) value = slip(value);
+        if (value !== '') listed.add(value);
+      }
+      const result = parseArchitecture(
+        [
+          'version: 1',
+          'domains:',
+          ...onMap.map(
+            (value, i) => `  - { id: d${i}, name: D, labels: { v: ${JSON.stringify(value)} } }`,
+          ),
+          'presets:',
+          '  - name: P',
+          '    label: v',
+          '    values:',
+          ...[...listed].map((value) => `      ${JSON.stringify(value)}:`),
+          '',
+        ].join('\n'),
+      );
+      const unlisted = onMap.filter((value) => !listed.has(value));
+      const expected: string[] = [];
+      for (const value of listed) {
+        const meant = onMap.includes(value) ? undefined : suggest(value, unlisted);
+        if (meant === undefined) {
+          silent += 1;
+          continue;
+        }
+        const edits = editDistance(value.toLowerCase(), meant.toLowerCase());
+        if (edits > Math.min(3, Math.floor(value.length / 3))) byLastSegment += 1;
+        else hints.set(edits, (hints.get(edits) ?? 0) + 1);
+        expected.push(
+          `Preset "P" lists value "${value}", which no node has as its "v"; did you mean "${meant}"?`,
+        );
+      }
+      expect(result.errors).toEqual([]);
+      expect(messages(result.warnings)).toEqual(expected);
+    }
+    // Hints at every distance that counts as a slip and by the last segment, and values that
+    // get none.
+    for (const edits of [0, 1, 2, 3]) expect(hints.get(edits) ?? 0, `${edits}`).toBeGreaterThan(10);
+    expect(byLastSegment).toBeGreaterThan(10);
+    expect(silent).toBeGreaterThan(100);
+  });
+
+  it('stays fast when a preset lists many long values that resemble those of the nodes', () => {
+    const count = 60;
+    const base = 'word '.repeat(120).trim();
+    const withLetter = (at: number, letter: string): string =>
+      base.slice(0, at) + letter + base.slice(at + 1);
+    const onMap = Array.from({ length: count }, (_, i) => withLetter(5 * i, 'x'));
+    const text = [
+      'version: 1',
+      'domains:',
+      ...onMap.map((value, i) => `  - { id: d${i}, name: D, labels: { note: ${value} } }`),
+      'presets:',
+      '  - name: P',
+      '    label: note',
+      '    values:',
+      ...Array.from({ length: count }, (_, i) => `      ${withLetter(5 * i + 1, 'y')}:`),
+      '',
+    ].join('\n');
+    const started = performance.now();
+    const result = parseArchitecture(text);
+    const elapsed = performance.now() - started;
+    expect(result.errors).toEqual([]);
+    // Every listed value is two letters away from every value on the map.
+    expect(result.warnings).toHaveLength(count);
+    expect(result.warnings[0]?.message).toContain('; did you mean "xord word ');
+    // Well under a second here; it took about 20 s when a table of one length by the other was
+    // filled for every pair of values. The bound is generous to survive a loaded computer.
+    expect(elapsed).toBeLessThan(4500);
+  });
+
+  it('an unknown key, an empty value and a value listed twice are warnings', () => {
+    const result = parseArchitecture(
+      withPresets(`  - name: Life
+    label: lifecycle
+    colours: { live: green }
+    values:
+      '': red
+      live: green
+      ' live': red
+`),
+    );
+    expect(result.errors).toEqual([]);
+    expect(messages(result.warnings)).toEqual([
+      'Unknown key "colours" in preset "Life" (ignored)',
+      'Preset "Life" lists an empty value (ignored)',
+      'Preset "Life" lists value "live" twice; the first is kept',
+    ]);
+    expect(result.model?.presets[0]?.values).toEqual([
+      { value: 'live', color: CATEGORICAL_COLORS[5] },
+    ]);
+    expect(
+      messages(parseArchitecture(withPresets('  - { name: L, label: tier, value: 1 }\n')).warnings),
+    ).toEqual(['Unknown key "value" in preset "L" (ignored); did you mean "values"?']);
+  });
+
+  it('the same value twice in "values" is the YAML library’s error', () => {
+    const result = parseArchitecture(
+      withPresets('  - name: L\n    label: tier\n    values:\n      a: red\n      a: blue\n'),
+    );
+    expect(messages(result.errors)).toEqual(['Map keys must be unique']);
   });
 });
