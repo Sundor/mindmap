@@ -5,7 +5,7 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
-## Unreleased
+## 0.3.0 — 2026-10-10
 
 - **Changed behaviour — Edges on demand holds at every level of detail.** It used to hide the
   edges only at the Domains and Components levels and show every edge at the finer ones; now
