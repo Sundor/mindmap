@@ -98,8 +98,10 @@ panel, box and notice in its states, and the whole app in a few situations — w
 stylesheet in a marked block, light with a scheme switch, or dark by `--dark`. They are for
 restyling in a design tool: change the marked block and keep its selectors and custom-property
 names, then `npm run design:extract design-template/kit.html` lists what the restyled page
-changed in `src/ui/styles.css`, and with `--write` puts the returned stylesheet in place. A test
-fails when a control is added to the viewer and not to the pages (`src/design/pages.test.ts`).
+changed in `src/ui/styles.css`, and with `--write` puts the returned stylesheet in place. The
+guide to the pages, `docs/design-template-README.md` (which block to change, what to keep, how
+to hand the work back), is written beside them as `design-template/README.md`. A test fails when
+a control is added to the viewer and not to the pages (`src/design/pages.test.ts`).
 
 ## Build and share
 

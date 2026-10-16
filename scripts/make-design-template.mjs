@@ -53,6 +53,12 @@ try {
   } else {
     const out = path.resolve(root, value('--out') ?? 'design-template');
     await mkdir(out, { recursive: true });
+    // The guide to the pages goes with them: how to restyle them and hand them back.
+    await writeFile(
+      path.join(out, 'README.md'),
+      await readFile(path.join(root, 'docs/design-template-README.md'), 'utf8'),
+    );
+    console.log(path.join(out, 'README.md'));
     const { designPages } = await server.ssrLoadModule('/src/design/pages.ts');
     const { staticProblems } = await server.ssrLoadModule('/src/design/markup.ts');
     let problems = 0;
