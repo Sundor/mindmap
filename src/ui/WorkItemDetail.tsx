@@ -142,7 +142,7 @@ function PlaceNote({
         </p>
       );
     case 'off':
-      text = `Not drawn on the map: "Work items on the map" (Detail tab) is ${STORY_MODE_LABELS.off}.`;
+      text = `Not drawn on the map: "Work items on the map" (Map tab) is ${STORY_MODE_LABELS.off}.`;
       action = (
         <button
           type="button"

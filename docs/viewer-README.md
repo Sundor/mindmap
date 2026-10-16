@@ -144,7 +144,7 @@ edges: # the lines; the arrowhead is at "to"
   - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
   - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
 
-flows: # stories told through the edges: Visibility → Focus lights one and pales the rest
+flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
     name: Place an order # its entry in the focus list, the title of its panel
     kind: workflow # workflow (the default) or dataflow: its group in the focus list
@@ -477,10 +477,10 @@ those nodes. All other tags are shown as plain tags in the panel.
 
 - States **Closed, Done, Resolved, Removed** (any letter case) count as completed: such items
   are struck through and can be hidden with one setting. Every other state counts as open.
-- **Work items on the map**, on the **Detail** tab, shows nothing, the
+- **Work items on the map**, on the **Map** tab, shows nothing, the
   stories/bugs/features/epics, or those with their tasks. A box lists at most 8 lines and then
   "+_k_ more"; the detail panel always lists all.
-- `iteration` and `state` feed the filter under **Visibility → Work items shown**. The iteration
+- `iteration` and `state` feed the filter under **Map → Work items shown**. The iteration
   list offers every path above a sprint too (`Shop\PI 3` covers `Shop\PI 3\Sprint 13` and
   `…\Sprint 14`), so a programme increment or a release can be chosen as one scope.
 - Open items are what **Heat by work** measures; completed over all items is what the
@@ -660,27 +660,27 @@ To try another file, use **Open YAML…** / **Open work items…** on the **File
 ## Using the viewer
 
 The controls are in the **control panel** at the left, as tall as the window. Its **rail** is
-always there: **Search**, six tabs, and at the foot **Reload** (for a map the browser can read
-again from the disk), **Fit view** and **Hide** / **Show**. Beside the rail, the body of the
-panel shows the name and version of the viewer, the names of the two data files, the search
-box and the tab that is chosen. Below, "**Lenses → Colour by**" means the control _Colour by_
-on the tab _Lenses_.
+always there: **Search**, four tabs, and at the foot the **level of detail** (`Auto` or
+`Pinned`, with the level drawn under it: each click goes on to Auto, Domains, Components,
+Subcomponents, Everything and round again), **Reload** (for a map the browser can read again
+from the disk), **Fit view** and **Hide** / **Show**. Beside the rail, the body of the panel
+shows the name and version of the viewer, the names of the two data files, the search box and
+the tab that is chosen. Below, "**Lenses → Colour by**" means the control _Colour by_ on the
+tab _Lenses_. What a control does, and what its state means, is in its tooltip: hover it.
 
-| Tab            | Holds                                                                                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Detail**     | The level of detail; Collapse all, Expand all, Shrink collapsed groups (on while Close up the gaps is); Work items on the map; the zoom thresholds of Auto |
-| **Visibility** | Focus, with the Focus / Filter switch; the four edge-kind buttons, Edges on demand; Work items shown (states, iteration)                                   |
-| **Lenses**     | Colour by, Heat by work, Progress bars                                                                                                                     |
-| **Layout**     | Arrange in rows; Close up the gaps; Unlock / Lock positions (to move boxes and resize open groups), Reset positions                                        |
-| **Views**      | The saved views and Copy link                                                                                                                              |
-| **Files**      | What the two data files hold, Open YAML…, Open work items…, Export (PNG, SVG, HTML), Recent maps                                                           |
+| Tab        | Holds                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Map**    | Groups: Collapse all, Expand all, Shrink collapsed groups (on while Close up the gaps is); Work items on the map; Focus, with the Focus / Filter switch; the four edge-kind buttons, Edges on demand; Work items shown (states, iteration); Arrange in rows, Close up the gaps; Unlock / Lock positions (to move boxes and resize open groups), Reset positions; the zoom thresholds of Auto |
+| **Lenses** | Colour by, Heat by work, Progress bars                                                                                                                                                                                                                                                                                                                                                       |
+| **Views**  | The saved views and Copy link                                                                                                                                                                                                                                                                                                                                                                |
+| **Files**  | What the two data files hold, Open YAML…, Open work items…, Export (PNG, SVG, HTML), Recent maps                                                                                                                                                                                                                                                                                             |
 
 - A click on a tab shows it. A click on the tab that is shown, or **Hide**, hides the body and
   leaves the rail; **Show** or a click on any tab brings it back. The tab shown and whether the
   body is hidden are remembered.
-- The tabs say on the rail what is behind them: **Detail** the level being drawn (`Dom`, `Comp`,
-  `Sub`, `All`; highlighted while it is pinned), **Visibility** a dot while something is hidden,
-  paled or filtered, **Views** the number of saved views.
+- The rail says what is behind its buttons: the level-of-detail button the level being drawn
+  (`Dom`, `Comp`, `Sub`, `All`; filled while it is pinned, dashed while another level is to come),
+  **Map** a dot while something is hidden, paled or filtered, **Views** the number of saved views.
 - In a window at least 1400 px wide the open body stands beside the map. In a narrower one it
   lies over the left of the map until it is hidden; the map does not change size under it, and
   **Fit view**, the search and the links of the detail panel bring things on screen in the part
@@ -696,32 +696,32 @@ on the tab _Lenses_.
 The version of the viewer stands beside its name at the top of the control panel (for example
 `0.1.0`): quote it when you report something.
 
-| To                                    | Do                                                                                                     |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Pan / zoom                            | Drag the canvas / mouse wheel or pinch; or press, drag, wheel in the minimap                           |
-| See the whole map                     | **Fit view** on the rail                                                                               |
-| Choose how much is drawn              | **Detail** tab: Auto (follows the zoom), Domains, Components, Subcomponents, Everything                |
-| Collapse / expand a group             | Its chevron, or double-click it; **Detail → Collapse all** / **Expand all**                            |
-| Select a node, an edge or a work item | Click it: its neighbourhood stays lit, the rest dims, the detail panel opens                           |
-| Clear the selection                   | Click the empty canvas, **Esc**, or **×** in the panel                                                 |
-| Find a node or a work item            | Type in the search box (**/**, **Ctrl+K**, **Search**): names, IDs, `#1010`, title words               |
-| Show / hide an edge kind              | The four kind buttons under **Visibility → Edges** (the legend is on the map, top left)                |
-| Choose what is shown of the work      | **Detail → Work items on the map**: Off / Stories only / Stories + Tasks                               |
-| Hide work items by state or iteration | **Visibility → Work items shown**; **Show completed work items**                                       |
-| Follow one story through the map      | **Visibility → Focus**: a flow, an epic or a feature; or **Focus** in the panel of a work item or flow |
-| Draw only what a focus involves       | The **Focus / Filter** switch: on the **Visibility** tab, and in the bar above the map                 |
-| See where the work is                 | **Lenses → Heat by work**, **Progress bars**                                                           |
-| Colour the boxes                      | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric (legend top left)           |
-| Calm the overview                     | **Visibility → Edges on demand**                                                                       |
-| Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                             |
-| Save the map as a picture or a page   | **Files → Export**: **PNG**, **SVG** or **HTML**, of the map as it is drawn                            |
-| Lay out without the row bands         | **Layout → Arrange in rows**                                                                           |
-| Close up the room of closed groups    | **Layout → Close up the gaps**                                                                         |
-| Move and resize boxes by hand         | **Layout → Unlock positions**, drag a box or the edge of an open group; **Reset positions** undoes it  |
-| Load other data                       | **Files → Open YAML…**, **Open work items…**, or drop a file on the page                               |
-| Open a map again                      | **Files → Recent maps**, **Open again** on the start page (Edge, Chrome)                               |
-| See an edit of the data files         | **Reload** on the rail (maps opened from disk in Edge, Chrome); else open the file again               |
-| Get more room for the map             | **Hide** on the rail, or click the tab that is shown                                                   |
+| To                                    | Do                                                                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Pan / zoom                            | Drag the canvas / mouse wheel or pinch; or press, drag, wheel in the minimap                                                 |
+| See the whole map                     | **Fit view** on the rail                                                                                                     |
+| Choose how much is drawn              | The level-of-detail button on the rail: Auto (follows the zoom), Domains, Components, Subcomponents, Everything, round again |
+| Collapse / expand a group             | Its chevron, or double-click it; **Map → Collapse all** / **Expand all**                                                     |
+| Select a node, an edge or a work item | Click it: its neighbourhood stays lit, the rest dims, the detail panel opens                                                 |
+| Clear the selection                   | Click the empty canvas, **Esc**, or **×** in the panel                                                                       |
+| Find a node or a work item            | Type in the search box (**/**, **Ctrl+K**, **Search**): names, IDs, `#1010`, title words                                     |
+| Show / hide an edge kind              | The four kind buttons under **Map → Edges** (the legend is on the map, top left)                                             |
+| Choose what is shown of the work      | **Map → Work items on the map**: Off / Stories only / Stories + Tasks                                                        |
+| Hide work items by state or iteration | **Map → Work items shown**; **Show completed work items**                                                                    |
+| Follow one story through the map      | **Map → Focus**: a flow, an epic or a feature; or **Focus** in the panel of a work item or flow                              |
+| Draw only what a focus involves       | The **Focus / Filter** switch: on the **Map** tab, and in the bar above the map                                              |
+| See where the work is                 | **Lenses → Heat by work**, **Progress bars**                                                                                 |
+| Colour the boxes                      | **Lenses → Colour by**: a preset, a label, owner, status, tech or a metric (legend top left)                                 |
+| Calm the overview                     | **Map → Edges on demand**                                                                                                    |
+| Keep or share an arrangement          | **Views** tab: save under a name, come back, **Copy link**                                                                   |
+| Save the map as a picture or a page   | **Files → Export**: **PNG**, **SVG** or **HTML**, of the map as it is drawn                                                  |
+| Lay out without the row bands         | **Map → Arrange in rows**                                                                                                    |
+| Close up the room of closed groups    | **Map → Close up the gaps**                                                                                                  |
+| Move and resize boxes by hand         | **Map → Unlock positions**, drag a box or the edge of an open group; **Reset positions** undoes it                           |
+| Load other data                       | **Files → Open YAML…**, **Open work items…**, or drop a file on the page                                                     |
+| Open a map again                      | **Files → Recent maps**, **Open again** on the start page (Edge, Chrome)                                                     |
+| See an edit of the data files         | **Reload** on the rail (maps opened from disk in Edge, Chrome); else open the file again                                     |
+| Get more room for the map             | **Hide** on the rail, or click the tab that is shown                                                                         |
 
 - **Levels of detail.** Zoomed out, only domains are drawn and edges are merged per domain;
   zooming in shows components, then subcomponents with edge labels, then (**Everything**, above
@@ -730,7 +730,7 @@ The version of the viewer stands beside its name at the top of the control panel
   gaps** is on.
 - **Collapsed groups** keep their place, unless **Close up the gaps** is on; edges into them
   are re-attached to the group and merged (`×3`). Select a merged edge to see its member edges.
-- **Close up the gaps** (**Layout** tab, off by default) moves the boxes that are drawn closer
+- **Close up the gaps** (**Map** tab, off by default) moves the boxes that are drawn closer
   together whenever groups are closed — by hand, by **Collapse all**, by a pinned level, or in
   Auto by the zoom — and apart again when they open.
   - _What moves:_ a closed group is drawn shrunk and takes only the room of its small box; an
@@ -742,9 +742,11 @@ The version of the viewer stands beside its name at the top of the control panel
     right of another box stays on that side, and so does one above or below it; the space
     between two such boxes is never less than on the full map — or, where it is wider there,
     than the usual spacing, so a wide gap may close down to that — and the map never becomes
-    wider or taller than the full one. One exception: a box of the Unassigned area follows its
-    connections, as on the full map — it stays right of the row bands, but may come to stand
-    beside a box in the bands that it stood above or below.
+    wider or taller than the full one, except for the room of the edge labels: two boxes joined
+    by a labelled edge are kept far enough apart for the label to lie between them with the
+    line showing on both sides of it. One exception to the order: a box of the Unassigned area
+    follows its connections, as on the full map — it stays right of the row bands, but may come
+    to stand beside a box in the bands that it stood above or below.
     The map is still laid out only once, fully expanded, and closing up only moves its boxes,
     so it happens at once, and the same groups closed at the same level always give the same
     map: zooming across a level and back shows the map as it was. With every group open at
@@ -759,9 +761,9 @@ The version of the viewer stands beside its name at the top of the control panel
     middle of the canvas stays where it is, at the same zoom.
   - _Auto:_ the level follows the zoom once the view has come to rest (0.2 s after it last
     moved, and not while a finger is on the screen or the canvas is being dragged), not in the
-    middle of a zoom. Until then the **Detail** tab shows the level that is still drawn, the
-    button of the level to come has a dashed outline there, and so has the level shown on the
-    rail; the work-item lists of Everything come and go with their level, when the view rests.
+    middle of a zoom. Until then the level-of-detail button on the rail shows the level that is
+    still drawn, with a dashed outline (its tooltip names the level to come); the work-item
+    lists of Everything come and go with their level, when the view rests.
     Going to a search result, a link in the detail panel, a work item or a saved view first
     closes up the map for the level the move ends on, then moves there.
   - _Shrink collapsed groups_ is implied: while the option is on, closed groups are drawn shrunk
@@ -785,7 +787,7 @@ The version of the viewer stands beside its name at the top of the control panel
     left when the same ones are closed again; what was moved or resized on the full map shows
     only with the option off or every group open. In Auto every level that closes other groups
     is such a set.
-- **Moving and resizing by hand** (**Layout → Unlock positions**; **Lock positions** ends it).
+- **Moving and resizing by hand** (**Map → Unlock positions**; **Lock positions** ends it).
   Nothing else on the map moves for a box that is moved or resized, edges are redrawn on the
   drop, and **Reset positions** puts back every move and every size of the arrangement on
   screen.
@@ -834,7 +836,7 @@ The version of the viewer stands beside its name at the top of the control panel
     keyboard.
   - _Where it is kept:_ in this browser, per arrangement — rows on or off, each story mode,
     each filtered map and each closed-up arrangement have positions and sizes of their own —
-    and counted on the **Layout** tab ("2 moved · 1 resized"). Saved views and links carry
+    and counted on the **Map** tab ("2 moved · 1 resized"). Saved views and links carry
     neither positions nor sizes. A changed structure file starts from the arrangement the
     layout computes.
   - _Limits:_ the title bar is 40 px of the map high (16 px on the screen at 40%, 8 px at 20%),
@@ -846,9 +848,14 @@ The version of the viewer stands beside its name at the top of the control panel
     of the map is not on the minimap there (**Fit view** shows it); grown to the right or
     downward, the map and the minimap grow along. A box or an edge that is drawn over a handle
     takes the press there.
+- **Edge labels** sit on their lines: the line runs through the middle of the label, bent to it
+  where the label was moved beside the line to lie clear of a box, of a name or of another
+  label, and a dot in the colour of the edge on each side of the label, where the line crosses
+  its border, says which edge the label belongs to. The labels of edges running side by side
+  lie next to each other.
 - **Edge legend** (top left of the map): a sample of the line of each edge kind with its name,
   there whichever tab is shown; a kind that is hidden is struck through. It is a key only — the
-  kinds are switched under **Visibility → Edges**.
+  kinds are switched under **Map → Edges**.
 - **Detail panel** (right): for a node its description, parent path, children, incoming and
   outgoing edges and all its work items; for an edge its ends, kind, protocol and description;
   for a work item everything in the file, its parent, its tasks and the nodes it is tagged to.
@@ -856,7 +863,7 @@ The version of the viewer stands beside its name at the top of the control panel
   node, each followed by "(from _name_)" when the node has it from a group around it.
   Everything underlined is a link that selects that thing and brings it on screen.
 - **Focus** answers "what does this involve": choose a flow, an epic or a feature under
-  **Visibility → Focus**, or press **Focus** in the panel of any work item or flow (a story, a
+  **Map → Focus**, or press **Focus** in the panel of any work item or flow (a story, a
   bug). The nodes and edges involved stay lit — for a work item, the nodes of everything under
   it and the edges among them — and the rest of the map is paled; a bar above the map names the
   focus. Selecting things still works inside a focus, and what is selected is never paled.
@@ -1201,7 +1208,7 @@ The viewer works on a computer or a network without internet access. What that r
 | "… is no longer where it was"                              | The file was moved, renamed or deleted. Open it from where it is now; **×** forgets the old entry                                                       |
 | A recent map opens without its work items                  | They could not be read again (moved, or not allowed). Open them with **Open work items…**                                                               |
 | Work items load but none are on the map                    | No `comp:` tag matches a node ID — see the unknown tags and the coverage in the Diagnostics panel                                                       |
-| Items missing                                              | Skipped for a format problem (Diagnostics), or hidden by **Visibility → Work items shown**                                                              |
+| Items missing                                              | Skipped for a format problem (Diagnostics), or hidden by **Map → Work items shown**                                                                     |
 | No stories in the boxes                                    | They are listed at the **Everything** level only (zoom in, or click **Everything**); **Work items on the map** not Off                                  |
 | Only a part of the map is drawn                            | The **Focus / Filter** switch stands on Filter and a focus is chosen: set it to Focus, or **Clear focus** (bar above the map)                           |
 | A preset is missing from **Colour by**                     | Its `label` is on no node, so the preset is left out. The Diagnostics panel has the warning, with the label it may have meant                           |

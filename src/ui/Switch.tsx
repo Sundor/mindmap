@@ -10,6 +10,8 @@ export interface SwitchProps {
   /** The accessible name: what "on" means. */
   readonly label: string;
   readonly describedBy?: string;
+  /** The tooltip: what the position in force means. */
+  readonly title?: string;
 }
 
 export function Switch({
@@ -20,6 +22,7 @@ export function Switch({
   onLabel,
   label,
   describedBy,
+  title,
 }: SwitchProps) {
   return (
     <button
@@ -30,6 +33,7 @@ export function Switch({
       aria-checked={checked}
       aria-label={label}
       aria-describedby={describedBy}
+      title={title}
       onClick={() => onChange(!checked)}
     >
       <span className="switch-label switch-label-off" aria-hidden="true">

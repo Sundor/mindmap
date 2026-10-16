@@ -5,6 +5,35 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## Unreleased
+
+- **Changed behaviour — the level of detail is chosen on the rail.** The row of five buttons
+  has gone from the panel; the button above **Reload** on the rail goes round Auto, Domains,
+  Components, Subcomponents, Everything and back to Auto with each click. It says `Auto` or
+  `Pinned`, shows the level drawn under that (dashed while another level is to come once the
+  view rests), and its tooltip names the level, what it shows and what the next click does.
+- **Changed behaviour — one Map tab.** The Detail, Visibility and Layout tabs are one tab,
+  **Map**, with their controls as its sections: Groups, Work items on the map, Focus, Edges,
+  Work items shown, Layout (Arrange in rows, Close up the gaps), Positions and the zoom
+  thresholds of Auto. The rail has four tabs; a tab remembered from an earlier version opens
+  the Map tab. The explanations beside the controls are gone: what a control does, and what
+  its state means, is its tooltip (the note under the Focus / Filter switch is the tooltip of
+  the switch; the Map tab counts the groups collapsed by hand beside **Groups** and the boxes
+  moved or resized beside **Positions**).
+- **Edge labels lie next to each other, on their lines.** A label that would lie on a box, on
+  a name, on a work-item line or on another label is moved beside its line as well as along it,
+  so that the labels of edges running side by side come to lie next to each other instead of
+  staggered along the edges. The line is then drawn through the middle of the label, bent to it
+  in two pieces that meet smoothly, and a dot in the colour of the edge on each side of the
+  label, where the line crosses its border, says which edge the label belongs to; the export and
+  the design pages draw it the same way. A label also keeps clear of the boxes now, so that it
+  no longer covers an arrowhead where it can lie elsewhere.
+- **Close up the gaps keeps room for the edge labels.** Two boxes joined by a labelled edge —
+  themselves, or through what is drawn inside them — are kept far enough apart, along the axis
+  the edge crosses between them, for the label to lie between them with the line showing on
+  both sides (at most 160 px side by side and 72 px one above the other; no such room is kept
+  between the row bands). The closed-up map can be wider than the full one by that room.
+
 ## 0.3.0 — 2026-10-10
 
 - **Changed behaviour — Edges on demand holds at every level of detail.** It used to hide the

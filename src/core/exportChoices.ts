@@ -227,7 +227,7 @@ export function exportStamp(ms: number, offsetMinutes: number): string {
 
 // --- What a picture says about itself ------------------------------------------------------------
 
-/** The levels of detail in the words of the Detail tab. */
+/** The levels of detail in the words of the level-of-detail button. */
 export const PICTURE_LEVEL_NAMES: Readonly<Record<LodLevel, string>> = {
   domains: 'Domains',
   components: 'Components',

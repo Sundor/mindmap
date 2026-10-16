@@ -42,6 +42,7 @@ import {
   LOD_LEVELS,
   labelRoom,
   lodForZoom,
+  lodModeAfter,
   lodModeToDraw,
   miniMapNodes,
   lodRevealZoom,
@@ -174,18 +175,20 @@ import { browserStorage } from './browserStorage';
 import { canvasIsUp, whenCanvasReady } from './canvasReady';
 import { ColorLegend } from './ColorLegend';
 import { DETAIL_PANEL_WIDTH, fitOptions, fitRoom, fittedViewport, fitWithRoom } from './constants';
-import { ControlPanel, type ControlTabMarks } from './ControlPanel';
+import { ControlPanel, type ControlTabMarks, type LodControl } from './ControlPanel';
 import { coveredCanvasLeft } from './coveredCanvas';
 import { exportMap } from './exportMap';
 import { DetailPanel } from './DetailPanel';
-import { DetailTab } from './DetailTab';
+
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import { EdgeLegend } from './EdgeLegend';
 import { ErrorBoundary } from './ErrorBoundary';
 import { FilesTab } from './FilesTab';
 import { FilterContext, type FilteredMap } from './filterContext';
 import { FocusBar } from './FocusBar';
-import { LayoutTab } from './LayoutTab';
+import { LayoutSection } from './LayoutSection';
+import { GroupsSection, ThresholdsSection } from './LevelSections';
+import { lodButtonHint } from './lodHints';
 import { LensesTab } from './LensesTab';
 import { MapCanvas } from './MapCanvas';
 import type { NodeLenses } from './nodeLensContext';
@@ -195,7 +198,7 @@ import { SearchBox, type SearchOutside } from './SearchBox';
 import { useLevelAtRest, useLodLevel } from './useLodLevel';
 import { APP_VERSION } from './version';
 import { ViewsTab } from './ViewsTab';
-import { VisibilityTab, type WorkItemFilterChoices } from './VisibilityTab';
+import { VisibilitySection, type WorkItemFilterChoices } from './VisibilitySection';
 import type { WorkItemCanvas } from './workItemContext';
 import '@xyflow/react/dist/style.css';
 import './styles.css';
@@ -314,8 +317,8 @@ const NO_ROW_PLACEMENT: RowPlacement = { placedRow: new Map(), rowOf: new Map() 
 const FILES_ONLY: readonly ControlTab[] = ['files'];
 
 /**
- * The level being drawn, as the Detail tab says it on the rail of the control panel: in short
- * on the tab, by its name in the tooltip.
+ * The level being drawn, as the level-of-detail button on the rail of the control panel says
+ * it: in short on the button, by its name in the tooltip.
  */
 const LOD_MARKS: Readonly<Record<LodLevel, { readonly text: string; readonly name: string }>> = {
   domains: { text: 'Dom', name: 'Domains' },
@@ -2635,14 +2638,21 @@ function Viewer() {
   // out of sight: the level drawn (and the one to come), that something is hidden or paled, how
   // many views are kept.
   const fileNames = [source?.name, workLoad?.source?.name].filter((name) => name !== undefined);
+  const lodControl: LodControl | undefined = mapDrawn
+    ? {
+        mode: lodMode,
+        level: LOD_MARKS[drawnLevel],
+        pending: pendingLevel && { id: pendingLevel, name: LOD_MARKS[pendingLevel].name },
+        hint: lodButtonHint(
+          lodMode,
+          lodConfig,
+          LOD_MARKS[drawnLevel].name,
+          pendingLevel && LOD_MARKS[pendingLevel].name,
+        ),
+        onCycle: () => chooseLod(lodModeAfter(lodMode)),
+      }
+    : undefined;
   const marks: ControlTabMarks = {
-    level: mapDrawn
-      ? {
-          ...LOD_MARKS[drawnLevel],
-          pinned: lodMode !== 'auto',
-          pending: pendingLevel && LOD_MARKS[pendingLevel].name,
-        }
-      : undefined,
     hiding:
       hiddenKinds.size > 0 ||
       focus !== undefined ||
@@ -2713,6 +2723,7 @@ function Viewer() {
         available={model ? CONTROL_TABS : FILES_ONLY}
         onChange={changePanel}
         marks={marks}
+        lod={lodControl}
         head={
           <>
             <h1>Architecture Map</h1>
@@ -2795,49 +2806,55 @@ function Viewer() {
           </>
         }
         panels={{
-          detail: (
-            <DetailTab
-              drawn={mapDrawn}
-              lodMode={lodMode}
-              lodLevel={drawnLevel}
-              pendingLevel={pendingLevel}
-              lodConfig={lodConfig}
-              onChooseLod={chooseLod}
-              collapsedCount={collapsed.size}
-              canCollapseAll={groups.length > 0 && !allCollapsed}
-              onCollapseAll={collapseAll}
-              onExpandAll={expandAll}
-              settings={settings}
-              onChange={changeSettings}
-              hasWorkItems={workItems.length > 0}
-              onChooseStoryMode={chooseStoryMode}
-            />
-          ),
-          visibility: (
-            <VisibilityTab
-              drawn={mapDrawn}
-              focusChooser={
-                // Offered as soon as there is a structure, not only once it is drawn.
-                model && (model.flows.length > 0 || workItems.length > 0)
-                  ? {
-                      flows: model.flows,
-                      items: overlay?.shown ?? NO_WORK_ITEMS,
-                      focus,
-                      focusName: focusName(),
-                      onChoose: chooseFocus,
-                    }
-                  : undefined
-              }
-              filterOn={filterOn}
-              onFilterChange={switchFilter}
-              filterHint={filterHint()}
-              hiddenKinds={hiddenKinds}
-              kindCounts={kindCounts}
-              onToggleKind={toggleKind}
-              settings={settings}
-              onChange={changeSettings}
-              workItems={filterChoices}
-            />
+          map: (
+            <>
+              <GroupsSection
+                drawn={mapDrawn}
+                collapsedCount={collapsed.size}
+                canCollapseAll={groups.length > 0 && !allCollapsed}
+                onCollapseAll={collapseAll}
+                onExpandAll={expandAll}
+                settings={settings}
+                onChange={changeSettings}
+                hasWorkItems={workItems.length > 0}
+                onChooseStoryMode={chooseStoryMode}
+              />
+              <VisibilitySection
+                drawn={mapDrawn}
+                focusChooser={
+                  // Offered as soon as there is a structure, not only once it is drawn.
+                  model && (model.flows.length > 0 || workItems.length > 0)
+                    ? {
+                        flows: model.flows,
+                        items: overlay?.shown ?? NO_WORK_ITEMS,
+                        focus,
+                        focusName: focusName(),
+                        onChoose: chooseFocus,
+                      }
+                    : undefined
+                }
+                filterOn={filterOn}
+                onFilterChange={switchFilter}
+                filterHint={filterHint()}
+                hiddenKinds={hiddenKinds}
+                kindCounts={kindCounts}
+                onToggleKind={toggleKind}
+                settings={settings}
+                onChange={changeSettings}
+                workItems={filterChoices}
+              />
+              <LayoutSection
+                drawn={mapDrawn}
+                settings={settings}
+                onChange={changeSettings}
+                positionsUnlocked={positionsUnlocked}
+                onToggleUnlocked={() => setPositionsUnlocked((unlocked) => !unlocked)}
+                movedCount={byHand.positions.size}
+                resizedCount={resizedIds.size}
+                onResetPositions={resetPositions}
+              />
+              <ThresholdsSection drawn={mapDrawn} settings={settings} onChange={changeSettings} />
+            </>
           ),
           lenses: (
             <LensesTab
@@ -2846,18 +2863,6 @@ function Viewer() {
               onChange={changeLenses}
               colorChoices={colorChoices}
               hasWorkItems={workItems.length > 0}
-            />
-          ),
-          layout: (
-            <LayoutTab
-              drawn={mapDrawn}
-              settings={settings}
-              onChange={changeSettings}
-              positionsUnlocked={positionsUnlocked}
-              onToggleUnlocked={() => setPositionsUnlocked((unlocked) => !unlocked)}
-              movedCount={byHand.positions.size}
-              resizedCount={resizedIds.size}
-              onResetPositions={resetPositions}
             />
           ),
           views: (

@@ -16,14 +16,14 @@ import {
 } from './controlPanel';
 
 describe('the tabs', () => {
-  it('start on Detail, with the collapsed state not chosen', () => {
-    expect(DEFAULT_CONTROL_PANEL).toEqual({ tab: 'detail' });
-    expect(CONTROL_TABS[0]).toBe('detail');
+  it('start on Map, with the collapsed state not chosen', () => {
+    expect(DEFAULT_CONTROL_PANEL).toEqual({ tab: 'map' });
+    expect(CONTROL_TABS).toEqual(['map', 'lenses', 'views', 'files']);
   });
 
   it('are told from anything else', () => {
     for (const tab of CONTROL_TABS) expect(isControlTab(tab)).toBe(true);
-    for (const value of ['settings', 'Detail', '', 0, null, undefined, ['detail']]) {
+    for (const value of ['settings', 'Map', 'detail', '', 0, null, undefined, ['map']]) {
       expect(isControlTab(value)).toBe(false);
     }
   });
@@ -36,14 +36,23 @@ describe('stored control panel', () => {
     }
   });
 
-  it('falls back to Detail for an unknown or missing tab', () => {
-    expect(parseControlPanel('{"tab":"settings"}')).toEqual({ tab: 'detail' });
+  it('falls back to Map for an unknown or missing tab', () => {
+    expect(parseControlPanel('{"tab":"settings"}')).toEqual({ tab: 'map' });
     expect(parseControlPanel('{"tab":3,"collapsed":true}')).toEqual({
-      tab: 'detail',
+      tab: 'map',
       collapsed: true,
     });
-    expect(parseControlPanel('{}')).toEqual({ tab: 'detail' });
-    expect(parseControlPanel('[]')).toEqual({ tab: 'detail' });
+    expect(parseControlPanel('{}')).toEqual({ tab: 'map' });
+    expect(parseControlPanel('[]')).toEqual({ tab: 'map' });
+  });
+
+  it('opens the Map tab for the tabs of earlier versions that it took over', () => {
+    for (const former of ['detail', 'visibility', 'layout']) {
+      expect(parseControlPanel(`{"tab":"${former}","collapsed":false}`)).toEqual({
+        tab: 'map',
+        collapsed: false,
+      });
+    }
   });
 
   it('keeps `collapsed` only when it is a boolean', () => {
@@ -66,7 +75,7 @@ describe('stored control panel', () => {
     const states: ControlPanelState[] = [
       { tab: 'files' },
       { tab: 'lenses', collapsed: true },
-      { tab: 'layout', collapsed: false },
+      { tab: 'map', collapsed: false },
     ];
     for (const state of states) {
       expect(parseControlPanel(serializeControlPanel(state))).toEqual(state);
@@ -80,9 +89,9 @@ describe('stored control panel', () => {
       setItem: (key: string, value: string) => void items.set(key, value),
     };
     expect(readControlPanel(storage)).toBe(DEFAULT_CONTROL_PANEL);
-    const state: ControlPanelState = { tab: 'visibility', collapsed: true };
+    const state: ControlPanelState = { tab: 'views', collapsed: true };
     writeControlPanel(storage, state);
-    expect(items.get(CONTROL_PANEL_KEY)).toBe('{"tab":"visibility","collapsed":true}');
+    expect(items.get(CONTROL_PANEL_KEY)).toBe('{"tab":"views","collapsed":true}');
     expect(readControlPanel(storage)).toEqual(state);
     const broken = {
       getItem: () => {
@@ -101,8 +110,8 @@ describe('stored control panel', () => {
 
 describe('controlPanelCollapsed', () => {
   it('is what the user chose, whatever the window', () => {
-    expect(controlPanelCollapsed({ tab: 'detail', collapsed: true }, 1920)).toBe(true);
-    expect(controlPanelCollapsed({ tab: 'detail', collapsed: false }, 800)).toBe(false);
+    expect(controlPanelCollapsed({ tab: 'map', collapsed: true }, 1920)).toBe(true);
+    expect(controlPanelCollapsed({ tab: 'map', collapsed: false }, 800)).toBe(false);
   });
 
   it('follows the window while nothing is chosen: collapsed below the dock width', () => {
@@ -122,23 +131,23 @@ describe('shownControlTab', () => {
 
 describe('controlTabAfterKey', () => {
   it('steps down and up', () => {
-    expect(controlTabAfterKey('detail', 'ArrowDown')).toBe('visibility');
-    expect(controlTabAfterKey('layout', 'ArrowUp')).toBe('lenses');
+    expect(controlTabAfterKey('map', 'ArrowDown')).toBe('lenses');
+    expect(controlTabAfterKey('views', 'ArrowUp')).toBe('lenses');
   });
 
   it('wraps at both ends', () => {
-    expect(controlTabAfterKey('files', 'ArrowDown')).toBe('detail');
-    expect(controlTabAfterKey('detail', 'ArrowUp')).toBe('files');
+    expect(controlTabAfterKey('files', 'ArrowDown')).toBe('map');
+    expect(controlTabAfterKey('map', 'ArrowUp')).toBe('files');
   });
 
   it('goes to the first tab on Home and to the last on End', () => {
-    expect(controlTabAfterKey('layout', 'Home')).toBe('detail');
-    expect(controlTabAfterKey('layout', 'End')).toBe('files');
+    expect(controlTabAfterKey('views', 'Home')).toBe('map');
+    expect(controlTabAfterKey('views', 'End')).toBe('files');
   });
 
   it('gives nothing for any other key', () => {
     for (const key of ['ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Tab', 'a']) {
-      expect(controlTabAfterKey('detail', key)).toBeUndefined();
+      expect(controlTabAfterKey('map', key)).toBeUndefined();
     }
   });
 
@@ -148,10 +157,10 @@ describe('controlTabAfterKey', () => {
       expect(controlTabAfterKey('files', key, one)).toBe('files');
       expect(controlTabAfterKey('lenses', key, one)).toBe('files');
     }
-    const some = ['visibility', 'views'] as const;
-    expect(controlTabAfterKey('detail', 'ArrowDown', some)).toBe('visibility');
-    expect(controlTabAfterKey('detail', 'ArrowUp', some)).toBe('views');
-    expect(controlTabAfterKey('detail', 'ArrowDown', [])).toBeUndefined();
-    expect(controlTabAfterKey('detail', 'Home', [])).toBeUndefined();
+    const some = ['lenses', 'views'] as const;
+    expect(controlTabAfterKey('map', 'ArrowDown', some)).toBe('lenses');
+    expect(controlTabAfterKey('map', 'ArrowUp', some)).toBe('views');
+    expect(controlTabAfterKey('map', 'ArrowDown', [])).toBeUndefined();
+    expect(controlTabAfterKey('map', 'Home', [])).toBeUndefined();
   });
 });

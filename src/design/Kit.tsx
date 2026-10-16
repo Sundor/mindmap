@@ -15,28 +15,29 @@ import {
   type Diagnostic,
   type DisplaySettings,
   type EdgeKind,
-  type LodLevel,
   type RecentMap,
   type SavedView,
   type Selection,
   type ViewCenter,
 } from '../core';
 import { ColorLegend } from '../ui/ColorLegend';
-import { ControlPanel, type ControlTabMarks } from '../ui/ControlPanel';
+import { ControlPanel, type ControlTabMarks, type LodControl } from '../ui/ControlPanel';
 import { DetailPanel } from '../ui/DetailPanel';
-import { DetailTab } from '../ui/DetailTab';
+
 import { DiagnosticsPanel } from '../ui/DiagnosticsPanel';
 import { EdgeLegend } from '../ui/EdgeLegend';
 import { FilesTab } from '../ui/FilesTab';
 import { FilterContext, type FilteredMap } from '../ui/filterContext';
 import { FocusBar } from '../ui/FocusBar';
-import { LayoutTab } from '../ui/LayoutTab';
+import { LayoutSection } from '../ui/LayoutSection';
+import { GroupsSection, ThresholdsSection } from '../ui/LevelSections';
+import { lodButtonHint } from '../ui/lodHints';
 import { LensesTab } from '../ui/LensesTab';
 import { PanelIcon, type PanelIconName } from '../ui/PanelIcons';
 import { SearchBox, type SearchOutside } from '../ui/SearchBox';
 import { Switch } from '../ui/Switch';
 import { ViewsTab } from '../ui/ViewsTab';
-import { VisibilityTab } from '../ui/VisibilityTab';
+import { VisibilitySection } from '../ui/VisibilitySection';
 import { WorkItemIcon } from '../ui/WorkItemIcon';
 import {
   AppFrame,
@@ -61,24 +62,35 @@ const NO_KINDS: ReadonlySet<EdgeKind> = new Set();
 /** A filtered map that shows nothing: every link of the detail panel then points outside it. */
 const NOTHING_SHOWN: FilteredMap = { showsNode: () => false, showsEdge: () => false };
 const PANEL_ICONS: readonly PanelIconName[] = [
-  'detail',
-  'visibility',
+  'map',
   'lenses',
-  'layout',
   'views',
   'files',
   'search',
+  'lod',
   'reload',
   'fit',
   'hide',
   'show',
 ];
-const LEVEL_NAMES: Readonly<Record<LodLevel, { readonly text: string; readonly name: string }>> = {
-  domains: { text: 'Dom', name: 'Domains' },
-  components: { text: 'Comp', name: 'Components' },
-  subcomponents: { text: 'Sub', name: 'Subcomponents' },
-  detail: { text: 'All', name: 'Everything' },
+/** The level-of-detail button in its three looks: Auto, Auto with a level to come, pinned. */
+const LOD_AUTO: LodControl = {
+  mode: 'auto',
+  level: { text: 'Comp', name: 'Components' },
+  hint: lodButtonHint('auto', DEFAULT_DISPLAY_SETTINGS.lod, 'Components', undefined),
+  onCycle: noop,
 };
+const LOD_PENDING: LodControl = {
+  ...LOD_AUTO,
+  pending: { id: 'subcomponents', name: 'Subcomponents' },
+  hint: lodButtonHint('auto', DEFAULT_DISPLAY_SETTINGS.lod, 'Components', 'Subcomponents'),
+};
+const LOD_PINNED: LodControl = {
+  ...LOD_AUTO,
+  mode: 'components',
+  hint: lodButtonHint('components', DEFAULT_DISPLAY_SETTINGS.lod, 'Components', undefined),
+};
+
 const CENTER: ViewCenter = { x: 0, y: 0, zoom: 1 };
 const VIEWS: readonly SavedView[] = [
   { name: 'Overview', collapsed: [], hiddenKinds: [], lodMode: 'auto', center: CENTER },
@@ -127,10 +139,8 @@ function canvasOf(prepared: Prepared, id: string): Canvas {
 
 function panelsWith(tab: ControlTab, content: ReactNode): Readonly<Record<ControlTab, ReactNode>> {
   const panels: Record<ControlTab, ReactNode> = {
-    detail: null,
-    visibility: null,
+    map: null,
     lenses: null,
-    layout: null,
     views: null,
     files: null,
   };
@@ -154,70 +164,78 @@ export function TabContent({
     (choice) => choice.group === 'preset' && choice.description !== undefined,
   )?.value;
   switch (tab) {
-    case 'detail': {
-      const pinned = variant === 'pinned';
-      const shown: DisplaySettings = pinned
-        ? {
-            ...settings,
-            closeGaps: true,
-            compactCollapsed: true,
-            lod: { ...settings.lod, componentsZoom: settings.lod.componentsZoom * 1.2 },
-          }
-        : settings;
-      return (
-        <DetailTab
-          drawn
-          lodMode={pinned ? 'components' : 'auto'}
-          lodLevel="components"
-          pendingLevel={pinned ? undefined : 'subcomponents'}
-          lodConfig={shown.lod}
-          onChooseLod={noop}
-          collapsedCount={2}
-          canCollapseAll
-          onCollapseAll={noop}
-          onExpandAll={noop}
-          settings={shown}
-          onChange={noop}
-          hasWorkItems
-          onChooseStoryMode={noop}
-        />
-      );
-    }
-    case 'visibility': {
+    case 'map': {
+      // 'filter': the switch on Filter, the gaps closed up, the positions unlocked, thresholds
+      // changed; otherwise a focus in Focus mode, nothing moved.
       const filter = variant === 'filter';
       const states = [...new Set(items.map((item) => item.state))];
       const iterations = [
         ...new Set(items.flatMap((item) => (item.iteration ? [item.iteration] : []))),
       ];
-      return (
-        <VisibilityTab
-          drawn
-          focusChooser={{
-            flows: model.flows,
-            items,
-            focus: prepared.focus,
-            focusName: model.flows[0]?.name,
-            onChoose: noop,
-          }}
-          filterOn={filter}
-          onFilterChange={noop}
-          filterHint="The rest of the map is left out and the map is laid out again."
-          hiddenKinds={new Set<EdgeKind>(EDGE_KINDS.slice(1, 2))}
-          kindCounts={prepared.kindCounts}
-          onToggleKind={noop}
-          settings={
-            filter
-              ? { ...settings, focusMode: 'filter', edgesOnDemand: true, iteration: iterations[0] }
-              : { ...settings, hiddenStates: states.slice(-1) }
+      const shown: DisplaySettings = filter
+        ? {
+            ...settings,
+            closeGaps: true,
+            compactCollapsed: true,
+            lod: { ...settings.lod, componentsZoom: settings.lod.componentsZoom * 1.2 },
+            focusMode: 'filter',
+            edgesOnDemand: true,
+            iteration: iterations[0],
           }
-          onChange={noop}
-          workItems={{
-            states,
-            iterations,
-            shown: Math.max(0, items.length - 1),
-            total: items.length,
-          }}
-        />
+        : { ...settings, hiddenStates: states.slice(-1) };
+      return (
+        <>
+          <GroupsSection
+            drawn
+            collapsedCount={2}
+            canCollapseAll
+            onCollapseAll={noop}
+            onExpandAll={noop}
+            settings={shown}
+            onChange={noop}
+            hasWorkItems
+            onChooseStoryMode={noop}
+          />
+          <VisibilitySection
+            drawn
+            focusChooser={{
+              flows: model.flows,
+              items,
+              focus: prepared.focus,
+              focusName: model.flows[0]?.name,
+              onChoose: noop,
+            }}
+            filterOn={filter}
+            onFilterChange={noop}
+            filterHint={
+              filter
+                ? 'The rest of the map is left out and the map is laid out again.'
+                : 'The rest of the map is paled.'
+            }
+            hiddenKinds={new Set<EdgeKind>(EDGE_KINDS.slice(1, 2))}
+            kindCounts={prepared.kindCounts}
+            onToggleKind={noop}
+            settings={shown}
+            onChange={noop}
+            workItems={{
+              states,
+              iterations,
+              shown: Math.max(0, items.length - 1),
+              total: items.length,
+            }}
+          />
+          <LayoutSection
+            drawn
+            settings={shown}
+            onChange={noop}
+            positionsUnlocked={filter}
+            onToggleUnlocked={noop}
+            movedCount={filter ? 3 : 0}
+            resizedCount={filter ? 2 : 0}
+            onResetPositions={noop}
+          />
+          <ThresholdsSection drawn settings={shown} onChange={noop} />
+        </>
       );
     }
     case 'lenses':
@@ -230,21 +248,6 @@ export function TabContent({
           hasWorkItems
         />
       );
-    case 'layout': {
-      const unlocked = variant === 'unlocked';
-      return (
-        <LayoutTab
-          drawn
-          settings={settings}
-          onChange={noop}
-          positionsUnlocked={unlocked}
-          onToggleUnlocked={noop}
-          movedCount={unlocked ? 3 : 0}
-          resizedCount={unlocked ? 2 : 0}
-          onResetPositions={noop}
-        />
-      );
-    }
     case 'views':
       return (
         <ViewsTab
@@ -328,6 +331,8 @@ export interface PanelElementProps {
   readonly search?: ReactNode | undefined;
   readonly available?: readonly ControlTab[] | undefined;
   readonly marks?: ControlTabMarks | undefined;
+  /** The level-of-detail button on the rail; left out: Auto with Components drawn. */
+  readonly lod?: LodControl | undefined;
   /** The names of the files shown in the head; none before a map is loaded. */
   readonly files?: boolean | undefined;
   readonly reload?: boolean | undefined;
@@ -344,6 +349,7 @@ export function PanelElement({
   search,
   available = CONTROL_TABS,
   marks,
+  lod = LOD_AUTO,
   files = true,
   reload = true,
   fitDisabled = false,
@@ -354,7 +360,8 @@ export function PanelElement({
       collapsed={collapsed}
       available={available}
       onChange={noop}
-      marks={marks ?? { level: { ...LEVEL_NAMES.components, pinned: false }, views: VIEWS.length }}
+      marks={marks ?? { views: VIEWS.length }}
+      lod={files ? lod : undefined}
       head={
         <PanelHead
           version={VERSION}
@@ -589,41 +596,24 @@ export function KitSpecimen({
       return <TokenTable properties={properties} />;
     case 'icons':
       return <Icons />;
-    case 'panel-detail':
+    case 'panel-map':
+      return (
+        <Panel prepared={prepared} tab="map" marks={{ hiding: true, views: 2 }} lod={LOD_PENDING} />
+      );
+    case 'panel-map-filter':
       return (
         <Panel
           prepared={prepared}
-          tab="detail"
-          marks={{
-            level: { ...LEVEL_NAMES.components, pinned: false, pending: 'Sub' },
-            hiding: true,
-            views: 2,
-          }}
+          tab="map"
+          variant="filter"
+          marks={{ hiding: true, views: 2 }}
+          lod={LOD_PINNED}
         />
-      );
-    case 'panel-detail-pinned':
-      return (
-        <Panel
-          prepared={prepared}
-          tab="detail"
-          variant="pinned"
-          marks={{ level: { ...LEVEL_NAMES.components, pinned: true }, views: 2 }}
-        />
-      );
-    case 'panel-visibility':
-      return <Panel prepared={prepared} tab="visibility" marks={{ hiding: true }} />;
-    case 'panel-visibility-filter':
-      return (
-        <Panel prepared={prepared} tab="visibility" variant="filter" marks={{ hiding: true }} />
       );
     case 'panel-lenses':
       return <Panel prepared={prepared} tab="lenses" />;
     case 'panel-lenses-empty':
       return <Panel prepared={prepared} tab="lenses" variant="empty" />;
-    case 'panel-layout':
-      return <Panel prepared={prepared} tab="layout" />;
-    case 'panel-layout-unlocked':
-      return <Panel prepared={prepared} tab="layout" variant="unlocked" />;
     case 'panel-views':
       return <Panel prepared={prepared} tab="views" />;
     case 'panel-views-empty':
@@ -650,13 +640,13 @@ export function KitSpecimen({
         />
       );
     case 'panel-collapsed':
-      return <Panel prepared={prepared} tab="detail" collapsed />;
+      return <Panel prepared={prepared} tab="map" collapsed />;
     case 'panel-flyout':
     case 'panel-flyout-narrow':
       return (
         <Panel
           prepared={prepared}
-          tab="detail"
+          tab="map"
           collapsed
           searchOpen
           search={<Search prepared={prepared} query={hit} />}
@@ -666,7 +656,7 @@ export function KitSpecimen({
       return (
         <Panel
           prepared={prepared}
-          tab="detail"
+          tab="map"
           collapsed
           searchOpen
           search={<Search prepared={prepared} query="qzx" />}
@@ -676,7 +666,7 @@ export function KitSpecimen({
       return (
         <Panel
           prepared={prepared}
-          tab="detail"
+          tab="map"
           collapsed
           searchOpen
           search={<Search prepared={prepared} query={hit} outside={all} />}

@@ -1909,7 +1909,7 @@ async function run(viewerPath, browserPath) {
     );
 
     // --- Control panel: tabs, every control, the edge legend, collapsing, a reload ------------
-    const tabNames = ['detail', 'visibility', 'lenses', 'layout', 'views', 'files'];
+    const tabNames = ['map', 'lenses', 'views', 'files'];
     const tabsState = () => evaluate(`window.__smoke.tabs()`);
     /** @param {unknown} a @param {unknown} b */
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -1957,14 +1957,14 @@ async function run(viewerPath, browserPath) {
     );
     check(
       'until the reader chooses, the body of the control panel is open in a wide window and collapsed in a narrow one',
-      storedNarrow === null && (await panelStored()) === null && (await showsTab('detail')),
+      storedNarrow === null && (await panelStored()) === null && (await showsTab('map')),
       { storedNarrow, stored: await panelStored() },
     );
-    await click('#tab-visibility');
-    await until(`window.__smoke.attr('data-panel-tab') === 'visibility'`, 'the Visibility tab');
+    await click('#tab-lenses');
+    await until(`window.__smoke.attr('data-panel-tab') === 'lenses'`, 'the Lenses tab');
     check(
       'a click on another tab shows its panel and hides the others',
-      await showsTab('visibility'),
+      await showsTab('lenses'),
       await tabsState(),
     );
     // The arrow keys go from tab to tab and around the ends, Home and End to the first and the
@@ -1972,12 +1972,12 @@ async function run(viewerPath, browserPath) {
     /** @type {string[]} */
     const wrongKeys = [];
     for (const [key, keyCode, name] of /** @type {[string, number, string][]} */ ([
-      ['ArrowDown', 40, 'lenses'],
-      ['ArrowUp', 38, 'visibility'],
+      ['ArrowDown', 40, 'views'],
+      ['ArrowUp', 38, 'lenses'],
       ['End', 35, 'files'],
-      ['ArrowDown', 40, 'detail'],
+      ['ArrowDown', 40, 'map'],
       ['ArrowUp', 38, 'files'],
-      ['Home', 36, 'detail'],
+      ['Home', 36, 'map'],
     ])) {
       await press(key, { keyCode });
       await until(
@@ -2006,7 +2006,7 @@ async function run(viewerPath, browserPath) {
       'reload-files',
       'fit-view',
       'panel-toggle',
-      'lod-indicator',
+      'lod-cycle',
       'collapse-all',
       'expand-all',
       'compact-collapsed',
@@ -2016,7 +2016,6 @@ async function run(viewerPath, browserPath) {
       'focus-control',
       'focus-select',
       'focus-mode',
-      'focus-mode-hint',
       'kind-filters',
       'edges-on-demand',
       'workitem-filter',
@@ -2052,7 +2051,7 @@ async function run(viewerPath, browserPath) {
       .map((id) => `${id}: ${idCounts[id]}`);
     const choices = await evaluate(`({
       kinds: window.__smoke.count('#kind-filters button[data-kind]'),
-      levels: window.__smoke.count('#lod-indicator button[data-lod-option]'),
+      levels: window.__smoke.count('#lod-cycle'),
       stories: window.__smoke.count('#story-mode button[data-story-option]'),
       thresholds: window.__smoke.count('input[data-threshold]'),
     })`);
@@ -2060,16 +2059,17 @@ async function run(viewerPath, browserPath) {
       'every control is in the page exactly once, whichever tab is shown',
       notOnce.length === 0 &&
         choices.kinds === 4 &&
-        choices.levels === 5 &&
+        choices.levels === 1 &&
         choices.stories === 3 &&
         choices.thresholds === 3,
       { notOnce, choices },
     );
-    // A tab is named by its caption alone; what its mark stands for is said in its tooltip, and
-    // the names in the head of the panel, which are cut where they are long, in theirs.
+    // A tab is named by its caption alone; what its mark stands for is said in its tooltip, as
+    // the level-of-detail button says the level its mark abbreviates, and the names in the head
+    // of the panel, which are cut where they are long, in theirs.
     const tabTexts = await evaluate(`({
-      marks: [...document.querySelectorAll('.cp-tab .cp-tab-mark')].map((mark) => mark.getAttribute('aria-hidden')),
-      detail: document.querySelector('#tab-detail').title,
+      marks: [...document.querySelectorAll('.cp-rail .cp-tab-mark')].map((mark) => mark.getAttribute('aria-hidden')),
+      detail: document.querySelector('#lod-cycle').title,
       level: window.__smoke.attr('data-lod'),
       structure: document.querySelector('#source-name').title,
       workItems: document.querySelector('#workitems-source').title,
@@ -2081,10 +2081,11 @@ async function run(viewerPath, browserPath) {
       detail: 'Everything',
     });
     check(
-      'the tooltip of the Detail tab names the level its mark abbreviates, and the file names have tooltips',
+      'the tooltip of the level-of-detail button names the level its mark abbreviates, and the file names have tooltips',
       tabTexts.marks.length > 0 &&
         tabTexts.marks.every((/** @type {string | null} */ hidden) => hidden === 'true') &&
-        tabTexts.detail.startsWith(`Level of detail: ${levelNames[tabTexts.level]} — `) &&
+        tabTexts.detail.startsWith('Level of detail: ') &&
+        tabTexts.detail.includes(`${levelNames[tabTexts.level]} drawn`) &&
         tabTexts.structure.endsWith('architecture.yaml') &&
         tabTexts.workItems.endsWith('workitems.json'),
       tabTexts,
@@ -2253,7 +2254,7 @@ async function run(viewerPath, browserPath) {
         `[...document.querySelectorAll('h1')].filter((h) => h.getClientRects().length > 0).map((h) => h.textContent)`,
       );
     const headingsCollapsed = await headings();
-    await click('#tab-layout');
+    await click('#tab-lenses');
     await until(
       `window.__smoke.attr('data-panel-collapsed') === 'false'`,
       'the body opened by a tab',
@@ -2290,7 +2291,7 @@ async function run(viewerPath, browserPath) {
       'the Files tab on the start page',
     );
     await clickAt(
-      await evaluate(`window.__smoke.clickPoint('#tab-detail')`),
+      await evaluate(`window.__smoke.clickPoint('#tab-map')`),
       'a tab that cannot be chosen',
     );
     const tabsOnStart = await tabsState();
@@ -2317,14 +2318,29 @@ async function run(viewerPath, browserPath) {
       'a reload keeps the collapsed panel and, for the map, the tab chosen before',
       tabsReloaded.collapsed === 'true' &&
         tabsReloaded.shown.length === 0 &&
-        tabKept === 'layout' &&
-        (await showsTab('layout')),
+        tabKept === 'lenses' &&
+        (await showsTab('lenses')),
       { tabsReloaded, tabKept, now: await tabsState() },
     );
     // Back to the first tab, for the checks below.
-    await click('#tab-detail');
-    await until(`window.__smoke.attr('data-panel-tab') === 'detail'`, 'the first tab again');
+    await click('#tab-map');
+    await until(`window.__smoke.attr('data-panel-tab') === 'map'`, 'the first tab again');
     await park();
+    /**
+     * Goes round the level-of-detail button on the rail until `mode` is in force (Auto, then
+     * the levels coarsest first, then Auto again).
+     * @param {string} mode
+     */
+    const cycleLodTo = async (mode) => {
+      for (let turns = 0; turns < 5; turns++) {
+        if ((await evaluate(`window.__smoke.attr('data-lod-mode')`)) === mode) return;
+        await evaluate(`document.querySelector('#lod-cycle').click()`);
+        await sleep(60);
+      }
+      if ((await evaluate(`window.__smoke.attr('data-lod-mode')`)) !== mode) {
+        throw new Error(`the level of detail could not be set to ${mode}`);
+      }
+    };
 
     // --- Work items: loaded next to the structure, room reserved by the layout ---------------
     const work = await evaluate(`(() => {
@@ -2380,9 +2396,7 @@ async function run(viewerPath, browserPath) {
       coarse,
     );
     const pinLevel = async (/** @type {string} */ mode, /** @type {string} */ level) => {
-      await evaluate(
-        `document.querySelector('#lod-indicator [data-lod-option="${mode}"]').click()`,
-      );
+      await cycleLodTo(mode);
       await until(`window.__smoke.attr('data-lod') === '${level}'`, `the ${level} level`);
       await until(
         `window.__smoke.attr('data-lines-laid-out') === 'true'`,
@@ -2412,9 +2426,7 @@ async function run(viewerPath, browserPath) {
     const text = (/** @type {string} */ selector) =>
       evaluate(`window.__smoke.text(${JSON.stringify(selector)})`);
     const pinLod = async (/** @type {string} */ mode, /** @type {string} */ level = mode) => {
-      await evaluate(
-        `document.querySelector('#lod-indicator [data-lod-option="${mode}"]').click()`,
-      );
+      await cycleLodTo(mode);
       await until(`window.__smoke.attr('data-lod') === '${level}'`, `the ${level} level`);
       await until(
         `window.__smoke.attr('data-lines-laid-out') === 'true'`,
@@ -3071,9 +3083,8 @@ async function run(viewerPath, browserPath) {
       'search brings the node on screen',
       await evaluate(`window.__smoke.onScreen('.react-flow__node[data-id="storefront.apps.ios"]')`),
     );
-    // Level-of-detail buttons: a pinned level overrides the zoom, Auto follows it again.
-    const pin = (/** @type {string} */ mode) =>
-      evaluate(`document.querySelector('#lod-indicator [data-lod-option="${mode}"]').click()`);
+    // The level-of-detail button: a pinned level overrides the zoom, Auto follows it again.
+    const pin = cycleLodTo;
     await pin('domains');
     await until(`window.__smoke.attr('data-lod') === 'domains'`, 'the pinned domains level');
     check(
@@ -3613,8 +3624,8 @@ async function run(viewerPath, browserPath) {
       area.scrollTop = area.scrollHeight;
       return area.scrollTop;
     })()`);
-    await clickAt(await evaluate(`window.__smoke.clickPoint('#tab-detail')`), 'the Detail tab');
-    await until(`window.__smoke.attr('data-panel-tab') === 'detail'`, 'the Detail tab');
+    await clickAt(await evaluate(`window.__smoke.clickPoint('#tab-map')`), 'the Map tab');
+    await until(`window.__smoke.attr('data-panel-tab') === 'map'`, 'the Map tab');
     const otherTab = await evaluate(`(() => {
       const area = document.querySelector('.cp-panels');
       return { top: area.scrollTop, scrolls: area.scrollHeight > area.clientHeight };
@@ -3809,13 +3820,15 @@ async function run(viewerPath, browserPath) {
       const refitted = await viewNow();
       return { fitted: off.length === 0 && sameView(view, refitted), off, view, refitted };
     };
+    /** What the position of the switch means for the map: the tooltip of the switch. */
+    const switchHint = () => evaluate(`document.querySelector('#focus-mode')?.title ?? null`);
     const switchState = () =>
       evaluate(`(() => {
         const control = document.querySelector('#focus-mode');
         return {
           role: control?.getAttribute('role') ?? null,
           checked: control?.getAttribute('aria-checked') ?? null,
-          hint: window.__smoke.text('#focus-mode-hint'),
+          hint: control?.title ?? null,
           mode: window.__smoke.attr('data-focus-mode'),
           filtered: window.__smoke.attr('data-filtered'),
           nodes: window.__smoke.attr('data-drawn-nodes'),
@@ -3856,27 +3869,9 @@ async function run(viewerPath, browserPath) {
       `[...document.querySelectorAll('#detail-flow-steps [data-edge-id]')].map((step) => step.dataset.edgeId)`,
     );
     const viewFocused = await viewNow();
-    // The height of the hint under the switch in every frame from here on: while the reduced
-    // map is laid out the hint says so on one line, like the texts before and after it.
-    await showControl('#focus-mode');
-    await evaluate(`(() => {
-      const seen = new Set();
-      window.__hintHeights = seen;
-      const step = () => {
-        seen.add(Math.round(document.querySelector('#focus-mode-hint').getBoundingClientRect().height));
-        if (window.__hintHeights === seen) requestAnimationFrame(step);
-      };
-      step();
-    })()`);
     await click('#focus-mode');
     await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode');
     await untilFiltered(flowFocus);
-    /** @type {number[]} */
-    const hintHeights = await evaluate(`(() => {
-      const seen = [...window.__hintHeights];
-      window.__hintHeights = null;
-      return seen;
-    })()`);
     const switchOn = await switchState();
     check(
       'the switch turns Filter on: the map is reduced to the 14 nodes and 7 edges of the focused flow',
@@ -3919,13 +3914,8 @@ async function run(viewerPath, browserPath) {
         (await evaluate(
           `document.querySelector('#focus-bar-mode').getAttribute('aria-checked')`,
         )) === 'true' &&
-        (await text('#focus-mode-hint')) === 'Not drawn: 31 of 45 nodes.',
-      { barFiltered, hint: await text('#focus-mode-hint') },
-    );
-    check(
-      'the hint at the switch keeps its height while the reduced map is laid out: nothing below it moves',
-      hintHeights.length === 1 && Number(hintHeights[0]) > 0,
-      hintHeights,
+        (await switchHint()) === 'Not drawn: 31 of 45 nodes.',
+      { barFiltered, hint: await switchHint() },
     );
     // The detail panel lists the whole model: what the filtered map leaves out is marked there.
     await click('.react-flow__node[data-id="data.analytics"] .arch-node-name');
@@ -4201,12 +4191,12 @@ async function run(viewerPath, browserPath) {
     await click('#focus-mode');
     await until(`window.__smoke.attr('data-focus-mode') === 'filter'`, 'Filter mode for the bug');
     await until(
-      `window.__smoke.text('#focus-mode-hint') !== 'The rest of the map is paled.'`,
+      `(document.querySelector('#focus-mode')?.title ?? null) !== 'The rest of the map is paled.'`,
       'the hint for a focus that involves nothing',
     );
     const nothingInvolved = {
       bar: await text('#focus-bar'),
-      hint: await text('#focus-mode-hint'),
+      hint: await switchHint(),
       filtered: await attr('data-filtered'),
       drawn: await attr('data-drawn-nodes'),
       unfaded: (await evaluate(`window.__smoke.nodeIds(':not(.arch-faded)')`)).length,
@@ -4549,7 +4539,7 @@ async function run(viewerPath, browserPath) {
         (await attr('data-focus')) === null &&
         (await attr('data-filtered')) === null &&
         (await attr('data-drawn-nodes')) === '45' &&
-        (await text('#focus-mode-hint')).includes('Applies once a focus is chosen') &&
+        (await switchHint()).includes('Applies once a focus is chosen') &&
         sameView(await viewNow(), viewWhole),
       { mode: await attr('data-focus-mode'), viewWhole, now: await viewNow() },
     );
@@ -5780,7 +5770,7 @@ async function run(viewerPath, browserPath) {
       `window.__smoke.count('#views-list li[data-view-name="${START_VIEW}"]') === 1`,
       'the view to come back to',
     );
-    // The body of the control panel open on the Layout tab: the canvas keeps its width from here.
+    // The body of the control panel open on the Map tab: the canvas keeps its width from here.
     await showControl('#close-gaps');
 
     const frame = () => /** @type {Promise<Frame>} */ (evaluate(`window.__smoke.frame()`));
@@ -6881,7 +6871,7 @@ async function run(viewerPath, browserPath) {
 
     // In Auto the level drawn waits for the view to rest. While a gesture lasts — here the
     // canvas held with the mouse while the wheel zooms from the Domains level to Everything —
-    // the map stays as it is, on the layout without the lists, and the Detail tab and its mark
+    // the map stays as it is, on the layout without the lists, and the rail button and its mark
     // on the rail show the level that is to come. Let go, that level is drawn.
     await pinLod('auto', await attr('data-zoom-lod'));
     await zoomToLevel('domains');
@@ -6903,8 +6893,8 @@ async function run(viewerPath, browserPath) {
       await until(`window.__smoke.viewport().zoom > ${zoom}`, 'the zoom after a wheel turn');
     }
     const toComeShown = await eventually(
-      `window.__smoke.attr('data-zoom-lod') === 'detail' && document.querySelector('#lod-indicator')?.dataset.lodPending === 'detail' && window.__smoke.count('#lod-indicator .lod-step-pending[data-lod-option="detail"]') === 1 && window.__smoke.count('#tab-detail .cp-tab-mark-pending') === 1`,
-      'the level to come shown on the Detail tab and on the rail',
+      `window.__smoke.attr('data-zoom-lod') === 'detail' && document.querySelector('#lod-cycle')?.dataset.lodPending === 'detail' && window.__smoke.count('#lod-cycle .cp-tab-mark-pending') === 1`,
+      'the level to come shown on the rail',
     );
     // Longer than the level and the lists wait for a view at rest.
     const levelsHeld = await levelsDuring(900);
@@ -6926,11 +6916,9 @@ async function run(viewerPath, browserPath) {
     );
     await settled();
     const toComeAfter =
-      (await countOf('#lod-indicator[data-lod-pending]')) +
-      (await countOf('.lod-step-pending')) +
-      (await countOf('.cp-tab-mark-pending'));
+      (await countOf('#lod-cycle[data-lod-pending]')) + (await countOf('.cp-tab-mark-pending'));
     check(
-      'closed up in Auto: while the canvas is held and the wheel zooms from the Domains level to Everything, the map stays as it is and the Detail tab and the rail show the level to come; let go, that level is drawn with its lists',
+      'closed up in Auto: while the canvas is held and the wheel zooms from the Domains level to Everything, the map stays as it is and the rail shows the level to come; let go, that level is drawn with its lists',
       toComeShown &&
         levelsHeld.length === 1 &&
         levelsHeld[0] === 'domains false' &&
@@ -7328,7 +7316,7 @@ async function run(viewerPath, browserPath) {
         Math.sign(moved) === Math.sign(dragged);
 
       // The full map with rows, every group open, the Components level pinned: the domains are
-      // drawn open, the components in them closed. The Layout tab stays open from here, so the
+      // drawn open, the components in them closed. The Map tab stays open from here, so the
       // canvas keeps its width.
       await showControl('#unlock-positions');
       await closeUp(false);
@@ -7342,7 +7330,9 @@ async function run(viewerPath, browserPath) {
       const lockedMarks = {
         controls: await countOf('.arch-resize'),
         titles: await countOf('.react-flow__node.arch-title-drag'),
-        hint: await countOf('#resize-hint'),
+        hint: await evaluate(
+          `document.querySelector('#unlock-positions').title.includes('corner')`,
+        ),
       };
       await unlock(true);
       await resetByHand();
@@ -7624,14 +7614,11 @@ async function run(viewerPath, browserPath) {
             .slice(0, 4),
         },
       );
-      await showControl('#resize-hint');
+      const unlockedHint = await evaluate(`document.querySelector('#unlock-positions').title`);
       check(
-        'the Layout tab says how groups are resized only while the positions are unlocked',
-        lockedMarks.hint === 0 &&
-          (await evaluate(
-            `(document.querySelector('#resize-hint')?.getClientRects().length ?? 0) > 0`,
-          )) === true,
-        { locked: lockedMarks.hint, hint: await text('#resize-hint') },
+        'the Map tab says how groups are resized only while the positions are unlocked',
+        lockedMarks.hint === false && unlockedHint.includes('corner'),
+        { locked: lockedMarks.hint, hint: unlockedHint },
       );
 
       // Where the layout left no room, an edge does not come in: the box is back at the drop.
@@ -7736,7 +7723,7 @@ async function run(viewerPath, browserPath) {
         .map(([, value]) => JSON.parse(value)[EAST])
         .find((entry) => Array.isArray(entry));
       check(
-        'the Layout tab counts the resized group, and its size is kept in the browser as how far each edge was moved, beside the positions, which stay as they were',
+        'the Map tab counts the resized group, and its size is kept in the browser as how far each edge was moved, beside the positions, which stay as they were',
         (await text('#hand-count')) === '1 resized' &&
           sizeKept !== undefined &&
           sizeKept.length === 4 &&

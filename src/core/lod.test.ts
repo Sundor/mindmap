@@ -7,9 +7,11 @@ import {
   LOD_CONFIG,
   LOD_MODES,
   lodForZoom,
+  lodModeAfter,
   lodModeToReveal,
   lodThreshold,
   type LodConfig,
+  type LodMode,
 } from './lod';
 import { LOD_LEVELS, type LodLevel } from './visibility';
 
@@ -278,6 +280,17 @@ describe('level-of-detail mode', () => {
     for (const value of ['', 'Auto', 'everything', 3, null, undefined]) {
       expect(isLodMode(value)).toBe(false);
     }
+  });
+
+  it('goes round from Auto through the levels, coarsest first, back to Auto', () => {
+    const round = [];
+    let mode: LodMode = 'auto';
+    do {
+      round.push(mode);
+      mode = lodModeAfter(mode);
+    } while (mode !== 'auto' && round.length < 10);
+    expect(round).toEqual(['auto', 'domains', 'components', 'subcomponents', 'detail']);
+    expect(lodModeAfter('detail')).toBe('auto');
   });
 
   it('auto follows the zoom, a pinned level ignores it', () => {

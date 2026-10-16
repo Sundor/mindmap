@@ -1,8 +1,8 @@
 // The control panel at the left of the map: a rail that is always there — search, one tab per
-// group of controls, and the actions wanted at any time — and beside it a body with the title,
-// the search box and the tab that is shown. The body can be collapsed to the rail; the search
-// box then shows as a small card beside it while it is in use. The shell knows nothing about
-// the controls: they come as props.
+// group of controls, and the actions wanted at any time, among them the level of detail — and
+// beside it a body with the title, the search box and the tab that is shown. The body can be
+// collapsed to the rail; the search box then shows as a small card beside it while it is in
+// use. The shell knows nothing about the controls: they come as props.
 
 import {
   useLayoutEffect,
@@ -11,59 +11,61 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { CONTROL_TABS, controlTabAfterKey, type ControlTab } from '../core';
+import {
+  CONTROL_TABS,
+  controlTabAfterKey,
+  type ControlTab,
+  type LodLevel,
+  type LodMode,
+} from '../core';
 import { PanelIcon } from './PanelIcons';
 
 /** Captions on the rail. */
 const TAB_LABELS: Readonly<Record<ControlTab, string>> = {
-  detail: 'Detail',
-  visibility: 'Visibility',
+  map: 'Map',
   lenses: 'Lenses',
-  layout: 'Layout',
   views: 'Views',
   files: 'Files',
 };
 
-/** Headings of the tab panels. "Level of detail", not to be taken for the detail panel. */
+/** Headings of the tab panels. */
 const TAB_HEADINGS: Readonly<Record<ControlTab, string>> = {
-  detail: 'Level of detail',
-  visibility: 'Visibility',
+  map: 'Map',
   lenses: 'Lenses',
-  layout: 'Layout',
   views: 'Saved views',
   files: 'Files',
 };
 
 /** Tooltips of the tabs: the heading, and what is found under it. */
 const TAB_HINTS: Readonly<Record<ControlTab, string>> = {
-  detail: 'Level of detail',
-  visibility: 'Visibility: focus, edge kinds, work items shown',
+  map: 'Map: groups, work items on the map, focus, edges, work items shown, layout, positions, zoom thresholds',
   lenses: 'Lenses: colour, heat and progress on the boxes',
-  layout: 'Layout: rows, positions set by hand',
   views: 'Saved views: keep the current arrangement under a name, or share it as a link',
   files: 'Files',
 };
 
 /** What the tabs say on the rail about the controls behind them. */
 export interface ControlTabMarks {
-  /**
-   * Detail: the level being drawn — its name, the short form shown —, whether it is pinned, and
-   * the name of the level that is drawn once the view rests, when that is another one.
-   */
-  readonly level?:
-    | {
-        readonly text: string;
-        readonly name: string;
-        readonly pinned: boolean;
-        readonly pending?: string | undefined;
-      }
-    | undefined;
-  /** Visibility: something is hidden, paled or filtered. */
+  /** Map: something is hidden, paled or filtered. */
   readonly hiding?: boolean | undefined;
   /** Views: the number of saved views. */
   readonly views?: number | undefined;
   /** Files: the names of the files in use. */
   readonly files?: string | undefined;
+}
+
+/** The level-of-detail button on the rail: what it shows and what a click does. */
+export interface LodControl {
+  /** The mode in force: Auto, or a pinned level. */
+  readonly mode: LodMode;
+  /** The level being drawn: in short on the rail, by its name in the tooltip. */
+  readonly level: { readonly text: string; readonly name: string };
+  /** The level drawn once the view rests, when that is another one. */
+  readonly pending?: { readonly id: LodLevel; readonly name: string } | undefined;
+  /** The tooltip: the mode, what it shows, what a click does. */
+  readonly hint: string;
+  /** A click: the next mode of the round (Auto, the levels coarsest first, Auto again). */
+  readonly onCycle: () => void;
 }
 
 export interface ControlPanelProps {
@@ -75,6 +77,8 @@ export interface ControlPanelProps {
   /** A user action: a tab chosen, the body hidden or shown. */
   readonly onChange: (next: { readonly tab: ControlTab; readonly collapsed: boolean }) => void;
   readonly marks?: ControlTabMarks | undefined;
+  /** The level of detail; undefined while no map is drawn (the button is then disabled). */
+  readonly lod?: LodControl | undefined;
   /** Title, version, file names. */
   readonly head: ReactNode;
   /** The search box: one instance, kept mounted; undefined while there is nothing to search. */
@@ -84,7 +88,7 @@ export interface ControlPanelProps {
   readonly onSearchOpenChange: (open: boolean) => void;
   /** `#search-open` was pressed. */
   readonly onSearch: () => void;
-  /** Buttons at the foot of the rail, above Hide / Show (Reload, Fit view). */
+  /** Buttons at the foot of the rail, below the level of detail and above Hide / Show (Reload, Fit view). */
   readonly actions: ReactNode;
   /** The contents of each tab; all stay mounted. */
   readonly panels: Readonly<Record<ControlTab, ReactNode>>;
@@ -95,13 +99,7 @@ const NO_MARKS: ControlTabMarks = {};
 function tabHint(id: ControlTab, marks: ControlTabMarks): string {
   const hint = TAB_HINTS[id];
   switch (id) {
-    case 'detail':
-      if (!marks.level) return hint;
-      if (marks.level.pinned) return `${hint}: ${marks.level.name} — pinned`;
-      return marks.level.pending === undefined
-        ? `${hint}: ${marks.level.name} — follows the zoom`
-        : `${hint}: ${marks.level.name} — ${marks.level.pending} once the view rests`;
-    case 'visibility':
+    case 'map':
       return marks.hiding ? `${hint} — something is hidden, paled or filtered` : hint;
     case 'views':
       return marks.views ? `${hint} — ${marks.views} saved` : hint;
@@ -114,16 +112,7 @@ function tabHint(id: ControlTab, marks: ControlTabMarks): string {
 
 /** A mark is for the eye: the tab is named by its caption, and its tooltip says the mark in full. */
 function TabMark({ id, marks }: { readonly id: ControlTab; readonly marks: ControlTabMarks }) {
-  if (id === 'detail' && marks.level) {
-    const pinned = marks.level.pinned ? ' cp-tab-mark-pinned' : '';
-    const pending = marks.level.pending === undefined ? '' : ' cp-tab-mark-pending';
-    return (
-      <span className={`cp-tab-mark cp-tab-mark-level${pinned}${pending}`} aria-hidden="true">
-        {marks.level.text}
-      </span>
-    );
-  }
-  if (id === 'visibility' && marks.hiding) {
+  if (id === 'map' && marks.hiding) {
     return <span className="cp-tab-mark cp-tab-mark-dot" aria-hidden="true" />;
   }
   if (id === 'views' && marks.views !== undefined && marks.views > 0) {
@@ -136,12 +125,46 @@ function TabMark({ id, marks }: { readonly id: ControlTab; readonly marks: Contr
   return null;
 }
 
+/**
+ * The level-of-detail button: the mode as its caption (Auto, or Pinned), the level being drawn
+ * as a mark under it — dashed while another level is to come, filled while pinned —, and a
+ * click goes round the modes.
+ */
+function LodButton({ lod }: { readonly lod: LodControl | undefined }) {
+  const pinned = lod !== undefined && lod.mode !== 'auto';
+  const pending = lod?.pending === undefined ? '' : ' cp-tab-mark-pending';
+  return (
+    <button
+      type="button"
+      id="lod-cycle"
+      className="cp-rail-button"
+      disabled={lod === undefined}
+      data-lod-mode={lod?.mode}
+      data-lod-pending={lod?.pending?.id}
+      title={lod?.hint ?? 'Level of detail'}
+      onClick={lod?.onCycle}
+    >
+      <PanelIcon name="lod" />
+      <span className="cp-tab-label">{pinned ? 'Pinned' : 'Auto'}</span>
+      {lod && (
+        <span
+          className={`cp-tab-mark cp-tab-mark-level${pinned ? ' cp-tab-mark-pinned' : ''}${pending}`}
+          aria-hidden="true"
+        >
+          {lod.level.text}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function ControlPanel({
   tab,
   collapsed,
   available,
   onChange,
   marks = NO_MARKS,
+  lod,
   head,
   search,
   searchOpen,
@@ -223,6 +246,7 @@ export function ControlPanel({
           ))}
         </div>
         <span className="cp-rail-spacer" />
+        <LodButton lod={lod} />
         {actions}
         <button
           type="button"

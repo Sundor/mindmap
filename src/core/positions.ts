@@ -700,7 +700,7 @@ export function keyGrowth(key: string, shift: boolean): Partial<EdgeGrowth> | un
   }
 }
 
-/** "2 moved · 1 resized", as the Layout tab says it; undefined when nothing was set by hand. */
+/** "2 moved · 1 resized", as the Map tab says it; undefined when nothing was set by hand. */
 export function handCountText(moved: number, resized: number): string | undefined {
   const parts: string[] = [];
   if (moved > 0) parts.push(`${moved} moved`);

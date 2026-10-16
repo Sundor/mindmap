@@ -7,7 +7,14 @@ import { ColorLegend } from '../ui/ColorLegend';
 import { DetailPanel } from '../ui/DetailPanel';
 import { EdgeLegend } from '../ui/EdgeLegend';
 import { FocusBar } from '../ui/FocusBar';
-import { heatByWork, progressByNode, workItemTagReport, type EdgeKind } from '../core';
+import {
+  DEFAULT_DISPLAY_SETTINGS,
+  heatByWork,
+  progressByNode,
+  workItemTagReport,
+  type EdgeKind,
+} from '../core';
+import { lodButtonHint } from '../ui/lodHints';
 import { AppFrame, HiddenInputs, StartScreen } from './Frame';
 import { PanelElement } from './Kit';
 import {
@@ -64,7 +71,7 @@ function MapScreen({
 }: {
   readonly prepared: Prepared;
   readonly id: string;
-  readonly tab: 'detail' | 'lenses';
+  readonly tab: 'map' | 'lenses';
   readonly pinned: boolean;
   readonly lenses?: boolean | undefined;
   readonly beside?: React.ReactNode;
@@ -86,7 +93,18 @@ function MapScreen({
         <PanelElement
           prepared={prepared}
           tab={tab}
-          marks={{ level: { ...MARK[canvas.level], pinned }, views: 0 }}
+          marks={{ views: 0 }}
+          lod={{
+            mode: pinned ? canvas.level : 'auto',
+            level: MARK[canvas.level],
+            hint: lodButtonHint(
+              pinned ? canvas.level : 'auto',
+              DEFAULT_DISPLAY_SETTINGS.lod,
+              MARK[canvas.level].name,
+              undefined,
+            ),
+            onCycle: noop,
+          }}
         />
         <div className="app-column">
           {above}
@@ -142,9 +160,9 @@ export function Screen({ id, prepared }: { readonly id: string; readonly prepare
         </FlowStore>
       );
     case 'screen-map':
-      return <MapScreen prepared={prepared} id="screen-map" tab="detail" pinned={false} />;
+      return <MapScreen prepared={prepared} id="screen-map" tab="map" pinned={false} />;
     case 'screen-everything':
-      return <MapScreen prepared={prepared} id="screen-everything" tab="detail" pinned />;
+      return <MapScreen prepared={prepared} id="screen-everything" tab="map" pinned />;
     case 'screen-selected': {
       const { model, overlay } = prepared.example;
       const canvas = canvasOf(prepared, 'screen-selected');

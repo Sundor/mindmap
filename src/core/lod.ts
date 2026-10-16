@@ -98,7 +98,7 @@ export const LOD_THRESHOLD_KEYS: readonly LodThresholdKey[] = [
   'subcomponentsZoom',
   'detailZoom',
 ];
-/** Range offered for a threshold (the sliders on the Detail tab). */
+/** Range offered for a threshold (the sliders on the Map tab). */
 export const LOD_THRESHOLD_RANGE = { min: 0.05, max: 4, step: 0.05 } as const;
 
 /** Smallest ratio between consecutive thresholds: their dead bands must not touch. */
@@ -177,6 +177,15 @@ export function isLodMode(value: unknown): value is LodMode {
 /** The level that is drawn: the pinned one, or in `auto` mode the one the zoom selects. */
 export function effectiveLod(mode: LodMode, zoomLevel: LodLevel): LodLevel {
   return mode === 'auto' ? zoomLevel : mode;
+}
+
+/**
+ * The mode after `mode` in the round the level-of-detail button on the rail goes: Auto, then
+ * the levels coarsest first, then Auto again.
+ */
+export function lodModeAfter(mode: LodMode): LodMode {
+  const at = LOD_MODES.indexOf(mode);
+  return LOD_MODES[(at + 1) % LOD_MODES.length] ?? 'auto';
 }
 
 /**

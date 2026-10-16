@@ -487,7 +487,7 @@ export const SPECIMEN_WORK_ITEMS = JSON.stringify(
 
 // --- Model, work items, layouts and flows -----------------------------------------------------
 
-/** What of a map is drawn, as the Detail and Layout tabs choose it. */
+/** What of a map is drawn, as the level of detail and the Map tab choose it. */
 import { allResizeLimits, NO_HAND_OVERRIDES } from '../core';
 
 export interface FixtureView {

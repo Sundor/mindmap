@@ -46,7 +46,7 @@ export interface FlowStoreProps {
 /**
  * React Flow's store as the app has it once a map is on screen: the nodes with the handles their
  * edges attach to, the settings MapCanvas gives `<ReactFlow>`, the view. Everything that reads
- * the store stands below it: the canvas, and the Detail tab with its zoom readout. Renders no
+ * the store stands below it: the canvas, and the Map tab with its zoom readout. Renders no
  * element of its own.
  */
 export function FlowStore({

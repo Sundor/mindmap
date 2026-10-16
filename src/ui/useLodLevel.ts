@@ -25,7 +25,7 @@ export const LEVEL_SETTLE_MS = 200;
  * The same holds while `fitting`: a fit the app makes itself (a move to a view it worked out) is
  * judged like one of the canvas, by the plain thresholds once it is there.
  *
- * A new `config` object (the thresholds were changed on the Detail tab) starts a new tracker: the
+ * A new `config` object (the thresholds were changed on the Map tab) starts a new tracker: the
  * current zoom is then judged by the plain thresholds of that config. Keep the object stable
  * between changes. Must be used below a `ReactFlowProvider`.
  */

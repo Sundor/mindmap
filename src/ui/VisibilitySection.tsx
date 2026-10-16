@@ -1,6 +1,6 @@
-// The Visibility tab of the control panel: what of the map is shown — the focus on a flow or a
-// work item, the edge kinds, and which work items the map shows (filter by state and by
-// iteration). The values are kept in the browser (see `DisplaySettings` in
+// Sections of the Map tab of the control panel about what of the map is shown: the focus on a
+// flow or a work item, the edge kinds, and which work items the map shows (filter by state and
+// by iteration). The values are kept in the browser (see `DisplaySettings` in
 // src/core/displaySettings.ts).
 
 import {
@@ -38,12 +38,12 @@ export interface WorkItemFilterChoices {
   readonly total: number;
 }
 
-export interface VisibilityTabProps {
+export interface VisibilitySectionProps {
   /** A map is drawn: without one only the focus is offered. */
   readonly drawn: boolean;
   /** Absent while there is nothing to focus on. */
   readonly focusChooser?: FocusChooser | undefined;
-  /** The Focus / Filter switch, and what its position means for the map: said under it. */
+  /** The Focus / Filter switch, and what its position means for the map: its tooltip. */
   readonly filterOn: boolean;
   readonly onFilterChange: (on: boolean) => void;
   readonly filterHint: string;
@@ -111,7 +111,7 @@ function FocusSelect({ flows, items, focus, focusName, onChoose }: FocusChooser)
   );
 }
 
-export function VisibilityTab({
+export function VisibilitySection({
   drawn,
   focusChooser,
   filterOn,
@@ -123,7 +123,7 @@ export function VisibilityTab({
   settings,
   onChange,
   workItems,
-}: VisibilityTabProps) {
+}: VisibilitySectionProps) {
   // An iteration stored for another file is not applied (`usableWorkItemFilter`), so not shown.
   const iteration =
     settings.iteration !== undefined && workItems?.iterations.includes(settings.iteration)
@@ -131,7 +131,6 @@ export function VisibilityTab({
       : '';
   return (
     <>
-      {!drawn && <p className="cp-empty">Nothing is drawn yet.</p>}
       {focusChooser && (
         <>
           <h3 className="cp-section-title">Focus</h3>
@@ -143,31 +142,25 @@ export function VisibilityTab({
             offLabel="Focus"
             onLabel="Filter"
             label="Filter: draw only what the focus involves"
-            describedBy="focus-mode-hint"
+            title={filterHint}
           />
-          <small id="focus-mode-hint" className="settings-note">
-            {filterHint}
-          </small>
         </>
       )}
       {drawn && (
         <>
           <h3 className="cp-section-title">Edges</h3>
           <KindFilters hiddenKinds={hiddenKinds} counts={kindCounts} onToggle={onToggleKind} />
-          <label className="settings-row settings-check">
+          <label
+            className="settings-row settings-check"
+            title="Edges show only at the box under the pointer or selected, and those of the focus"
+          >
             <input
               type="checkbox"
               id="edges-on-demand"
               checked={settings.edgesOnDemand}
               onChange={(event) => onChange({ ...settings, edgesOnDemand: event.target.checked })}
             />
-            <span>
-              Edges on demand
-              <small>
-                {' '}
-                (edges show only at the box under the pointer or selected, and those of the focus)
-              </small>
-            </span>
+            <span>Edges on demand</span>
           </label>
         </>
       )}
@@ -177,6 +170,7 @@ export function VisibilityTab({
           id="workitem-filter"
           role="group"
           aria-label="Work items shown"
+          title="Hidden items leave the lists, badges and counts; the map is laid out again"
         >
           <h3 className="cp-section-title">
             <span>Work items shown</span>
@@ -184,17 +178,17 @@ export function VisibilityTab({
               {workItems.shown} of {workItems.total}
             </span>
           </h3>
-          <label className="settings-row settings-completed">
+          <label
+            className="settings-row settings-completed"
+            title="Items in Closed, Done, Resolved or Removed"
+          >
             <input
               type="checkbox"
               id="show-completed"
               checked={settings.showCompleted}
               onChange={(event) => onChange({ ...settings, showCompleted: event.target.checked })}
             />
-            <span>
-              Show completed work items
-              <small> (Closed, Done, Resolved, Removed)</small>
-            </span>
+            <span>Show completed work items</span>
           </label>
           <div className="settings-states">
             {workItems.states.map((state) => (
@@ -234,9 +228,6 @@ export function VisibilityTab({
               ))}
             </select>
           </label>
-          <small className="settings-note">
-            Hidden items leave the lists, badges and counts; the map is laid out again.
-          </small>
         </div>
       )}
     </>

@@ -67,7 +67,7 @@ edges: # the lines; the arrowhead is at "to"
   - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
   - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
 
-flows: # stories told through the edges: Visibility → Focus lights one and pales the rest
+flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
     name: Place an order # its entry in the focus list, the title of its panel
     kind: workflow # workflow (the default) or dataflow: its group in the focus list

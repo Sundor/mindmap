@@ -14,7 +14,7 @@ import {
   type Viewport,
 } from '../core';
 import { fitOptions, fittedViewport } from '../ui/constants';
-import { DetailTab } from '../ui/DetailTab';
+import { ThresholdsSection } from '../ui/LevelSections';
 import { GroupWorkItemLists } from '../ui/WorkItemBlock';
 import { HANDLE_BOX, loadFixtures, type MapFixture } from './fixtures';
 import { fillContainer, startTags, withoutHandles, type StartTag } from './markup';
@@ -84,21 +84,11 @@ describe('FlowStore', () => {
     expect(html).toBe('<i class="below"></i>');
   });
 
-  it('gives the Detail tab the zoom it reads, which throws without a store', () => {
-    const tab = createElement(DetailTab, {
+  it('gives the zoom thresholds of the Map tab the zoom they read, which throws without a store', () => {
+    const tab = createElement(ThresholdsSection, {
       drawn: true,
-      lodMode: 'auto',
-      lodLevel: 'components',
-      lodConfig: DEFAULT_DISPLAY_SETTINGS.lod,
-      onChooseLod: noop,
-      collapsedCount: 0,
-      canCollapseAll: true,
-      onCollapseAll: noop,
-      onExpandAll: noop,
       settings: DEFAULT_DISPLAY_SETTINGS,
       onChange: noop,
-      hasWorkItems: true,
-      onChooseStoryMode: noop,
     });
     expect(() => renderToStaticMarkup(tab)).toThrow();
     const html = renderToStaticMarkup(

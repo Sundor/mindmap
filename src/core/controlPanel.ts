@@ -5,12 +5,18 @@
 import type { ViewStateStorage } from './visibility';
 
 /** The tabs of the control panel, in rail order. */
-export const CONTROL_TABS = ['detail', 'visibility', 'lenses', 'layout', 'views', 'files'] as const;
+export const CONTROL_TABS = ['map', 'lenses', 'views', 'files'] as const;
 export type ControlTab = (typeof CONTROL_TABS)[number];
 
 export function isControlTab(value: unknown): value is ControlTab {
   return typeof value === 'string' && (CONTROL_TABS as readonly string[]).includes(value);
 }
+
+/**
+ * The tabs of earlier versions that the Map tab took over (their controls are its sections): a
+ * stored one opens the Map tab.
+ */
+const FORMER_MAP_TABS: readonly string[] = ['detail', 'visibility', 'layout'];
 
 export interface ControlPanelState {
   readonly tab: ControlTab;
@@ -18,7 +24,7 @@ export interface ControlPanelState {
   readonly collapsed?: boolean;
 }
 
-export const DEFAULT_CONTROL_PANEL: ControlPanelState = { tab: 'detail' };
+export const DEFAULT_CONTROL_PANEL: ControlPanelState = { tab: 'map' };
 
 /** Window width from which the open body stands beside the canvas (mirrored in styles.css). */
 export const CONTROL_PANEL_DOCK_WIDTH = 1400;
@@ -73,7 +79,8 @@ export function serializeControlPanel(state: ControlPanelState): string {
 
 /**
  * State from stored text. Tolerant: no text, bad JSON, no object → the default; unknown tab →
- * 'detail'; `collapsed` kept only when it is a boolean.
+ * 'map', as is a tab of an earlier version that the Map tab took over; `collapsed` kept only
+ * when it is a boolean.
  */
 export function parseControlPanel(text: string | null | undefined): ControlPanelState {
   if (!text) return DEFAULT_CONTROL_PANEL;
@@ -85,7 +92,11 @@ export function parseControlPanel(text: string | null | undefined): ControlPanel
   }
   if (typeof value !== 'object' || value === null) return DEFAULT_CONTROL_PANEL;
   const record = value as Record<string, unknown>;
-  const tab = isControlTab(record.tab) ? record.tab : DEFAULT_CONTROL_PANEL.tab;
+  const tab = isControlTab(record.tab)
+    ? record.tab
+    : typeof record.tab === 'string' && FORMER_MAP_TABS.includes(record.tab)
+      ? 'map'
+      : DEFAULT_CONTROL_PANEL.tab;
   return typeof record.collapsed === 'boolean' ? { tab, collapsed: record.collapsed } : { tab };
 }
 
