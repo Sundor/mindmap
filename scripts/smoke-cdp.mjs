@@ -1925,15 +1925,15 @@ async function run(viewerPath, browserPath) {
     };
     const tabsAtStart = await tabsState();
     check(
-      'the control panel has six tabs, each with its panel, and shows the first: Level of detail',
+      'the control panel has four tabs, each with its panel, and shows the first: Map',
       same(
         tabsAtStart.tabs,
         tabNames.map((name) => `tab-${name}`),
       ) &&
         tabsAtStart.disabled.length === 0 &&
         tabsAtStart.paired &&
-        tabsAtStart.panels === 6 &&
-        (await showsTab('detail')),
+        tabsAtStart.panels === 4 &&
+        (await showsTab('map')),
       tabsAtStart,
     );
     // Until a tab or Hide is clicked the body follows the window: open where it stands beside
@@ -2261,7 +2261,7 @@ async function run(viewerPath, browserPath) {
     );
     check(
       'a click on a tab while the panel is collapsed opens it on that tab',
-      (await showsTab('layout')) &&
+      (await showsTab('lenses')) &&
         Math.abs((await sides('#map-canvas')).width - canvasOpen.width) < 1,
       await tabsState(),
     );
@@ -3284,12 +3284,14 @@ async function run(viewerPath, browserPath) {
     await evaluate(`document.querySelector('#reset-thresholds').click()`);
     await until(`window.__smoke.attr('data-lod') === '${lodBefore}'`, 'the level after the reset');
     check('Reset thresholds restores the level', true);
-    // Picking a level of detail opens the groups collapsed by hand.
+    // Every turn of the level-of-detail button opens the groups collapsed by hand: a full round
+    // from Auto back to Auto leaves the level as it was and the groups open.
     await click('#collapse-all');
     await until(`window.__smoke.attr('data-collapsed-count') !== '0'`, 'everything collapsed');
-    await pin('auto');
+    for (const mode of ['domains', 'components', 'subcomponents', 'detail']) await pinLod(mode);
+    await pinLod('auto', await evaluate(`window.__smoke.attr('data-zoom-lod')`));
     await until(`window.__smoke.attr('data-collapsed-count') === '0'`, 'groups reopened by Auto');
-    check('a Detail button reopens the groups collapsed by hand', true);
+    check('a turn of the level-of-detail button reopens the groups collapsed by hand', true);
 
     // --- Rows hidden, positions moved by hand --------------------------------------------------
     const bandsBefore = await evaluate(`window.__smoke.count('.react-flow__node-band')`);
@@ -3308,7 +3310,13 @@ async function run(viewerPath, browserPath) {
       `window.__smoke.count('.react-flow__node-band') === ${bandsBefore}`,
       'the row bands again',
     );
+    // The layout with rows is computed again: the fit must wait for it, or it fits the old one.
+    await until(
+      `window.__smoke.attr('data-layout-pending') === 'false' && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the layout with rows',
+    );
     await click('#fit-view');
+    await settled();
     await sleep(600);
 
     /** Screen boxes of the top-level groups, by node ID. */
@@ -3338,12 +3346,21 @@ async function run(viewerPath, browserPath) {
       (await evaluate(`window.__smoke.attr('data-moved-count')`)) === '0',
     );
     await click('#fit-view');
+    await settled();
     await sleep(600);
 
     await click('#unlock-positions');
     await until(`window.__smoke.attr('data-positions-unlocked') === 'true'`, 'unlocked positions');
+    const underGrab = await evaluate(
+      `(() => { const e = document.elementFromPoint(${grabAt.x}, ${grabAt.y}); return e ? e.tagName + ' ' + (typeof e.className === 'string' ? e.className : e.className.baseVal) + ' ' + (e.closest('[data-id]')?.dataset.id ?? '') : null; })()`,
+    );
+    const boxesUnlocked = await domainBoxes();
+    const viewUnlocked = await evaluate(`JSON.stringify(window.__smoke.viewport())`);
     await drag(grabAt, dropAt);
-    await until(`window.__smoke.attr('data-moved-count') === '1'`, 'one node moved by hand');
+    await until(
+      `window.__smoke.attr('data-moved-count') === '1'`,
+      `one node moved by hand (grabbed ${JSON.stringify(grabAt)} on ${underGrab}; locked ${JSON.stringify(boxesLocked)}; unlocked ${JSON.stringify(boxesUnlocked)} at ${viewUnlocked})`,
+    );
     await sleep(200);
     /** @type {typeof boxesLocked} */
     const boxesMoved = await domainBoxes();
@@ -3618,7 +3635,8 @@ async function run(viewerPath, browserPath) {
       mobile: false,
     });
     await sleep(300);
-    await showControl('#focus-select');
+    // The Files tab, scrolled to its end; then the Map tab, which is long enough to scroll too.
+    await showControl('#open-yaml');
     const scrolledTab = await evaluate(`(() => {
       const area = document.querySelector('.cp-panels');
       area.scrollTop = area.scrollHeight;
@@ -4257,8 +4275,9 @@ async function run(viewerPath, browserPath) {
     );
     // Collapsing, the level of detail and the hidden kinds act on the filtered map as they do
     // on the whole one; none of them lays it out again. The collapsed groups are those of the
-    // whole map: the note counts them all.
-    const viewEpic = await viewNow();
+    // whole map: the note counts them all. The view is held from the Domains level on: the
+    // turns of the button from there to Subcomponents pass no Everything level, which lays the
+    // filtered map out with its lists and fits it.
     const groupsFiltered = await countOf('.react-flow__node-group');
     const domainsOnly = `window.__smoke.nodeIds().every((id) => !id.includes('.'))`;
     await click('#collapse-all');
@@ -4278,6 +4297,7 @@ async function run(viewerPath, browserPath) {
       'every node of the filtered map again',
     );
     await pinLod('domains');
+    const viewEpic = await viewNow();
     const domainsFiltered = (await evaluate(`window.__smoke.nodeIds()`)).length;
     const domainsAlone = await evaluate(domainsOnly);
     await pinLod('subcomponents');
@@ -4312,6 +4332,9 @@ async function run(viewerPath, browserPath) {
         sameView(await viewNow(), viewEpic),
       {
         collapsedFiltered,
+        domainsAlone,
+        viewEpic,
+        viewNow: await viewNow(),
         groupsOnWhole,
         groupsFiltered,
         domainsFiltered,
@@ -6103,7 +6126,8 @@ async function run(viewerPath, browserPath) {
       { sizeFull, sizeClosed, domainProblems },
     );
     // The example, laid out: a closed domain with a work-item badge is a line higher.
-    const domainsExpected = (await attr('data-story-mode')) === 'off' ? '1608x378' : '1608x430';
+    // 30 px wider than its boxes alone: the room kept for the count labels between domains.
+    const domainsExpected = (await attr('data-story-mode')) === 'off' ? '1638x378' : '1638x430';
     check(
       `closed up at the Domains level the example measures ${domainsExpected}, the full map 2484x1120`,
       sizeFull === '2484x1120' && sizeClosed === domainsExpected,
@@ -6315,23 +6339,38 @@ async function run(viewerPath, browserPath) {
     await pinLod('subcomponents');
     await fit();
     await centreOn('storefront.payment');
-    for (const [name, act, done] of /** @type {[string, () => Promise<void>, string][]} */ ([
+    // The level is pinned with one turn of the button on the rail: from Domains to Components.
+    const fromDomains = async () => {
+      await pinLod('domains');
+      await fit();
+      await centreOn('storefront');
+    };
+    for (const [
+      name,
+      act,
+      done,
+      prepare,
+    ] of /** @type {[string, () => Promise<void>, string, (() => Promise<void>) | undefined][]} */ ([
       [
         'Collapse all',
         () => click('#collapse-all'),
         `window.__smoke.attr('data-collapsed-count') !== '0' && window.__smoke.attr('data-arrangement') !== 'full'`,
+        undefined,
       ],
       [
         'Expand all',
         () => click('#expand-all'),
         `window.__smoke.attr('data-collapsed-count') === '0' && window.__smoke.attr('data-arrangement') === 'full'`,
+        undefined,
       ],
       [
         'a pinned level',
         () => pinLod('components'),
         `window.__smoke.attr('data-lod') === 'components' && window.__smoke.attr('data-arrangement') !== 'full'`,
+        fromDomains,
       ],
     ])) {
+      if (prepare) await prepare();
       const seen = await watched(act, done, `the map after ${name}`);
       const place = worstShift(seen.change, seen.rest, (before, after) =>
         placeShift(before, after, seen.rest),
@@ -9003,7 +9042,12 @@ async function run(viewerPath, browserPath) {
           }
         }
         for (const edge of placed.edges) {
-          if (!edge.canvas || edge.picture.length !== 8 || !nearAll(edge.picture, edge.canvas, 1)) {
+          // One cubic, or two where the line is bent through a label beside the curve.
+          if (
+            !edge.canvas ||
+            (edge.picture.length !== 8 && edge.picture.length !== 14) ||
+            !nearAll(edge.picture, edge.canvas, 1)
+          ) {
             problems.push(`${edge.id}: ${JSON.stringify([edge.picture, edge.canvas])}`);
           }
         }

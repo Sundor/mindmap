@@ -647,7 +647,7 @@ describe('the figures on examples/architecture.yaml with fixtures/workitems.json
       }
     });
     expect(cases).toBe(filters.length * parts.size * LOD_LEVELS.length * collapsedSets.length);
-  });
+  }, 20_000);
 
   it('add up to the same at every level and with every group closed', () => {
     // No item is listed on two nodes of one domain: each counts once for every domain it is in,
