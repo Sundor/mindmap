@@ -5,7 +5,7 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
-## Unreleased
+## 0.3.1 — 2026-10-16
 
 - **Changed behaviour — the level of detail is chosen on the rail.** The row of five buttons
   has gone from the panel; the button above **Reload** on the rail goes round Auto, Domains,
@@ -33,6 +33,9 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
   the edge crosses between them, for the label to lie between them with the line showing on
   both sides (at most 160 px side by side and 72 px one above the other; no such room is kept
   between the row bands). The closed-up map can be wider than the full one by that room.
+- **A guide to the design pages.** `npm run design` writes `design-template/README.md` beside
+  the pages: which style block to restyle, what to keep, how the schemes are expressed in the
+  pages, what the parts are called, and how the stylesheet is read back.
 
 ## 0.3.0 — 2026-10-10
 
