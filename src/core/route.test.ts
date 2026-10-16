@@ -2,20 +2,25 @@ import { describe, expect, it } from 'vitest';
 import type { Rect } from './layout/types';
 import {
   containsRect,
+  curveNormal,
   curvePath,
   curvePoint,
+  curvesPath,
   distanceToCurve,
+  distanceToCurves,
+  drawnCurves,
   edgeCurve,
   facingSides,
   hiddenSamples,
+  labelCentre,
   labelPoint,
   labelRect,
   overlapArea,
   placeLabel,
+  rectCrossings,
   rectsTouch,
   routeReach,
   LANE_GAP,
-  laneLabelT,
   laneOffset,
   routeEdge,
   shiftAlongSide,
@@ -289,11 +294,6 @@ describe('lanes', () => {
     expect(offsets).toEqual([-12, -4, 4, 12]);
     expect(laneOffset(1, 2, 4)).toBe(0);
   });
-
-  it('staggers the labels along the curve', () => {
-    expect(laneLabelT(0, 1)).toBe(0.5);
-    expect([0, 1].map((i) => laneLabelT(i, 2))).toEqual([1 / 3, 2 / 3]);
-  });
 });
 
 describe('routeReach', () => {
@@ -356,22 +356,28 @@ describe('placeLabel', () => {
 
   it('keeps the preferred place when the label covers nothing there', () => {
     expect(middle).toEqual({ x: 460, y: -10, width: 80, height: 20 });
-    expect(placeLabel(line, size, 0.5, [])).toEqual({ t: 0.5, covered: 0 });
+    expect(placeLabel(line, size, 0.5, [])).toEqual({ t: 0.5, offset: { x: 0, y: 0 }, covered: 0 });
     expect(placeLabel(line, size, 0.5, [rect(0, -25), rect(900, -25)]).t).toBe(0.5);
     expect(placeLabel(line, size, 1 / 3, [rect(460, -25)]).t).toBe(1 / 3);
   });
 
   it('moves along the curve to the nearest place that covers no box', () => {
     const box = rect(430, -25, 140, 50);
-    const { t, covered } = placeLabel(line, size, 0.5, [box]);
+    const { t, covered } = placeLabel(line, size, 0.5, [box], 0);
     expect(covered).toBe(0);
     expect(t).not.toBe(0.5);
     expect(Math.abs(t - 0.5)).toBeLessThan(0.2);
     expect(overlapArea(labelRect(line, t, size), box)).toBe(0);
     // Deterministic, and no further than needed.
-    expect(placeLabel(line, size, 0.5, [box]).t).toBe(t);
+    expect(placeLabel(line, size, 0.5, [box], 0).t).toBe(t);
     const nearer = t > 0.5 ? t - 0.04 : t + 0.04;
     expect(overlapArea(labelRect(line, nearer, size), box)).toBeGreaterThan(0);
+    // With places beside the curve allowed, the second one beside it (the first still lies on
+    // the box, which reaches 25 pixels from the line) is nearer than 80 pixels along.
+    const beside = placeLabel(line, size, 0.5, [box]);
+    expect(beside.t).toBe(0.5);
+    expect(Math.abs(beside.offset.y)).toBe(48);
+    expect(overlapArea(labelRect(line, beside.t, size, beside.offset), box)).toBe(0);
   });
 
   it('may centre the label beyond the ends of an edge shorter than the label', () => {
@@ -396,15 +402,166 @@ describe('placeLabel', () => {
   });
 
   it('takes the place that covers the least when every place covers something', () => {
-    // Boxes all along the line, one of them only just reaching it.
+    // Boxes all along the line, one of them only just reaching it; and nothing free beside it.
     const wall = [rect(-100, -25, 500, 50), rect(400, -108, 200, 100), rect(600, -25, 600, 50)];
-    const { t, covered } = placeLabel(line, size, 0.3, wall);
+    const { t, offset, covered } = placeLabel(line, size, 0.3, wall, 0);
     expect(covered).toBeGreaterThan(0);
     expect(covered).toBeLessThan(80 * 3);
+    expect(offset).toEqual({ x: 0, y: 0 });
     const point = curvePoint(line, t);
     expect(point.x).toBeGreaterThan(440);
     expect(point.x).toBeLessThan(560);
     expect(t).toBeGreaterThanOrEqual(0.1);
     expect(t).toBeLessThanOrEqual(0.9);
+  });
+
+  it('moves a label beside the curve, next to a label lying on it', () => {
+    // The place in the middle is taken: the next label goes beside the line, a label's height
+    // and a small gap away — nearer than the 80 pixels along the line it would have to move.
+    const taken = labelRect(line, 0.5, size);
+    const place = placeLabel(line, size, 0.5, [taken]);
+    expect(place.covered).toBe(0);
+    expect(place.t).toBe(0.5);
+    expect(Math.abs(place.offset.y)).toBe(size.height + 4);
+    expect(place.offset.x).toBeCloseTo(0, 6);
+    const beside = labelRect(line, place.t, size, place.offset);
+    expect(overlapArea(beside, taken)).toBe(0);
+    expect(labelCentre(line, place.t, place.offset)).toEqual({
+      x: 500,
+      y: place.offset.y,
+    });
+    // A third one goes beside on the other side, then two away.
+    const third = placeLabel(line, size, 0.5, [taken, beside]);
+    expect(third.covered).toBe(0);
+    expect(third.offset.y).toBe(-place.offset.y);
+    const fourth = placeLabel(line, size, 0.5, [
+      taken,
+      beside,
+      labelRect(line, third.t, size, third.offset),
+    ]);
+    expect(fourth.covered).toBe(0);
+    expect(Math.abs(fourth.offset.y)).toBe(2 * (size.height + 4));
+  });
+
+  it('prefers a short move along the curve to one beside it, and the nearer of two', () => {
+    // On a short line the steps along it are 8 pixels: a box reaching 4 pixels into the label
+    // is left behind with one step, nearer than the 24 pixels beside the line.
+    const short = edgeCurve({ x: 0, y: 0 }, 'right', { x: 200, y: 0 }, 'left');
+    const box = rect(50, -25, 14, 50);
+    const place = placeLabel(short, size, 0.5, [box]);
+    expect(place.covered).toBe(0);
+    expect(place.offset).toEqual({ x: 0, y: 0 });
+    expect(place.t).toBe(0.54);
+    expect(overlapArea(labelRect(short, place.t, size), box)).toBe(0);
+    // Moving along to the other side of the box costs 70 pixels: beside it is nearer.
+    const wide = placeLabel(short, size, 0.5, [rect(0, -10, 130, 20)], 2);
+    expect(wide.covered).toBe(0);
+    expect(wide.t).toBe(0.5);
+    expect(Math.abs(wide.offset.y)).toBe(24);
+  });
+
+  it('moves a label across a vertical curve by its width', () => {
+    const slope = edgeCurve({ x: 0, y: 0 }, 'bottom', { x: 0, y: 1000 }, 'top');
+    const normal = curveNormal(slope, 0.5);
+    expect(Math.hypot(normal.x, normal.y)).toBeCloseTo(1, 9);
+    expect(Math.abs(normal.x)).toBeCloseTo(1, 9);
+    const taken = labelRect(slope, 0.5, size);
+    // Along the curve, 40 pixels free it; beside it, 84 would: along wins.
+    const along = placeLabel(slope, size, 0.5, [taken]);
+    expect(along.covered).toBe(0);
+    expect(along.offset).toEqual({ x: 0, y: 0 });
+    expect(along.t).toBe(0.54);
+    // A wall along the curve leaves only the places beside it: a width and the gap away.
+    const wall = rect(-40, -100, 80, 1200);
+    const place = placeLabel(slope, size, 0.5, [wall]);
+    expect(place.covered).toBe(0);
+    expect(Math.abs(place.offset.x)).toBe(84);
+    expect(place.offset.y).toBeCloseTo(0, 6);
+    expect(curveNormal(edgeCurve({ x: 5, y: 5 }, 'right', { x: 5, y: 5 }, 'left'), 0.5)).toEqual({
+      x: 0,
+      y: -1,
+    });
+  });
+
+  it('does not move a label beside an edge shorter than the label', () => {
+    const short = edgeCurve({ x: 100, y: 0 }, 'right', { x: 120, y: 0 }, 'left');
+    const taken = labelRect(short, 0.5, size);
+    const place = placeLabel(short, size, 0.5, [taken, rect(0, -25, 100, 50), rect(160, -25)]);
+    expect(place.offset).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('drawnCurves', () => {
+  const line = edgeCurve({ x: 0, y: 0 }, 'right', { x: 1000, y: 0 }, 'left');
+  const offset = { x: 0, y: 30 };
+
+  it('is the curve itself while the label sits on it, or beyond the ends of a short edge', () => {
+    expect(drawnCurves(line, 0.5, { x: 0, y: 0 })).toEqual([line]);
+    expect(drawnCurves(line, 0.5)).toEqual([line]);
+    expect(drawnCurves(line, 1.5, offset)).toEqual([line]);
+    expect(drawnCurves(line, -0.2, offset)).toEqual([line]);
+    expect(curvesPath([line])).toBe(curvePath(line));
+  });
+
+  it('bends through the label centre in two pieces that meet with one tangent', () => {
+    for (const t of [0.5, 0.3, 0.8]) {
+      const curves = drawnCurves(line, t, offset);
+      expect(curves).toHaveLength(2);
+      const [a, b] = curves as [typeof line, typeof line];
+      expect(a.p0).toEqual(line.p0);
+      expect(b.p3).toEqual(line.p3);
+      expect(a.p3).toEqual(b.p0);
+      const centre = labelCentre(line, t, offset);
+      expect(a.p3.x).toBeCloseTo(centre.x, 9);
+      expect(a.p3.y).toBeCloseTo(centre.y, 9);
+      // The same direction into the join and out of it.
+      const into = { x: a.p3.x - a.c2.x, y: a.p3.y - a.c2.y };
+      const out = { x: b.c1.x - b.p0.x, y: b.c1.y - b.p0.y };
+      expect(into.x * out.y - into.y * out.x).toBeCloseTo(0, 6);
+      expect(into.x * out.x + into.y * out.y).toBeGreaterThan(0);
+      // The ends leave as before: the first control points lie where the split put them.
+      expect(a.c1).toEqual({ x: t * line.c1.x, y: 0 });
+      expect(b.c2.y).toBe(0);
+      // The path runs through the join; the join is as far from the line as the offset.
+      expect(curvesPath(curves)).toMatch(/^M0,0 C[^C]+ C[^C]+$/);
+      expect(distanceToCurves({ x: a.p3.x, y: 0 }, curves)).toBeCloseTo(30, 0);
+      expect(distanceToCurves(a.p3, curves)).toBe(0);
+    }
+  });
+});
+
+describe('rectCrossings', () => {
+  const line = edgeCurve({ x: 0, y: 0 }, 'right', { x: 1000, y: 0 }, 'left');
+  const size = { width: 80, height: 20 };
+
+  it('finds where a line enters and leaves a box', () => {
+    const points = rectCrossings([line], labelRect(line, 0.5, size));
+    expect(points).toHaveLength(2);
+    expect(points[0]?.x).toBeCloseTo(460, 0);
+    expect(points[1]?.x).toBeCloseTo(540, 0);
+    expect(points[0]?.y).toBeCloseTo(0, 6);
+  });
+
+  it('finds them on a line bent through a label beside the curve', () => {
+    const offset = { x: 0, y: 30 };
+    const curves = drawnCurves(line, 0.5, offset);
+    const box = labelRect(line, 0.5, size, offset);
+    const points = rectCrossings(curves, box);
+    expect(points).toHaveLength(2);
+    for (const point of points) {
+      const onVertical =
+        Math.abs(point.x - box.x) < 0.5 || Math.abs(point.x - box.x - box.width) < 0.5;
+      const onHorizontal =
+        Math.abs(point.y - box.y) < 0.5 || Math.abs(point.y - box.y - box.height) < 0.5;
+      expect(onVertical || onHorizontal, JSON.stringify(point)).toBe(true);
+      expect(point.x).toBeGreaterThanOrEqual(box.x - 0.5);
+      expect(point.x).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    }
+    expect(points[0]?.x).toBeLessThan(points[1]?.x ?? 0);
+  });
+
+  it('is empty for a line that misses the box or stays inside it', () => {
+    expect(rectCrossings([line], rect(0, 100))).toEqual([]);
+    expect(rectCrossings([line], rect(-100, -100, 1200, 200))).toEqual([]);
   });
 });

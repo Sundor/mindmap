@@ -40,6 +40,7 @@ import {
   groupIds,
   highlightFlow,
   LOD_LEVELS,
+  labelRoom,
   lodForZoom,
   lodModeToDraw,
   miniMapNodes,
@@ -356,6 +357,7 @@ function arrangeView(
   model: ArchitectureModel,
   workItems: WorkItemView | undefined,
   visible: ReadonlySet<string>,
+  level: LodLevel,
 ): ArrangeView {
   const drawnItems: FlowWorkItems | undefined = workItems
     ? { overlay: workItems.overlay, mode: workItems.mode }
@@ -368,6 +370,8 @@ function arrangeView(
         ...(drawnItems ? { workItems: drawnItems } : {}),
       }),
     content: workItems?.content,
+    // Room between the boxes for the labels of the edges drawn at that level.
+    labelRoom: labelRoom(model, visible, level),
   };
 }
 
@@ -1334,8 +1338,8 @@ function Viewer() {
   // visible: closed groups shrunk, the rest moved together, each box on its side of every other.
   const arrangeViewFor = useCallback(
     (visible: ReadonlySet<string>): ArrangeView | undefined =>
-      drawnModel ? arrangeView(drawnModel, shownWorkItems, visible) : undefined,
-    [drawnModel, shownWorkItems],
+      drawnModel ? arrangeView(drawnModel, shownWorkItems, visible, drawnLevel) : undefined,
+    [drawnModel, shownWorkItems, drawnLevel],
   );
   const visible = useMemo(
     () => (drawnModel ? visibleNodes(drawnModel, collapsed, drawnLevel) : undefined),
@@ -1668,7 +1672,7 @@ function Viewer() {
       const at = arrangedLayout(
         arrivingDrawn.model,
         placed,
-        arrangeView(arrivingDrawn.model, workItems, shown),
+        arrangeView(arrivingDrawn.model, workItems, shown, level),
       );
       // As they will be drawn, like the rectangles of the map on screen they are held against:
       // a closed group that spans rows shrunk in its column.
@@ -1916,7 +1920,7 @@ function Viewer() {
           const at = arrangedLayout(
             drawnModel,
             reference,
-            arrangeView(drawnModel, shownWorkItems, shown),
+            arrangeView(drawnModel, shownWorkItems, shown, level),
           );
           // As it is drawn there: with the positions and sizes set by hand in that arrangement.
           const there =

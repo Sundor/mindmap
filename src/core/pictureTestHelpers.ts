@@ -2,6 +2,7 @@
 // little XML reader, a seeded random source, and a map built into a flow.
 
 import { arrangedLayout } from './arrange';
+import { labelRoom } from './labelRoom';
 import { buildFlow, closedGroupSize, type FlowGraph } from './flow';
 import { computeLayoutUncached } from './layout';
 import type { LayoutResult } from './layout/types';
@@ -154,6 +155,7 @@ export async function buildMap(
             ...(workItems ? { workItems } : {}),
           }),
         content,
+        labelRoom: labelRoom(model, visible, level),
       })
     : reference;
   const flow = buildFlow(model, layout, {

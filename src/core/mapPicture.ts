@@ -12,6 +12,7 @@ import type { SchemeColor } from './model';
 import { COMPACT_GROUP, compactGroupText } from './compactGroup';
 import {
   aggregateCountLabel,
+  drawnEdgeCurves,
   EDGE_LABEL,
   flowEdgeLabel,
   PLACED_BY_CONNECTIONS,
@@ -43,7 +44,7 @@ import {
   type TextMeasure,
   type XmlAttributes,
 } from './pictureKit';
-import { curvePath, labelPoint, type Curve } from './route';
+import { curvesPath, labelCentre, rectCrossings, type Curve } from './route';
 import { DIMMED_CLASS } from './selection';
 import { plural } from './text';
 import { WORK_ITEM_GEOMETRY, type WorkItemLine } from './workItemContent';
@@ -1242,9 +1243,15 @@ function arrowHead(curve: Curve): string {
   return `M${num(p3.x)} ${num(p3.y)}L${num(back.x - 4.95 * uy)} ${num(back.y + 4.95 * ux)}L${num(back.x + 4.95 * uy)} ${num(back.y - 4.95 * ux)}Z`;
 }
 
-function drawEdge(ctx: Ctx, edge: FlowEdge): string {
+/**
+ * The line of an edge, its arrowhead and, when it has a label (`label`: its box), the dots where
+ * the line crosses the border of the label.
+ */
+function drawEdge(ctx: Ctx, edge: FlowEdge, label: LabelBox | undefined): string {
   const { curve, kind, count } = edge.data;
   finiteCurve(curve, edge.id);
+  const drawn = drawnEdgeCurves(edge.data);
+  const last = drawn[drawn.length - 1] ?? curve;
   const color = colorHex(parseColor(edgeColor(ctx.p, kind)));
   const text = flowEdgeLabel(edge.data);
   const hidden = edge.data.labelHidden === true && text !== undefined;
@@ -1274,13 +1281,32 @@ function drawEdge(ctx: Ctx, edge: FlowEdge): string {
       el('path', {
         'data-part': 'line',
         // The path of the canvas, as it writes it.
-        d: curvePath(curve),
+        d: curvesPath(drawn),
         fill: 'none',
         stroke: color,
         ...edgeLine(kind, count > 1, edge.selected === true),
       }) +
-      el('path', { 'data-part': 'head', d: arrowHead(curve), fill: color }),
+      el('path', { 'data-part': 'head', d: arrowHead(last), fill: color }) +
+      (label
+        ? rectCrossings(drawn, label.rect)
+            .map((dot) =>
+              el('circle', {
+                'data-part': 'dot',
+                cx: num(dot.x),
+                cy: num(dot.y),
+                r: count > 1 ? 3.5 : 2.75,
+                fill: color,
+              }),
+            )
+            .join('')
+        : ''),
   );
+}
+
+/** The box the line of an edge covers, as it is drawn ({@link drawnEdgeCurves}). */
+function edgeBounds(edge: FlowEdge): Rect {
+  const boxes = drawnEdgeCurves(edge.data).map(curveBounds);
+  return union(boxes) ?? curveBounds(edge.data.curve);
 }
 
 interface LabelBox {
@@ -1302,7 +1328,7 @@ function labelBox(edge: FlowEdge, measure: TextMeasure): LabelBox | undefined {
   const width =
     Math.max(0, ...lines.map((line) => measure(line, EDGE_LABEL.fontSize, weight))) + 2 * padX;
   const height = lines.length * EDGE_LABEL.fontSize * PICTURE_STYLE.label.line + 4;
-  const at = labelPoint(data.curve, data.route.labelT);
+  const at = labelCentre(data.curve, data.route.labelT, data.labelOffset);
   return { rect: { x: at.x - width / 2, y: at.y - height / 2, width, height }, lines, count };
 }
 
@@ -1465,7 +1491,7 @@ function extentOf(placed: Placed, measure: TextMeasure): Rect {
     if (list) rects.push(list);
   }
   for (const edge of placed.edges) {
-    rects.push(curveBounds(edge.data.curve));
+    rects.push(edgeBounds(edge));
     const label = labelBox(edge, measure);
     if (label) rects.push(label.rect);
   }
@@ -1812,14 +1838,14 @@ export function mapSvg(picture: MapPicture): MapSvg {
   const kinds = new Set<EdgeKind>();
   let aggregates = false;
   for (const edge of placed.edges) {
-    const box = curveBounds(edge.data.curve);
+    const box = edgeBounds(edge);
     const label = labelBox(edge, ctx.measure);
     const lineShown = within(grown(box, EDGE_OVERHANG, EDGE_OVERHANG));
     if (lineShown) {
       edgeIds.push(edge.id);
       kinds.add(edge.data.kind);
       if (edge.data.count > 1) aggregates = true;
-      lines += drawEdge(ctx, edge);
+      lines += drawEdge(ctx, edge, label);
     }
     if (label && within(label.rect)) {
       labelIds.push(edge.id);

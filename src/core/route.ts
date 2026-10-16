@@ -449,12 +449,42 @@ export function laneOffset(index: number, count: number, sideLength: number): nu
   return (index - (count - 1) / 2) * gap;
 }
 
-/** Curve parameter at which lane `index` of `count` carries its label (staggered along it). */
-export function laneLabelT(index: number, count: number): number {
-  return (index + 1) / (count + 1);
+// --- Labels ---------------------------------------------------------------------------------
+
+const NO_OFFSET: Point = { x: 0, y: 0 };
+
+/** Curve parameter at which a label sits unless something is in the way: the middle. */
+export const LABEL_T_MIDDLE = 0.5;
+
+/** Direction of the curve at `t` (its derivative; not normalised). */
+export function curveTangent(curve: Curve, t: number): Point {
+  const u = 1 - t;
+  const a = 3 * u * u;
+  const b = 6 * u * t;
+  const c = 3 * t * t;
+  return {
+    x:
+      a * (curve.c1.x - curve.p0.x) + b * (curve.c2.x - curve.c1.x) + c * (curve.p3.x - curve.c2.x),
+    y:
+      a * (curve.c1.y - curve.p0.y) + b * (curve.c2.y - curve.c1.y) + c * (curve.p3.y - curve.c2.y),
+  };
 }
 
-// --- Labels ---------------------------------------------------------------------------------
+/**
+ * Unit vector across the curve at `t` (the tangent turned by a quarter). Where the tangent
+ * vanishes, across the line through the two ends; and across a curve without length, upwards.
+ */
+export function curveNormal(curve: Curve, t: number): Point {
+  let { x, y } = curveTangent(curve, t);
+  let length = Math.hypot(x, y);
+  if (length < 1e-9) {
+    x = curve.p3.x - curve.p0.x;
+    y = curve.p3.y - curve.p0.y;
+    length = Math.hypot(x, y);
+  }
+  if (length < 1e-9) return { x: 0, y: -1 };
+  return { x: -y / length, y: x / length };
+}
 
 /**
  * Where the label of an edge is centred for curve parameter `t`: the point of the curve, and
@@ -470,15 +500,110 @@ export function labelPoint(curve: Curve, t: number): Point {
   return { x: end.x + beyond * (p3.x - p0.x), y: end.y + beyond * (p3.y - p0.y) };
 }
 
-/** The box of a label of `size` centred at {@link labelPoint} `t` of `curve`. */
-export function labelRect(curve: Curve, t: number, size: Size): Rect {
+/** The centre of a label at {@link labelPoint} `t` of `curve`, moved by `offset`. */
+export function labelCentre(curve: Curve, t: number, offset: Point = NO_OFFSET): Point {
   const point = labelPoint(curve, t);
+  return { x: point.x + offset.x, y: point.y + offset.y };
+}
+
+/** The box of a label of `size` centred at {@link labelCentre}. */
+export function labelRect(curve: Curve, t: number, size: Size, offset: Point = NO_OFFSET): Rect {
+  const point = labelCentre(curve, t, offset);
   return {
     x: point.x - size.width / 2,
     y: point.y - size.height / 2,
     width: size.width,
     height: size.height,
   };
+}
+
+/** Point `t` of the way from `a` to `b`. */
+function lerp(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function shifted(point: Point, by: Point): Point {
+  return { x: point.x + by.x, y: point.y + by.y };
+}
+
+/**
+ * The line of an edge as it is drawn: `curve` itself while its label sits on it, else the curve
+ * bent so that it passes through the centre of the label — the label is at {@link labelCentre}
+ * `t`, `offset` —, in two cubic pieces that meet there with one tangent (the curve split at `t`
+ * and the join moved by `offset`, with the control points beside it). A label beyond the ends
+ * of a short edge (`t` outside 0–1) leaves the curve as it is.
+ */
+export function drawnCurves(curve: Curve, t: number, offset: Point = NO_OFFSET): Curve[] {
+  if ((offset.x === 0 && offset.y === 0) || !(t > 0 && t < 1)) return [curve];
+  const { p0, c1, c2, p3 } = curve;
+  const p01 = lerp(p0, c1, t);
+  const p12 = lerp(c1, c2, t);
+  const p23 = lerp(c2, p3, t);
+  const p012 = lerp(p01, p12, t);
+  const p123 = lerp(p12, p23, t);
+  const join = shifted(lerp(p012, p123, t), offset);
+  return [
+    { p0, c1: p01, c2: shifted(p012, offset), p3: join },
+    { p0: join, c1: shifted(p123, offset), c2: p23, p3 },
+  ];
+}
+
+/** SVG path data of consecutive curves (each starts where the one before ends). */
+export function curvesPath(curves: readonly Curve[]): string {
+  return curves
+    .map((curve, i) => {
+      const { c1, c2, p3 } = curve;
+      const piece = `C${c1.x},${c1.y} ${c2.x},${c2.y} ${p3.x},${p3.y}`;
+      return i === 0 ? `M${curve.p0.x},${curve.p0.y} ${piece}` : ` ${piece}`;
+    })
+    .join('');
+}
+
+/** Distance from `point` to the nearest of `curves` ({@link distanceToCurve}). */
+export function distanceToCurves(point: Point, curves: readonly Curve[]): number {
+  let nearest = Infinity;
+  for (const curve of curves) nearest = Math.min(nearest, distanceToCurve(point, curve));
+  return nearest;
+}
+
+/** Distance between the points a curve is flattened to when it is held against a box. */
+const CROSSING_STEP = 2;
+
+/**
+ * Where the line of `curves` crosses the border of `rect`, in the order of the line: the points
+ * at which it enters and leaves the box. Measured on the line flattened to points about
+ * {@link CROSSING_STEP} pixels apart. Empty when the line stays outside the box or inside it.
+ */
+export function rectCrossings(curves: readonly Curve[], rect: Rect): Point[] {
+  const crossings: Point[] = [];
+  let previous: Point | undefined;
+  let wasInside = false;
+  for (const curve of curves) {
+    const { p0, c1, c2, p3 } = curve;
+    const hull =
+      Math.hypot(c1.x - p0.x, c1.y - p0.y) +
+      Math.hypot(c2.x - c1.x, c2.y - c1.y) +
+      Math.hypot(p3.x - c2.x, p3.y - c2.y);
+    const samples = Math.min(2000, Math.max(4, Math.ceil(hull / CROSSING_STEP)));
+    for (let i = previous ? 1 : 0; i <= samples; i++) {
+      const point = curvePoint(curve, i / samples);
+      const isInside = inside(point, rect, 0);
+      if (previous && isInside !== wasInside) {
+        // The crossing lies between the two samples: narrow it down on the segment.
+        let out = wasInside ? point : previous;
+        let within = wasInside ? previous : point;
+        for (let k = 0; k < 12; k++) {
+          const mid = lerp(out, within, 0.5);
+          if (inside(mid, rect, 0)) within = mid;
+          else out = mid;
+        }
+        crossings.push(lerp(out, within, 0.5));
+      }
+      previous = point;
+      wasInside = isInside;
+    }
+  }
+  return crossings;
 }
 
 /** Area two rectangles share; 0 when they only touch. */
@@ -493,57 +618,122 @@ const LABEL_T_RANGE = { min: 0.1, max: 0.9 } as const;
 /** Distance between the places tried along the curve: as a curve parameter, and in pixels. */
 const LABEL_T_STEP = 0.04;
 const LABEL_MIN_STEP = 4;
+/** Between two labels beside each other across their curve, in pixels. */
+const LABEL_SIDE_GAP = 4;
+/** How many places beside the curve are tried on each side of it. */
+export const LABEL_SIDE_STEPS = 2;
 
 /** Where a label goes on its curve, and how much of the obstacles it covers there. */
 export interface LabelPlace {
   /** Curve parameter (0–1), or beyond the ends of a short edge: see {@link labelPoint}. */
   readonly t: number;
+  /**
+   * How far the label centre is moved off the curve, across it, in canvas pixels: zero when the
+   * label sits on the curve. The line is then drawn through the moved centre
+   * ({@link drawnCurves}).
+   */
+  readonly offset: Point;
   /** Area of the obstacles under the label, in square pixels; 0 when it covers none. */
   readonly covered: number;
 }
 
 /**
- * Where a label of `size` sits on `curve`: at `preferred` when the label covers none of the
+ * Where a label of `size` sits at `curve`: at `preferred` when the label covers none of the
  * `obstacles` there (the boxes of what it would hide: names, work-item lines, labels already
- * placed); otherwise at the nearest place along the curve where it covers none, and when there
- * is no such place at the one where it covers the least.
+ * placed); otherwise at the nearest place where it covers none — along the curve, or beside it
+ * (`sideSteps` places on each side, a label's height and a small gap apart, so that the labels
+ * of edges running side by side come to lie next to each other) —, and when there is no such
+ * place at the one where it covers the least. Nearest by the distance of the label centre from
+ * its preferred place; among equals, a place on the curve before one beside it.
  *
  * An edge shorter than its label is wide (two boxes side by side) has no place for it at all: the
  * label may then be centred up to half its width beyond either end, so that it lies on whichever
- * of the two boxes has nothing written there.
+ * of the two boxes has nothing written there; it is not moved beside such an edge.
  */
 export function placeLabel(
   curve: Curve,
   size: Size,
   preferred: number,
   obstacles: readonly Rect[],
+  sideSteps: number = LABEL_SIDE_STEPS,
 ): LabelPlace {
-  const covered = (t: number): number => {
-    const rect = labelRect(curve, t, size);
-    let area = 0;
-    for (const obstacle of obstacles) area += overlapArea(rect, obstacle);
-    return area;
-  };
   const length = Math.hypot(curve.p3.x - curve.p0.x, curve.p3.y - curve.p0.y);
   const reach = Math.max(size.width, size.height);
   const beyond = length > 0 && length < reach ? reach / 2 / length : 0;
   const min = beyond > 0 ? -beyond : LABEL_T_RANGE.min;
   const max = beyond > 0 ? 1 + beyond : LABEL_T_RANGE.max;
   const stride = length > 0 ? Math.max(LABEL_T_STEP, LABEL_MIN_STEP / length) : LABEL_T_STEP;
-  let best = preferred;
-  let bestCovered = covered(preferred);
-  for (let step = 1; bestCovered > 0; step++) {
-    const below = preferred - step * stride;
-    const above = preferred + step * stride;
-    const candidates = [above, below].filter((t) => t >= min - 1e-9 && t <= max + 1e-9);
-    if (candidates.length === 0) break;
-    for (const t of candidates) {
-      const area = covered(t);
-      if (area < bestCovered) {
-        best = t;
-        bestCovered = area;
+  const steps = beyond > 0 ? 0 : Math.max(0, Math.floor(sideSteps));
+  // How far a label is moved across the curve for each place beside it: just far enough that
+  // two labels of this size at consecutive places do not overlap — the label's height across a
+  // horizontal curve, its width across a vertical one —, and the gap.
+  const pitchAcross = (normal: Point): number => {
+    const byWidth = normal.x === 0 ? Infinity : size.width / Math.abs(normal.x);
+    const byHeight = normal.y === 0 ? Infinity : size.height / Math.abs(normal.y);
+    return Math.min(byWidth, byHeight) + LABEL_SIDE_GAP;
+  };
+  const farthest = steps * (Math.max(size.width, size.height) + LABEL_SIDE_GAP);
+
+  // Only the obstacles any of the places can reach count: the curve stays within the box of its
+  // control points, and the label centre within that box grown by the reach beyond the ends and
+  // the places beside the curve.
+  const { p0, c1, c2, p3 } = curve;
+  const grow = reach / 2 + farthest + (beyond > 0 ? reach / 2 : 0);
+  const minX = Math.min(p0.x, c1.x, c2.x, p3.x) - grow - size.width / 2;
+  const maxX = Math.max(p0.x, c1.x, c2.x, p3.x) + grow + size.width / 2;
+  const minY = Math.min(p0.y, c1.y, c2.y, p3.y) - grow - size.height / 2;
+  const maxY = Math.max(p0.y, c1.y, c2.y, p3.y) + grow + size.height / 2;
+  const near = obstacles.filter(
+    (rect) =>
+      rect.x < maxX && rect.x + rect.width > minX && rect.y < maxY && rect.y + rect.height > minY,
+  );
+  const covered = (t: number, offset: Point): number => {
+    const rect = labelRect(curve, t, size, offset);
+    let area = 0;
+    for (const obstacle of near) area += overlapArea(rect, obstacle);
+    return area;
+  };
+
+  interface Candidate {
+    readonly t: number;
+    readonly offset: Point;
+    readonly cost: number;
+  }
+  const candidates: Candidate[] = [];
+  /** The places at `t`, `along` pixels from the preferred place. */
+  const addPlaces = (t: number, along: number): void => {
+    candidates.push({ t, offset: NO_OFFSET, cost: along });
+    if (steps === 0) return;
+    const normal = curveNormal(curve, t);
+    const pitch = pitchAcross(normal);
+    for (let k = 1; k <= steps; k++) {
+      for (const sign of [1, -1]) {
+        const offset = { x: sign * k * pitch * normal.x, y: sign * k * pitch * normal.y };
+        candidates.push({ t, offset, cost: along + k * pitch });
       }
     }
+  };
+  addPlaces(preferred, 0);
+  for (let step = 1; ; step++) {
+    const below = preferred - step * stride;
+    const above = preferred + step * stride;
+    const within = [above, below].filter((t) => t >= min - 1e-9 && t <= max + 1e-9);
+    if (within.length === 0) break;
+    for (const t of within) addPlaces(t, step * stride * length);
   }
-  return { t: best, covered: bestCovered };
+  // A stable sort: among places equally far, the order they were added in holds — on the
+  // curve before beside it, towards the target before towards the source.
+  candidates.sort((a, b) => a.cost - b.cost);
+
+  let best: Candidate = candidates[0] ?? { t: preferred, offset: NO_OFFSET, cost: 0 };
+  let bestCovered = Infinity;
+  for (const candidate of candidates) {
+    const area = covered(candidate.t, candidate.offset);
+    if (area < bestCovered) {
+      best = candidate;
+      bestCovered = area;
+      if (area === 0) break;
+    }
+  }
+  return { t: best.t, offset: best.offset, covered: bestCovered };
 }

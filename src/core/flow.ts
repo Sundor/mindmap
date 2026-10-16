@@ -5,9 +5,10 @@
 
 import type { LayoutResult, Rect, Size } from './layout/types';
 import {
-  distanceToCurve,
+  distanceToCurves,
+  drawnCurves,
   edgeCurve,
-  laneLabelT,
+  LABEL_T_MIDDLE,
   laneOffset,
   labelRect,
   overlapArea,
@@ -319,9 +320,10 @@ export type ArchEdgeRoute = EdgeRoute & {
    */
   readonly offset: number;
   /**
-   * Curve parameter (0–1, from the source) at which the label sits: staggered between lanes,
-   * and moved along the curve where it would cover the text of a box (`placeLabel`; beyond the
-   * ends of a very short edge, see `labelPoint`).
+   * Curve parameter (0–1, from the source) at which the label sits: the middle, moved along the
+   * curve where it would cover a box or the text of one, or another label (`placeLabel`; beyond
+   * the ends of a very short edge, see `labelPoint`). With `ArchEdgeData.labelOffset` the label
+   * is moved beside the curve as well.
    */
   readonly labelT: number;
 };
@@ -357,10 +359,18 @@ export type ArchEdgeData = {
    * the tooltip of the edge; the detail panel shows it as for any edge.
    */
   readonly labelHidden?: boolean;
+  /**
+   * Set when the label sits beside its curve rather than on it (`placeLabel`): how far its
+   * centre is moved across the curve from the point `route.labelT`. The line is then drawn
+   * through the label centre ({@link drawnEdgeCurves}), so that the label stays on its edge,
+   * and the labels of edges running side by side lie next to each other.
+   */
+  readonly labelOffset?: Point;
   readonly route: ArchEdgeRoute;
   /**
-   * The line of the edge in canvas coordinates, as computed from the layout: what a click is
-   * compared with ({@link nearestEdgeAt}). The edge is drawn with the same {@link routeCurve}.
+   * The line of the edge in canvas coordinates, as computed from the layout, before it is bent
+   * through a label beside it ({@link drawnEdgeCurves}: what is drawn and what a click is
+   * compared with, {@link nearestEdgeAt}). The edge is drawn with the same {@link routeCurve}.
    */
   readonly curve: Curve;
   /** Set by `highlightFlow`: outside the neighbourhood of the selection (dims the label). */
@@ -409,6 +419,16 @@ export function routeCurve(
 }
 
 /**
+ * The line of an edge as it is drawn, in canvas coordinates: its `curve`, bent through the
+ * centre of its label when the label sits beside the curve (`labelOffset`; see `drawnCurves`).
+ */
+export function drawnEdgeCurves(
+  data: Pick<ArchEdgeData, 'curve' | 'route' | 'labelOffset'>,
+): Curve[] {
+  return drawnCurves(data.curve, data.route.labelT, data.labelOffset);
+}
+
+/**
  * The rendered edge whose line is nearest to `point` (canvas coordinates), or undefined when
  * none is within `maxDistance`. Edges running side by side are closer together than their hit
  * areas are wide, so the hit areas overlap and the element under the pointer may belong to a
@@ -416,7 +436,9 @@ export function routeCurve(
  * Of edges at the same distance the one drawn last (on top) wins. An edge that edges on demand
  * keeps out of sight is not there to be clicked.
  */
-export function nearestEdgeAt<E extends { readonly data: Pick<ArchEdgeData, 'curve' | 'quiet'> }>(
+export function nearestEdgeAt<
+  E extends { readonly data: Pick<ArchEdgeData, 'curve' | 'quiet' | 'route' | 'labelOffset'> },
+>(
   point: Point,
   edges: readonly E[],
   maxDistance: number = EDGE_INTERACTION_WIDTH / 2,
@@ -425,7 +447,7 @@ export function nearestEdgeAt<E extends { readonly data: Pick<ArchEdgeData, 'cur
   let bestDistance = Infinity;
   for (const edge of edges) {
     if (edge.data.quiet === true) continue;
-    const distance = distanceToCurve(point, edge.data.curve);
+    const distance = distanceToCurves(point, drawnEdgeCurves(edge.data));
     if (distance <= maxDistance && distance <= bestDistance) {
       best = edge;
       bestDistance = distance;
@@ -629,14 +651,14 @@ function buildEdges(
     const lanes = pair.edgeIds.length;
     const forward = edge.source === pair.from;
     const base = forward ? pair.route : reverseRoute(pair.route);
-    // Labels are staggered along the shared route, so measured from the same end for every lane.
-    const labelT = laneLabelT(lane, lanes);
+    // Every lane prefers the middle of the shared route for its label: the labels are then moved
+    // beside their curves, next to each other, where they would lie on one another (below).
     const route: ArchEdgeRoute = {
       ...base,
       lane,
       lanes,
       offset: laneOffset(lane, lanes, pair.sideLength),
-      labelT: forward ? labelT : 1 - labelT,
+      labelT: LABEL_T_MIDDLE,
     };
     // Only a single edge shows its own label, protocol and description.
     const original = edge.count === 1 ? edge.edge : undefined;
@@ -678,9 +700,12 @@ function buildEdges(
     };
   });
 
-  // Labels are drawn above everything, so one lying on a box may cover what is written in it:
-  // each is moved along its curve to where it covers no text (the name of a leaf, a closed
-  // group, a work-item line) and no label placed before it. In document order of the edges.
+  // Labels are drawn above everything, so one lying on a box covers the box — the arrowhead at
+  // its border, what is written in it: each is moved along its curve, or beside it, to where it
+  // covers no box drawn above edges (a leaf, a closed group, a work-item list), no text (the
+  // name of a leaf, a closed group, a work-item line) and no label placed before it. In document
+  // order of the edges.
+  const boxes = obstacles.map((obstacle) => obstacle.rect);
   const labels: Rect[] = [];
   return edges.map((edge) => {
     const text = flowEdgeLabel(edge.data);
@@ -707,16 +732,18 @@ function buildEdges(
       }
       return best;
     };
-    // Clear of everything written and of the other labels; failing that, of what is written
-    // (two labels on each other is the lesser evil); failing that, where it covers the least
-    // of a name, as long as it covers no work-item line. A label that would lie on a work-item
-    // line wherever it went is left out: the lines are there to be read and clicked, and the
-    // label is still the tooltip of its edge and in the panel of the edge.
+    // Clear of the boxes, of everything written and of the other labels; failing that, of what
+    // is written and the other labels (a label on a box is the lesser evil); failing that, of
+    // what is written (two labels on each other); failing that, where it covers the least of a
+    // name, as long as it covers no work-item line. A label that would lie on a work-item line
+    // wherever it went is left out: the lines are there to be read and clicked, and the label
+    // is still the tooltip of its edge and in the panel of the edge.
     const written = [...texts.names, ...texts.lines];
-    let best = choose([...written, ...labels]);
+    let best = choose([...boxes, ...written, ...labels]);
+    if (best && best.place.covered > 0) best = choose([...written, ...labels]);
     if (best && best.place.covered > 0) best = choose(written);
     if (best && best.place.covered > 0) {
-      const box = labelRect(curve, best.place.t, best.size);
+      const box = labelRect(curve, best.place.t, best.size, best.place.offset);
       if (texts.lines.some((line) => overlapArea(box, line) > 0)) {
         best = choose(texts.lines);
         if (best && best.place.covered > 0) {
@@ -725,15 +752,17 @@ function buildEdges(
       }
     }
     if (!best) return edge;
-    const labelT = best.place.t;
-    labels.push(labelRect(curve, labelT, best.size));
-    if (labelT === route.labelT && best.text === text) return edge;
+    const { t: labelT, offset } = best.place;
+    labels.push(labelRect(curve, labelT, best.size, offset));
+    const beside = offset.x !== 0 || offset.y !== 0;
+    if (labelT === route.labelT && best.text === text && !beside) return edge;
     return {
       ...edge,
       data: {
         ...edge.data,
         route: { ...route, labelT },
         ...(best.text === text ? {} : { labelText: best.text }),
+        ...(beside ? { labelOffset: offset } : {}),
       },
     };
   });

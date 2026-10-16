@@ -48,7 +48,7 @@ import {
   type TextMeasure,
 } from './pictureKit';
 import { buildMap, readXml, seeded, unescapeXml, type XmlElement } from './pictureTestHelpers';
-import { curvePoint, labelPoint, type Curve } from './route';
+import { curvePoint, labelCentre, labelPoint, type Curve } from './route';
 import { highlightFlow } from './selection';
 import { plural } from './text';
 import { WORK_ITEM_GEOMETRY, type WorkItemLine } from './workItemContent';
@@ -1834,7 +1834,7 @@ describe('what an edge and its label say', () => {
       const width = Number(box?.attrs.get('width')) + 1;
       const height = Number(box?.attrs.get('height')) + 1;
       const at = translateOf(g);
-      const middle = labelPoint(edge.data.curve, edge.data.route.labelT);
+      const middle = labelCentre(edge.data.curve, edge.data.route.labelT, edge.data.labelOffset);
       expect(at.x + width / 2, edge.id).toBeCloseTo(middle.x, 1);
       expect(at.y + height / 2, edge.id).toBeCloseTo(middle.y, 1);
       expect(box?.attrs.get('stroke')).toBe(strokes[edge.data.kind]);

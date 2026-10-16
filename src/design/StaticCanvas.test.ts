@@ -2,11 +2,12 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  curvePath,
+  curvesPath,
   DEFAULT_DISPLAY_SETTINGS,
+  drawnEdgeCurves,
   flowEdgeLabel,
   highlightFlow,
-  labelPoint,
+  labelCentre,
   progressOfDrawn,
   type FlowGraph,
   type LayoutResult,
@@ -135,7 +136,7 @@ describe('StaticCanvas with the shipped example', () => {
     let furthest = 0;
     for (const edge of everything.flow.edges) {
       const got = numbersOf(drawn.get(edge.id));
-      const wanted = numbersOf(curvePath(edge.data.curve));
+      const wanted = numbersOf(curvesPath(drawnEdgeCurves(edge.data)));
       expect(got.length, edge.id).toBe(wanted.length);
       expect(got.length, edge.id).toBeGreaterThanOrEqual(8);
       got.forEach((value, index) => {
@@ -262,7 +263,7 @@ describe('EdgeLabelLayer', () => {
       labelled.map((edge) => edge.id),
     );
     labelled.forEach((edge, index) => {
-      const at = labelPoint(edge.data.curve, edge.data.route.labelT);
+      const at = labelCentre(edge.data.curve, edge.data.route.labelT, edge.data.labelOffset);
       expect(labels[index]?.attributes.get('style'), edge.id).toBe(
         `transform:translate(-50%, -50%) translate(${String(at.x)}px, ${String(at.y)}px)`,
       );

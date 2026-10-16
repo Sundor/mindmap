@@ -10,7 +10,13 @@ import {
   compactGroupBox,
   curvePath,
   curvePoint,
+  drawnEdgeCurves,
   drawnNodeRects,
+  edgeLabelSize,
+  flowEdgeLabel,
+  labelCentre,
+  labelRect,
+  overlapArea,
   distanceToCurve,
   EDGE_INTERACTION_WIDTH,
   edgeCurve,
@@ -665,8 +671,14 @@ describe('buildFlow for examples/architecture.yaml', () => {
       expect(shown.edges.length).toBeGreaterThan(0);
       for (const e of shown.edges) {
         let own = 0;
+        // Along the line as it is drawn: bent through a label beside the curve.
+        const drawn = drawnEdgeCurves(e.data);
         for (let i = 1; i <= 37; i++) {
-          if (nearestEdgeAt(curvePoint(e.data.curve, i / 38), shown.edges)?.id === e.id) own++;
+          const along = (i / 38) * drawn.length;
+          const piece = drawn[Math.min(drawn.length - 1, Math.floor(along))];
+          if (!piece) throw new Error('no curve');
+          const point = curvePoint(piece, along - Math.floor(along));
+          if (nearestEdgeAt(point, shown.edges)?.id === e.id) own++;
         }
         // All of its line but where another edge crosses it.
         expect(own, `${e.id} in ${JSON.stringify(view)}`).toBeGreaterThanOrEqual(30);
@@ -687,10 +699,24 @@ describe('buildFlow for examples/architecture.yaml', () => {
     const b = curveOf(back, layout);
     expect(Math.hypot(a.p0.x - b.p3.x, a.p0.y - b.p3.y)).toBeGreaterThanOrEqual(12);
     expect(Math.hypot(a.p3.x - b.p0.x, a.p3.y - b.p0.y)).toBeGreaterThanOrEqual(12);
-    const labelA = curvePoint(a, there.data.route.labelT);
-    const labelB = curvePoint(b, back.data.route.labelT);
-    // Labels are about 16px high: staggered far enough along the curve not to cover each other.
-    expect(Math.abs(labelA.y - labelB.y)).toBeGreaterThan(24);
+    // The two labels lie next to each other, not on each other: the second was moved beside its
+    // curve, and its line is drawn through it.
+    const labelOf = (edge: FlowEdge, curve: Curve) =>
+      labelRect(
+        curve,
+        edge.data.route.labelT,
+        edgeLabelSize(edge.data.labelText ?? flowEdgeLabel(edge.data) ?? ''),
+        edge.data.labelOffset,
+      );
+    expect(overlapArea(labelOf(there, a), labelOf(back, b))).toBe(0);
+    expect([there, back].some((edge) => edge.data.labelOffset !== undefined)).toBe(true);
+    for (const edge of [there, back]) {
+      if (!edge.data.labelOffset) continue;
+      const drawn = drawnEdgeCurves(edge.data);
+      expect(drawn).toHaveLength(2);
+      const centre = labelCentre(edge.data.curve, edge.data.route.labelT, edge.data.labelOffset);
+      expect(drawn[0]?.p3).toEqual(centre);
+    }
     // Every pair of nodes joined by several edges gets as many lanes.
     const byPair = new Map<string, FlowEdge[]>();
     for (const edge of flow.edges) {

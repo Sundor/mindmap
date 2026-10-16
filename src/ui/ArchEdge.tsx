@@ -1,13 +1,20 @@
 // Custom edge styled by kind (dataflow solid, dependency dashed, control dotted,
-// config dash-dot thin), with a per-kind arrowhead and a label with a readable background.
+// config dash-dot thin), with a per-kind arrowhead and a label with a readable background. The
+// line runs through the centre of its label, bent to it where the label sits beside the curve,
+// and a dot on each side of the label, where the line crosses its border, says which edge the
+// label belongs to.
 
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react';
 import {
-  curvePath,
+  curvesPath,
+  drawnCurves,
   EDGE_KINDS,
   aggregateCountLabel,
+  edgeLabelSize,
   flowEdgeLabel,
-  labelPoint,
+  labelCentre,
+  labelRect,
+  rectCrossings,
   routeCurve,
   type ArchEdgeData,
   type EdgeKind,
@@ -100,8 +107,17 @@ export function ArchEdgeView({
   // way the curve leaves them and how far this edge is shifted from its parallel neighbours.
   const { route } = data;
   const curve = routeCurve({ x: sourceX, y: sourceY }, { x: targetX, y: targetY }, route);
-  const label = labelPoint(curve, route.labelT);
+  const label = labelCentre(curve, route.labelT, data.labelOffset);
+  const drawn = drawnCurves(curve, route.labelT, data.labelOffset);
   const { text, aggregate, countShown, hidden } = edgeLabelOf(data);
+  const labelShown = text !== undefined && !hidden;
+  // Where the line crosses the border of its label (the box as src/core estimates it).
+  const dots = labelShown
+    ? rectCrossings(
+        drawn,
+        labelRect(curve, route.labelT, edgeLabelSize(data.labelText ?? text), data.labelOffset),
+      )
+    : [];
   const tooltip = [
     hidden ? (aggregate && countShown ? `${data.count} ${data.kind} edges` : text) : undefined,
     data.description,
@@ -112,11 +128,20 @@ export function ArchEdgeView({
       {tooltip.length > 0 && <title>{tooltip.join('\n')}</title>}
       <BaseEdge
         id={id}
-        path={curvePath(curve)}
+        path={curvesPath(drawn)}
         markerEnd={`url(#${markerId(data.kind)})`}
         interactionWidth={interactionWidth}
       />
-      {text !== undefined && !hidden && (
+      {dots.map((dot, i) => (
+        <circle
+          key={i}
+          className="arch-edge-dot"
+          cx={dot.x}
+          cy={dot.y}
+          r={aggregate ? 3.5 : 2.75}
+        />
+      ))}
+      {labelShown && (
         <EdgeLabelRenderer>
           <EdgeLabel id={id} data={data} x={label.x} y={label.y} />
         </EdgeLabelRenderer>

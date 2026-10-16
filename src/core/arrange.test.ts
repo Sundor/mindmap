@@ -27,6 +27,7 @@ import {
   UNASSIGNED_HEADER,
   UNASSIGNED_PADDING,
 } from './layout/constants';
+import { labelRoom, pairKey, type LabelRoom } from './labelRoom';
 import { overlaps, parseOk } from './layout/test-helpers';
 import { rowPlacement } from './layout/tiered';
 import type { Rect, Size } from './layout/types';
@@ -271,8 +272,14 @@ function viewOf(
   visible: ReadonlySet<string>,
   workItems?: FlowWorkItems,
   content?: ReadonlyMap<string, Size>,
+  room?: LabelRoom,
 ): ArrangeView {
-  return { visible, closedSize: shrunk(model, workItems), ...(content ? { content } : {}) };
+  return {
+    visible,
+    closedSize: shrunk(model, workItems),
+    ...(content ? { content } : {}),
+    ...(room ? { labelRoom: room } : {}),
+  };
 }
 
 function nodeOf(model: ArchitectureModel, id: string): ArchNode {
@@ -371,12 +378,34 @@ function violations(
       node.rowRange === undefined
     );
   };
-  /** `first` before `second` in the reference along an axis: still so, and far enough. */
-  const ordered = (first: string, second: string, axis: 'x' | 'y', least: number): void => {
+  /**
+   * `first` before `second` in the reference along an axis: still so, and far enough — at least
+   * the gap of the reference capped at `least`, and at least the room of the labels between the
+   * two when an edge between them crosses the gap along that axis.
+   */
+  const ordered = (
+    first: string,
+    second: string,
+    axis: 'x' | 'y',
+    least: number,
+    roomKept = true,
+  ): void => {
     const extent = axis === 'x' ? 'width' : 'height';
+    const across = axis === 'x' ? 'y' : 'x';
+    const acrossExtent = axis === 'x' ? 'height' : 'width';
+    /** From the end of `first` to the start of `second` along the axis. */
     const gapIn = (rects: ReadonlyMap<string, Rect>): number => {
       const from = rectIn(rects, first);
       return rectIn(rects, second)[axis] - (from[axis] + from[extent]);
+    };
+    /** How far apart the two are across the axis, whichever is first; negative: not apart. */
+    const gapAcrossIn = (rects: ReadonlyMap<string, Rect>): number => {
+      const from = rectIn(rects, first);
+      const to = rectIn(rects, second);
+      return Math.max(
+        to[across] - (from[across] + from[acrossExtent]),
+        from[across] - (to[across] + to[acrossExtent]),
+      );
     };
     const gap = gapIn(reference.absolute);
     if (gap < 0) return;
@@ -385,6 +414,13 @@ function violations(
     if (!(centre(first) < centre(second))) problems.push(`${first} no longer ${side} ${second}`);
     else if (gapIn(layout.absolute) < Math.min(gap, least) - PIXEL) {
       problems.push(`${first} too close ${side} ${second}`);
+    }
+    const room = view.labelRoom?.get(pairKey(first, second));
+    if (!room || !roomKept) return;
+    const gapAcross = gapAcrossIn(reference.absolute);
+    const crosses = gapAcross < 0 || (axis === 'x' ? gap >= gapAcross : gap > gapAcross);
+    if (crosses && gapIn(layout.absolute) < room[extent] - PIXEL) {
+      problems.push(`${first} leaves no room for the label ${side} ${second}`);
     }
   };
   for (const [parent, group] of siblings) {
@@ -397,9 +433,13 @@ function violations(
           [a, b],
           [b, a],
         ] as const) {
-          ordered(first, second, 'x', inBands ? ITEM_GAP : LAYER_SPACING);
-          // A box of the Unassigned area follows its connections past the boxes in the bands.
-          if (isUnassigned(a) === isUnassigned(b)) ordered(first, second, 'y', NODE_SPACING);
+          // A box of the Unassigned area follows its connections past the boxes in the bands,
+          // and the area stands beside the bands as the bands are wide: no room for labels is
+          // kept between a box of the area and one of the bands. The bands keep their padding:
+          // none is kept between rows either.
+          const together = isUnassigned(a) === isUnassigned(b);
+          ordered(first, second, 'x', inBands ? ITEM_GAP : LAYER_SPACING, together);
+          if (together) ordered(first, second, 'y', NODE_SPACING, !inBands);
         }
       }
     });
@@ -436,8 +476,9 @@ function violations(
     }
   }
   if (
-    layout.bounds.width > reference.bounds.width + PIXEL ||
-    layout.bounds.height > reference.bounds.height + PIXEL
+    !view.labelRoom &&
+    (layout.bounds.width > reference.bounds.width + PIXEL ||
+      layout.bounds.height > reference.bounds.height + PIXEL)
   ) {
     problems.push('larger than the reference');
   }
@@ -574,6 +615,45 @@ describe('compact2D', () => {
     });
   });
 
+  it('keeps the room the labels ask for between boxes an edge crosses between', () => {
+    // Two boxes 48 apart, a third below the first: the first two are joined by a labelled edge.
+    const ref = [r(0, 0, 100, 50), r(148, 0, 100, 50), r(0, 100, 100, 50)];
+    const same = ref.map((box) => s(box.width, box.height));
+    const room = (i: number, j: number) =>
+      (i === 0 && j === 1) || (i === 1 && j === 0) ? { width: 120, height: 40 } : undefined;
+    const packed = compact2D(ref, same, LAYER_SPACING, NODE_SPACING, room);
+    expect(packed.positions).toEqual([
+      { x: 0, y: 0 },
+      { x: 220, y: 0 },
+      { x: 0, y: 74 },
+    ]);
+    expect(packed.width).toBe(320);
+    // Above each other: the height of the room.
+    const stacked = compact2D(
+      [r(0, 0, 100, 50), r(0, 74, 100, 50)],
+      [s(100, 50), s(100, 50)],
+      LAYER_SPACING,
+      NODE_SPACING,
+      () => ({ width: 120, height: 40 }),
+    );
+    expect(stacked.positions).toEqual([
+      { x: 0, y: 0 },
+      { x: 0, y: 90 },
+    ]);
+    // Diagonal, further apart along y: only the height applies.
+    const diagonal = compact2D(
+      [r(0, 0, 100, 50), r(150, 200, 100, 50)],
+      [s(100, 50), s(100, 50)],
+      LAYER_SPACING,
+      NODE_SPACING,
+      () => ({ width: 500, height: 300 }),
+    );
+    expect(diagonal.positions).toEqual([
+      { x: 0, y: 0 },
+      { x: 148, y: 350 },
+    ]);
+  });
+
   it('keeps a box centred in its room centred', () => {
     // C sits in the middle below A and B; A shrinks, so the room under the row shrinks too.
     const ref = [r(0, 0, 100, 50), r(148, 0, 100, 50), r(74, 74, 100, 50)];
@@ -650,6 +730,58 @@ describe('arrangeLayout of the example', () => {
           expect(area(plain.bounds)).toBeLessThanOrEqual(0.3 * area(reference.bounds));
           expect(area(withBadges.bounds)).toBeLessThanOrEqual(0.3 * area(reference.bounds));
         }
+      }
+    }
+  });
+
+  it('keeps room for the labels of the edges between the boxes', () => {
+    for (const { name, model, reference } of modes) {
+      for (const { level, collapsed } of namedCases(model, reference)) {
+        const visible = visibleNodes(model, collapsed, level);
+        const room = labelRoom(model, visible, level);
+        const view = viewOf(model, visible, undefined, undefined, room);
+        const label = `${name} ${level} ${[...collapsed].length} collapsed`;
+        // With no closed group drawn smaller the map is not closed up, room or no room.
+        if (arrangeLayout(model, reference, view) === reference) continue;
+        const layout = check(model, reference, view, label);
+        const plain = arrangeLayout(model, reference, viewOf(model, visible));
+        // Something was given room: the map is no narrower than without.
+        expect(layout.bounds.width, label).toBeGreaterThanOrEqual(plain.bounds.width);
+        // Every pair of drawn siblings joined by a labelled edge across a gap is that far apart.
+        let apart = 0;
+        const unassigned = (id: string): boolean => {
+          const node = nodeOf(model, id);
+          return (
+            layout.rows.length > 0 &&
+            node.parentId === undefined &&
+            node.effectiveRow === undefined &&
+            node.rowRange === undefined
+          );
+        };
+        for (const [key, size] of room) {
+          const [a = '', b = ''] = key.split('\n');
+          if (nodeOf(model, a).parentId !== nodeOf(model, b).parentId) continue;
+          if (unassigned(a) !== unassigned(b)) continue;
+          // Whether the edge crosses the gap along x is judged in the reference, as the
+          // arrangement judges it; the gap is measured in the arrangement.
+          const gapOf = (rects: ReadonlyMap<string, Rect>, axis: 'x' | 'y'): number => {
+            const extent = axis === 'x' ? 'width' : 'height';
+            const from = rectIn(rects, a);
+            const to = rectIn(rects, b);
+            return Math.max(
+              to[axis] - (from[axis] + from[extent]),
+              from[axis] - (to[axis] + to[extent]),
+            );
+          };
+          const refX = gapOf(reference.absolute, 'x');
+          const refY = gapOf(reference.absolute, 'y');
+          if (refX >= 0 && (refY < 0 || refX >= refY)) {
+            const gapX = gapOf(layout.absolute, 'x');
+            expect(gapX, `${label}: ${a} ${b}`).toBeGreaterThanOrEqual(size.width - PIXEL);
+            apart++;
+          }
+        }
+        if (level === 'domains') expect(apart, label).toBeGreaterThan(0);
       }
     }
   });

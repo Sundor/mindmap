@@ -4,7 +4,7 @@
 
 import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import { useState, type ReactNode } from 'react';
-import { labelPoint, ZOOM_RANGE, type FlowGraph, type Size, type Viewport } from '../core';
+import { labelCentre, ZOOM_RANGE, type FlowGraph, type Size, type Viewport } from '../core';
 import { EdgeLabel } from '../ui/ArchEdge';
 import { MapCanvas } from '../ui/MapCanvas';
 import type { NodeLenses } from '../ui/nodeLensContext';
@@ -116,7 +116,7 @@ export interface EdgeLabelLayerProps {
  */
 export function EdgeLabelLayer({ flow }: EdgeLabelLayerProps) {
   return flow.edges.map((edge) => {
-    const at = labelPoint(edge.data.curve, edge.data.route.labelT);
+    const at = labelCentre(edge.data.curve, edge.data.route.labelT, edge.data.labelOffset);
     return <EdgeLabel key={edge.id} id={edge.id} data={edge.data} x={at.x} y={at.y} />;
   });
 }

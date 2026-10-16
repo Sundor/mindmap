@@ -6,8 +6,10 @@
 // Order is kept among the boxes of one group, and among the top-level boxes: every two of them
 // that are left / right of each other in the reference stay so, and every two above / below each
 // other stay so. The gap between such a pair is never less than the one of the reference, capped
-// at LAYER_SPACING (left / right) and NODE_SPACING (above / below). Positions are whole pixels,
-// so this holds to the pixel.
+// at LAYER_SPACING (left / right) and NODE_SPACING (above / below) — and never less than the
+// room the labels of the edges between the two need (`ArrangeView.labelRoom`), so that a label
+// lies between the boxes it joins with the line showing on both sides of it. Positions are whole
+// pixels, so this holds to the pixel.
 //
 // With rows, the bands and the placement of the items in them are worked out again from the new
 // sizes by the rules of the row layout (./layout/tiered.ts), in the order the reference has
@@ -17,9 +19,10 @@
 // above / below each other, but, as in the row layout, each goes where its connections are drawn
 // now, so it can come to stand beside a box in the bands that it was above or below.
 //
-// An arrangement is a pure function of the reference, the drawn nodes and the sizes of the closed
-// groups. When no closed group is drawn smaller than its box it is the reference itself; it is
-// never wider or taller than the reference (but for the rounding to whole pixels).
+// An arrangement is a pure function of the reference, the drawn nodes, the sizes of the closed
+// groups and the room of the labels. When no closed group is drawn smaller than its box it is
+// the reference itself; it is never wider or taller than the reference (but for the rounding to
+// whole pixels) except where the room of the labels asks for more than the reference had.
 // Pure: no React, no browser APIs.
 
 import {
@@ -45,6 +48,7 @@ import { fnv1a64 } from './layout/hash';
 import { sweep1D } from './layout/sweep';
 import { selfAndAncestors } from './layout/tree';
 import type { LayoutResult, Rect, RowBand, Size } from './layout/types';
+import type { LabelRoom } from './labelRoom';
 import type { MiniMapSourceNode } from './minimap';
 import type { ArchitectureModel, ArchNode } from './model';
 
@@ -60,6 +64,60 @@ export interface ArrangeView {
   readonly closedSize: (node: ArchNode, full: Rect) => Size;
   /** The content blocks the reference was computed with (`ComputeLayoutOptions.content`). */
   readonly content?: ReadonlyMap<string, Size> | undefined;
+  /**
+   * The room the labels of the drawn edges take between the drawn nodes they join
+   * (`labelRoom`, src/core/labelRoom.ts): two boxes joined by a labelled edge — themselves or
+   * through what is drawn inside them — are kept at least that far apart, along the axis the
+   * edge crosses between them. Left out: no room is kept.
+   */
+  readonly labelRoom?: LabelRoom | undefined;
+}
+
+/** The room between two boxes, as a function of the IDs of the boxes; undefined for none. */
+type RoomBetween = (a: string, b: string) => Size | undefined;
+
+/**
+ * Whether an edge between `a` and `b`, which is right of `a` in the reference, crosses the gap
+ * along x: they are not above each other as well, or they are further apart along x. (The sides
+ * an edge attaches to, `facingSides` in src/core/route.ts, are chosen the same way.)
+ */
+function facesAlongX(a: Rect, b: Rect): boolean {
+  const gapX = b.x - (a.x + a.width);
+  const gapY = Math.max(b.y - (a.y + a.height), a.y - (b.y + b.height));
+  return gapX >= 0 && (gapY < 0 || gapX >= gapY);
+}
+
+/** The same for `b` below `a`: along y when they are further apart that way. */
+function facesAlongY(a: Rect, b: Rect): boolean {
+  const gapY = b.y - (a.y + a.height);
+  const gapX = Math.max(b.x - (a.x + a.width), a.x - (b.x + b.width));
+  return gapY >= 0 && (gapX < 0 || gapY > gapX);
+}
+
+/** The larger of two sizes in each dimension. */
+function larger(a: Size, b: Size): Size {
+  return { width: Math.max(a.width, b.width), height: Math.max(a.height, b.height) };
+}
+
+/**
+ * Whether any two of the boxes `ids`, at `refs` in the reference, are closer than the `room`
+ * their labels take along the axis an edge between them crosses: then the boxes are arranged
+ * again even where nothing inside changed its size.
+ */
+function roomShort(room: RoomBetween, ids: readonly string[], refs: readonly Rect[]): boolean {
+  return ids.some((a, i) =>
+    ids.slice(i + 1).some((b, k) => {
+      const wanted = room(a, b);
+      const ra = refs[i];
+      const rb = refs[i + 1 + k];
+      if (!wanted || !ra || !rb) return false;
+      const [left, right] = ra.x <= rb.x ? [ra, rb] : [rb, ra];
+      const [upper, lower] = ra.y <= rb.y ? [ra, rb] : [rb, ra];
+      if (facesAlongX(left, right)) return right.x - (left.x + left.width) < wanted.width;
+      if (facesAlongY(upper, lower)) return lower.y - (upper.y + upper.height) < wanted.height;
+      return false;
+    }),
+  );
 }
 
 // --- One container ----------------------------------------------------------------------------
@@ -155,12 +213,12 @@ function sortedRects(rects: readonly Rect[], compare: (a: Rect, b: Rect) => numb
 /** A separation from each rectangle to every later one in `order` that `gapOf` gives a gap. */
 function separations(
   order: readonly Indexed[],
-  gapOf: (a: Rect, b: Rect) => number | undefined,
+  gapOf: (a: Indexed, b: Indexed) => number | undefined,
 ): Separation[] {
   const out: Separation[] = [];
   order.forEach((a, p) => {
     for (const b of order.slice(p + 1)) {
-      const gap = gapOf(a.rect, b.rect);
+      const gap = gapOf(a, b);
       if (gap !== undefined) out.push({ from: a.index, to: b.index, gap });
     }
   });
@@ -183,15 +241,18 @@ function keepSizes(sizes: readonly Size[], refs: readonly Rect[]): boolean {
  * Positions, relative to the content origin of one container, of boxes of `size` whose
  * reference rectangles are `ref` (relative to the same origin). Every pair that is left / right
  * of each other in the reference stays so, every pair above / below each other stays so, and the
- * gap between such a pair is at least the one of the reference, capped at `gapX` / `gapY`. Two
- * rectangles that do not overlap in the reference are apart along x or along y, so nothing
- * overlaps. Positions and extents are whole pixels. O(k²) for k boxes.
+ * gap between such a pair is at least the one of the reference, capped at `gapX` / `gapY` — and
+ * at least the `room` the pair asks for (by index), along the axis an edge between the two
+ * crosses ({@link facesAlongX}, {@link facesAlongY}). Two rectangles that do not overlap in the
+ * reference are apart along x or along y, so nothing overlaps. Positions and extents are whole
+ * pixels. O(k²) for k boxes.
  */
 export function compact2D(
   ref: readonly Rect[],
   size: readonly Size[],
   gapX: number,
   gapY: number,
+  room?: (i: number, j: number) => Size | undefined,
 ): { positions: { x: number; y: number }[]; width: number; height: number } {
   const byX = sortedRects(ref, (a, b) => a.x - b.x || a.y - b.y);
   const byY = sortedRects(ref, (a, b) => a.y - b.y || a.x - b.x);
@@ -200,9 +261,16 @@ export function compact2D(
   const xs = place1D(
     byX.map((entry) => entry.index),
     separations(byX, (a, b) => {
-      const gap = b.x - (a.x + a.width);
-      if (gap < 0 && !(a.y < b.y + b.height && b.y < a.y + a.height)) return undefined;
-      return Math.min(Math.max(gap, 0), gapX);
+      const gap = b.rect.x - (a.rect.x + a.rect.width);
+      if (
+        gap < 0 &&
+        !(a.rect.y < b.rect.y + b.rect.height && b.rect.y < a.rect.y + a.rect.height)
+      ) {
+        return undefined;
+      }
+      const least = Math.min(Math.max(gap, 0), gapX);
+      const wanted = room?.(a.index, b.index);
+      return wanted && facesAlongX(a.rect, b.rect) ? Math.max(least, wanted.width) : least;
     }),
     size.map((s) => s.width),
     ref.map((r) => r.x),
@@ -212,8 +280,11 @@ export function compact2D(
   const ys = place1D(
     byY.map((entry) => entry.index),
     separations(byY, (a, b) => {
-      const gap = b.y - (a.y + a.height);
-      return gap < 0 ? undefined : Math.min(gap, gapY);
+      const gap = b.rect.y - (a.rect.y + a.rect.height);
+      if (gap < 0) return undefined;
+      const least = Math.min(gap, gapY);
+      const wanted = room?.(a.index, b.index);
+      return wanted && facesAlongY(a.rect, b.rect) ? Math.max(least, wanted.height) : least;
     }),
     size.map((s) => s.height),
     ref.map((r) => r.y),
@@ -246,7 +317,9 @@ function isClosed(node: ArchNode, visible: ReadonlySet<string>): boolean {
 
 /**
  * Names an arrangement of `reference`: `${id}:${w}x${h}` of every visible closed group whose
- * `closedSize` differs from its reference box, in model order, joined by ' '. '' when none.
+ * `closedSize` differs from its reference box, in model order, joined by ' '; then, when the
+ * view keeps room for labels, `labels` and the room of every pair. '' when no group is drawn
+ * smaller.
  *
  * With rows, a closed group that spans rows is named whatever its size once any group is drawn
  * smaller: its column is worked out from its rows then, not from its children, so the
@@ -268,6 +341,12 @@ export function arrangementSignature(
     const spans = reference.rows.length > 0 && roleOf(node) === 'span';
     if (drawnSmaller || spans) parts.push(`${node.id}:${size.width}x${size.height}`);
     if (drawnSmaller) smaller = true;
+  }
+  if (smaller && view.labelRoom && view.labelRoom.size > 0) {
+    parts.push('labels');
+    for (const [key, size] of view.labelRoom) {
+      parts.push(`${key.replace('\n', '>')}:${size.width}x${size.height}`);
+    }
   }
   return smaller ? parts.join(' ') : '';
 }
@@ -390,6 +469,15 @@ interface Boxes {
   readonly placed: Map<string, Rect>;
   /** Where the drawn children of the groups `sizeOf` arranged sit, relative to their group. */
   readonly offsets: ReadonlyMap<string, { readonly x: number; readonly y: number }>;
+  /**
+   * The room the labels take between two of `children` of a container (undefined: the canvas):
+   * the largest room of any pair of drawn nodes inside the two; undefined when the view keeps
+   * no room, or no edge with a label joins any two of the children.
+   */
+  readonly roomAmong: (
+    containerId: string | undefined,
+    children: readonly string[],
+  ) => RoomBetween | undefined;
 }
 
 function rectIn(rects: ReadonlyMap<string, Rect>, id: string): Rect {
@@ -410,6 +498,34 @@ function arrangeBoxes(model: ArchitectureModel, reference: LayoutResult, view: A
     const block = reference.content.get(id);
     return block && { width: view.content?.get(id)?.width ?? 0, height: block.height };
   };
+  const roomAmong = (
+    containerId: string | undefined,
+    children: readonly string[],
+  ): RoomBetween | undefined => {
+    const { labelRoom } = view;
+    if (!labelRoom || labelRoom.size === 0) return undefined;
+    const among = new Set(children);
+    /** The child of the container that `id` is, or lies inside; undefined when none. */
+    const childOf = (id: string): string | undefined => {
+      let node: ArchNode | undefined = model.nodes.get(id);
+      while (node && node.parentId !== containerId) {
+        node = node.parentId === undefined ? undefined : nodeOf(node.parentId);
+      }
+      return node && among.has(node.id) ? node.id : undefined;
+    };
+    const between = new Map<string, Size>();
+    for (const [key, size] of labelRoom) {
+      const [a = '', b = ''] = key.split('\n');
+      const childA = childOf(a);
+      const childB = childOf(b);
+      if (childA === undefined || childB === undefined || childA === childB) continue;
+      const pair = childA < childB ? `${childA}\n${childB}` : `${childB}\n${childA}`;
+      const known = between.get(pair);
+      between.set(pair, known ? larger(known, size) : size);
+    }
+    if (between.size === 0) return undefined;
+    return (a, b) => between.get(a < b ? `${a}\n${b}` : `${b}\n${a}`);
+  };
 
   const sizes = new Map<string, Size>();
   /** Where the drawn children of an arranged group sit, relative to it. */
@@ -429,8 +545,9 @@ function arrangeBoxes(model: ArchitectureModel, reference: LayoutResult, view: A
       const children = node.childIds.filter((child) => visible.has(child));
       const childSizes = children.map(sizeOf);
       const childRefs = children.map((child) => rectIn(reference.rects, child));
-      if (keepSizes(childSizes, childRefs)) {
-        // Nothing inside changed: the inside of the reference.
+      const room = roomAmong(id, children);
+      if (keepSizes(childSizes, childRefs) && !(room && roomShort(room, children, childRefs))) {
+        // Nothing inside changed, and the labels have their room: the inside of the reference.
         children.forEach((child, k) => offsets.set(child, childRefs[k] ?? { x: 0, y: 0 }));
         size = { width: ref.width, height: ref.height };
       } else {
@@ -441,6 +558,7 @@ function arrangeBoxes(model: ArchitectureModel, reference: LayoutResult, view: A
           childSizes,
           LAYER_SPACING,
           NODE_SPACING,
+          room && ((i, j) => room(children[i] ?? '', children[j] ?? '')),
         );
         children.forEach((child, k) => {
           const at = packed.positions[k] ?? { x: 0, y: 0 };
@@ -465,7 +583,7 @@ function arrangeBoxes(model: ArchitectureModel, reference: LayoutResult, view: A
     }
   };
 
-  return { nodeOf, referenceRect, contentOf, sizeOf, place, placed, offsets };
+  return { nodeOf, referenceRect, contentOf, sizeOf, place, placed, offsets, roomAmong };
 }
 
 /** The band geometry of an arrangement: none without rows. */
@@ -480,7 +598,8 @@ function arrangeCanvas(model: ArchitectureModel, reference: LayoutResult, boxes:
   const roots = model.rootIds;
   const sizes = roots.map(boxes.sizeOf);
   const refs = roots.map(boxes.referenceRect);
-  if (keepSizes(sizes, refs)) {
+  const room = boxes.roomAmong(undefined, roots);
+  if (keepSizes(sizes, refs) && !(room && roomShort(room, roots, refs))) {
     roots.forEach((id, k) => boxes.place(id, refs[k]?.x ?? 0, refs[k]?.y ?? 0));
     return { rows: [], bounds: reference.bounds };
   }
@@ -489,6 +608,7 @@ function arrangeCanvas(model: ArchitectureModel, reference: LayoutResult, boxes:
     sizes,
     LAYER_SPACING,
     NODE_SPACING,
+    room && ((i, j) => room(roots[i] ?? '', roots[j] ?? '')),
   );
   roots.forEach((id, k) => {
     const at = packed.positions[k] ?? { x: 0, y: 0 };
@@ -545,7 +665,7 @@ function arrangeRows(
   boxes: Boxes,
 ): Frame {
   const { visible } = view;
-  const { nodeOf, referenceRect, contentOf, sizeOf } = boxes;
+  const { nodeOf, referenceRect, contentOf, sizeOf, roomAmong } = boxes;
   const rowCount = reference.rows.length;
   const rowIndex = new Map(reference.rows.map((band, i) => [band.id, i]));
   const itemRow = (id: string): number | undefined => {
@@ -595,6 +715,9 @@ function arrangeRows(
     // that share a row. Once an item has another width than in the reference, the items after
     // it are also held right of every item they were right of there, whatever its rows, by the
     // gap they had, capped at ITEM_GAP. Up to that item the cursors alone give the reference.
+    // An item is held right of every item it is joined to by a labelled edge across the gap by
+    // the room of the labels, whatever came before.
+    const room = roomAmong(containerId === CANVAS ? undefined : containerId, childIds);
     const cursor = new Array<number>(rowCount).fill(0);
     const sliceHeight = new Array<number>(rowCount).fill(0);
     let contentWidth = 0;
@@ -602,11 +725,14 @@ function arrangeRows(
     for (const item of items) {
       let x = 0;
       for (let r = item.top; r <= item.bottom; r++) x = Math.max(x, cursor[r] ?? 0);
-      if (resized) {
-        for (const before of items) {
-          if (before === item) break;
-          const gap = item.ref.x - (before.ref.x + before.ref.width);
-          if (gap >= 0) x = Math.max(x, before.x + before.width + Math.min(gap, ITEM_GAP));
+      for (const before of items) {
+        if (before === item) break;
+        const gap = item.ref.x - (before.ref.x + before.ref.width);
+        if (gap < 0) continue;
+        if (resized) x = Math.max(x, before.x + before.width + Math.min(gap, ITEM_GAP));
+        const wanted = room?.(before.id, item.id);
+        if (wanted && facesAlongX(before.ref, item.ref)) {
+          x = Math.max(x, before.x + before.width + wanted.width);
         }
       }
       resized ||= item.width !== item.ref.width;

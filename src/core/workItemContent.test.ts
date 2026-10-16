@@ -522,6 +522,7 @@ describe('the example with the dummy work items', () => {
           edge.data.curve,
           edge.data.route.labelT,
           edgeLabelSize(edge.data.labelText ?? text),
+          edge.data.labelOffset,
         );
         const onText = texts.reduce((sum, rect) => sum + overlapArea(label, rect), 0);
         if (onText > 0) report.push(`${edge.id}: ${Math.round(onText)}`);

@@ -2,6 +2,7 @@
 
 export * from './diagnostics';
 export * from './arrange';
+export * from './labelRoom';
 export * from './flow';
 export * from './ids';
 export * from './model';

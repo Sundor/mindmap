@@ -719,6 +719,24 @@ button.lod-step-pending {
   font-weight: 700;
 }
 
+/* Where the line of an edge crosses the border of its label: which edge the label belongs to. */
+.react-flow__edge .arch-edge-dot {
+  fill: var(--edge-dataflow);
+  stroke: none;
+}
+
+.react-flow__edge.arch-edge-dependency .arch-edge-dot {
+  fill: var(--edge-dependency);
+}
+
+.react-flow__edge.arch-edge-control .arch-edge-dot {
+  fill: var(--edge-control);
+}
+
+.react-flow__edge.arch-edge-config .arch-edge-dot {
+  fill: var(--edge-config);
+}
+
 .arch-arrow-dataflow path {
   fill: var(--edge-dataflow);
 }
