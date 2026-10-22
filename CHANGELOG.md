@@ -5,7 +5,7 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
-## Unreleased
+## 0.4.0 — 2026-10-22
 
 - **Summary edges, plain edges and summaries.** A node's `summary` is what its box says while
   it is closed, in place of the names of its contents. An edge with `summary: true` stands for
