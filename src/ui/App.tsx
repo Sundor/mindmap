@@ -360,7 +360,7 @@ function arrangeView(
   model: ArchitectureModel,
   workItems: WorkItemView | undefined,
   visible: ReadonlySet<string>,
-  level: LodLevel,
+  edgeLabels: boolean,
 ): ArrangeView {
   const drawnItems: FlowWorkItems | undefined = workItems
     ? { overlay: workItems.overlay, mode: workItems.mode }
@@ -373,8 +373,8 @@ function arrangeView(
         ...(drawnItems ? { workItems: drawnItems } : {}),
       }),
     content: workItems?.content,
-    // Room between the boxes for the labels of the edges drawn at that level.
-    labelRoom: labelRoom(model, visible, level),
+    // Room between the boxes for the labels of the edges drawn there.
+    labelRoom: labelRoom(model, visible, edgeLabels),
   };
 }
 
@@ -514,7 +514,15 @@ function Viewer() {
   const fitting = pendingMove?.fit === true || fitMoving !== undefined;
   const zoomLod = useLodLevel(lodConfig, fitting);
   // 'auto' follows the zoom; any other mode pins that level whatever the zoom.
-  const [lodMode, setLodMode] = useState<LodMode>('auto');
+  // The level of detail is a setting: the mode comes back on the next visit.
+  const lodMode = settings.lodMode;
+  const setLodMode = useCallback(
+    (mode: LodMode) => {
+      const now = settingsNow.current;
+      if (now.lodMode !== mode) changeSettings({ ...now, lodMode: mode });
+    },
+    [changeSettings],
+  );
   const lodLevel = effectiveLod(lodMode, zoomLod);
   // The level that is drawn. With the map closed up, Auto draws the level of the zoom once the
   // view has come to rest: another level is another arrangement, whose place can only be kept
@@ -1341,8 +1349,10 @@ function Viewer() {
   // visible: closed groups shrunk, the rest moved together, each box on its side of every other.
   const arrangeViewFor = useCallback(
     (visible: ReadonlySet<string>): ArrangeView | undefined =>
-      drawnModel ? arrangeView(drawnModel, shownWorkItems, visible, drawnLevel) : undefined,
-    [drawnModel, shownWorkItems, drawnLevel],
+      drawnModel
+        ? arrangeView(drawnModel, shownWorkItems, visible, settings.edgeLabels)
+        : undefined,
+    [drawnModel, shownWorkItems, settings.edgeLabels],
   );
   const visible = useMemo(
     () => (drawnModel ? visibleNodes(drawnModel, collapsed, drawnLevel) : undefined),
@@ -1665,7 +1675,7 @@ function Viewer() {
 
   // What a layout that arrives will draw, with what the viewer has chosen now: the level the
   // zoom shows (judged by the plain thresholds, as a new canvas judges it) or the pinned one.
-  const { closeGaps } = settings;
+  const { closeGaps, edgeLabels } = settings;
   useEffect(() => {
     arriving.current = (arrivingDrawn, computed, workItems, zoom) => {
       const placed = withPlacedRows(computed, arrivingDrawn.placedRow ?? NO_PLACED_ROWS);
@@ -1675,7 +1685,7 @@ function Viewer() {
       const at = arrangedLayout(
         arrivingDrawn.model,
         placed,
-        arrangeView(arrivingDrawn.model, workItems, shown, level),
+        arrangeView(arrivingDrawn.model, workItems, shown, edgeLabels),
       );
       // As they will be drawn, like the rectangles of the map on screen they are held against:
       // a closed group that spans rows shrunk in its column.
@@ -1689,7 +1699,7 @@ function Viewer() {
         }),
       };
     };
-  }, [closeGaps, collapsed, lodMode, lodConfig]);
+  }, [closeGaps, edgeLabels, collapsed, lodMode, lodConfig]);
 
   // Moves of the view started by the viewer. With the map closed up, a move worked out on one
   // arrangement must not run while another arrives: it is worked out on the arrangement the
@@ -1923,7 +1933,7 @@ function Viewer() {
           const at = arrangedLayout(
             drawnModel,
             reference,
-            arrangeView(drawnModel, shownWorkItems, shown, level),
+            arrangeView(drawnModel, shownWorkItems, shown, settings.edgeLabels),
           );
           // As it is drawn there: with the positions and sizes set by hand in that arrangement.
           const there =

@@ -12,7 +12,6 @@ import {
   COLOR_NAMES,
   colorByOptions,
   EDGE_KINDS,
-  FLOW_KINDS,
   nodeColoring,
   parseArchitecture,
   parseWorkItems,
@@ -158,7 +157,8 @@ describe('examples/template/architecture.yaml', () => {
   it('has every kind of edge and of flow, and every way to write a value', () => {
     const kindsOf = (section: string): unknown[] => entries(root[section]).map((e) => e['kind']);
     expect(new Set(kindsOf('edges'))).toEqual(new Set(EDGE_KINDS));
-    expect(new Set(kindsOf('flows'))).toEqual(new Set(FLOW_KINDS));
+    // A flow's kind is the file's own word; the template shows the default and another.
+    expect(new Set(kindsOf('flows'))).toEqual(new Set(['workflow', 'dataflow']));
     // A label as text and as a number.
     const labels = nodes.flatMap((node) =>
       isEntry(node['labels']) ? Object.values(node['labels']) : [],

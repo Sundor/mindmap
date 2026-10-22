@@ -92,6 +92,8 @@ describe('display settings', () => {
   it('round-trips through the stored text', () => {
     const settings: DisplaySettings = {
       lod: withLodThreshold(LOD_CONFIG, 'detailZoom', 2.5),
+      lodMode: 'components',
+      edgeLabels: false,
       compactCollapsed: true,
       closeGaps: true,
       showRows: false,
@@ -469,7 +471,7 @@ edges:
   });
 
   it('show the count where edge labels are hidden, and when rolled up', () => {
-    const components = buildFlow(model, layout, { lodLevel: 'components' });
+    const components = buildFlow(model, layout, { lodLevel: 'components', edgeLabels: false });
     const merged = components.edges.find((e) => e.id === 'a.x>b:dataflow');
     expect(merged && flowEdgeLabel(merged.data)).toBe('×3');
 

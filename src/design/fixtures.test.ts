@@ -4,7 +4,6 @@ import exampleWorkItems from '../../fixtures/workitems.json?raw';
 import {
   EDGE_KINDS,
   effectiveAttribute,
-  FLOW_KINDS,
   isOpenState,
   parseArchitecture,
   parseWorkItems,
@@ -182,7 +181,7 @@ describe('the specimen model', () => {
 
   it('has a workflow and a data flow over its edges', () => {
     const { flows, edges } = specimen.model;
-    expect(new Set(flows.map((flow) => flow.kind))).toEqual(new Set(FLOW_KINDS));
+    expect(new Set(flows.map((flow) => flow.kind))).toEqual(new Set(['workflow', 'dataflow']));
     const edgeIds = new Set(edges.map((edge) => edge.id));
     for (const flow of flows) {
       expect(flow.edgeIds.length).toBeGreaterThan(1);

@@ -135,6 +135,8 @@ export async function buildMap(
     closeGaps?: boolean;
     mode?: StoryMode;
     collapsed?: readonly string[];
+    /** The labels of single edges switched off. */
+    edgeLabels?: boolean;
   } = {},
 ): Promise<Built> {
   const model = parseModel(yaml);
@@ -155,13 +157,14 @@ export async function buildMap(
             ...(workItems ? { workItems } : {}),
           }),
         content,
-        labelRoom: labelRoom(model, visible, level),
+        labelRoom: labelRoom(model, visible),
       })
     : reference;
   const flow = buildFlow(model, layout, {
     lodLevel: level,
     collapsedIds: collapsed,
     compactCollapsed: options.compact === true || options.closeGaps === true,
+    ...(options.edgeLabels === false ? { edgeLabels: false } : {}),
     ...(workItems ? { workItems } : {}),
   });
   return { model, overlay, layout, flow };

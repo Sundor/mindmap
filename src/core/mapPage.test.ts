@@ -642,10 +642,10 @@ describe('what the list, the table and the style sheet of the page say', () => {
     expect(elements.filter((e) => e.attrs.get('class') === 'workitems')).toHaveLength(1);
   });
 
-  it('an edge is a row of its two ends, its kind and its label — at a level that draws no label too', async () => {
+  it('an edge is a row of its two ends, its kind and its label — with the labels switched off too', async () => {
     let labelled = 0;
-    for (const level of ['components', 'detail'] as const) {
-      const { flow } = await buildMap(exampleYaml, undefined, level);
+    for (const edgeLabels of [false, true]) {
+      const { flow } = await buildMap(exampleYaml, undefined, 'detail', { edgeLabels });
       const picture = mapSvg({ flow, scheme: 'light', title: 't', description: 'd' });
       const elements = read(mapHtml({ ...TEXTS, picture, flow, scheme: 'light' }));
       const names = new Map(flow.nodes.map((n) => [n.id, n.type === 'band' ? '' : n.data.name]));
@@ -667,7 +667,7 @@ describe('what the list, the table and the style sheet of the page say', () => {
         if (label !== '' && flowEdgeLabel(edge.data) === undefined) labelled += 1;
       }
     }
-    // Labels the picture does not draw (a single edge below the Everything level) are in the table.
+    // Labels the picture does not draw (the labels switched off) are in the table.
     expect(labelled).toBeGreaterThan(0);
   }, 60_000);
 

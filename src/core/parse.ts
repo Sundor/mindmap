@@ -10,8 +10,8 @@ import { COLOR_NAMES, colorFromFile, GREY_NAMES } from './colorBy';
 import { formatPath, type Diagnostic, type DocPath, type Severity } from './diagnostics';
 import { didYouMean, ID_RULE, isValidId, isValidSegment, suggest } from './ids';
 import {
+  DEFAULT_FLOW_KIND,
   EDGE_KINDS,
-  FLOW_KINDS,
   isEdgeKind,
   isNodeAttribute,
   LABEL_NAME_MAX,
@@ -719,7 +719,7 @@ function readFlows(
         compact({
           id,
           name: data.name,
-          kind: data.kind ?? 'workflow',
+          kind: data.kind ?? DEFAULT_FLOW_KIND,
           description: data.description,
           edgeIds: flowEdges,
           nodeIds: [...new Set(flowNodes)],
@@ -1112,12 +1112,11 @@ function issueMessage(issue: z.core.$ZodIssue, label: string): string {
   const input: unknown = issue.input;
   const where = field === undefined ? capitalize(label) : `"${field}" of ${label}`;
 
-  if (field === 'kind') {
-    const ofFlow = label.startsWith('flow');
-    const allowed = (ofFlow ? FLOW_KINDS : EDGE_KINDS).join(', ');
+  if (field === 'kind' && !label.startsWith('flow')) {
+    const allowed = EDGE_KINDS.join(', ');
     return input === undefined
       ? `Missing required field "kind" in ${label} (one of: ${allowed})`
-      : `Invalid ${ofFlow ? 'flow' : 'edge'} kind ${JSON.stringify(input)} in ${label}; allowed kinds: ${allowed}`;
+      : `Invalid edge kind ${JSON.stringify(input)} in ${label}; allowed kinds: ${allowed}`;
   }
   if (field === 'version' && issue.path.length === 1) {
     return input === undefined

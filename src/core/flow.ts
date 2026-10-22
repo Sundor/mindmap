@@ -26,7 +26,6 @@ import {
 } from './route';
 import {
   NODE_LEVEL_NAMES,
-  type ArchEdge,
   type ArchitectureModel,
   type ArchNode,
   type EdgeKind,
@@ -78,18 +77,8 @@ export function targetHandleId(side: Side): string {
  */
 export const Z_INDEX = { band: -10, group: 0, edge: 5, leaf: 10 } as const;
 
-/**
- * The label of an edge as the style sheet draws it (`.arch-edge-label` in styles.css), a little
- * generously: what its box is estimated from when a place is chosen for it (`placeLabel`).
- */
-export const EDGE_LABEL = {
-  fontSize: 11,
-  lineHeight: 15,
-  paddingX: 7,
-  paddingY: 2,
-  /** A label that fits nowhere on one line is broken into at most this many. */
-  maxLines: 3,
-} as const;
+import { EDGE_LABEL, edgeLabelSize, edgeLabelText } from './edgeLabel';
+export { EDGE_LABEL, edgeLabelSize, edgeLabelText };
 
 /** The type a leaf name is set in, per level (`.arch-leaf` in styles.css), in pixels. */
 const LEAF_NAME_FONT_SIZE: Readonly<Record<NodeLevel, number>> = { 0: 18, 1: 16, 2: 15 };
@@ -105,16 +94,6 @@ function leafNameRect(box: Rect, name: string, level: NodeLevel, blockHeight: nu
     y: box.y,
     width,
     height: Math.max(0, box.height - blockHeight),
-  };
-}
-
-/** Upper estimate of the box of an edge label showing `text` (one line per line break). */
-export function edgeLabelSize(text: string): Size {
-  const lines = text.split('\n');
-  const widest = Math.max(0, ...lines.map((line) => estimateTextWidth(line, EDGE_LABEL.fontSize)));
-  return {
-    width: widest + 2 * EDGE_LABEL.paddingX,
-    height: lines.length * EDGE_LABEL.lineHeight + 2 * EDGE_LABEL.paddingY,
   };
 }
 
@@ -344,8 +323,8 @@ export type ArchEdgeData = {
    */
   readonly labels?: readonly string[];
   /**
-   * Whether a single edge draws its `label [protocol]`: only at the `detail` level. The count
-   * label of an aggregate is drawn at every level.
+   * Whether a single edge draws its `label [protocol]` (`FlowView.edgeLabels`). The count label
+   * of an aggregate is drawn whatever it says.
    */
   readonly labelShown: boolean;
   /**
@@ -456,28 +435,23 @@ export function nearestEdgeAt<
   return best;
 }
 
-/** Text shown on an edge: `label [protocol]`, either part alone, or undefined. */
-export function edgeLabelText(edge: Pick<ArchEdge, 'label' | 'protocol'>): string | undefined {
-  if (edge.label !== undefined && edge.protocol !== undefined) {
-    return `${edge.label} [${edge.protocol}]`;
-  }
-  return edge.label ?? edge.protocol;
-}
-
 /** Count label of an aggregate edge, e.g. "×3". */
 export function aggregateCountLabel(count: number): string {
   return `×${count}`;
 }
 
-/** True when single edges draw their labels at `lodLevel`: from `subcomponents` on. */
-export function edgeLabelsShown(lodLevel: LodLevel): boolean {
-  return lodLevel === 'subcomponents' || lodLevel === 'detail';
+/**
+ * True when single edges draw their labels: at every level of detail, unless the view switches
+ * them off (`FlowView.edgeLabels`).
+ */
+export function edgeLabelsShown(view: Pick<FlowView, 'edgeLabels'>): boolean {
+  return view.edgeLabels !== false;
 }
 
 /**
  * Text shown on a rendered edge: the count for an aggregate at every level of
- * detail, otherwise the original edge's `label [protocol]` unless the level of detail hides
- * edge labels (`labelShown === false`).
+ * detail, otherwise the original edge's `label [protocol]` unless the labels are switched off
+ * (`labelShown === false`).
  */
 export function flowEdgeLabel(
   data: Pick<ArchEdgeData, 'count' | 'label' | 'protocol'> &
@@ -782,6 +756,8 @@ export interface FlowView {
   /** Manually collapsed groups; unknown IDs and IDs of nodes without children are ignored. */
   readonly collapsedIds?: ReadonlySet<string>;
   readonly lodLevel?: LodLevel;
+  /** Draw the labels of single edges; left out: yes. */
+  readonly edgeLabels?: boolean;
   /**
    * Draw closed groups shrunk around the middle of their box ({@link compactGroupBox}) instead
    * of keeping the full box ({@link closedGroupSize}). Nothing else moves; edges attach to the
@@ -1084,7 +1060,7 @@ export function buildFlow(
     rollupEdges(model, visible),
     layout,
     closed,
-    edgeLabelsShown(lodLevel),
+    edgeLabelsShown(view),
     model,
     shrunk,
     lists,

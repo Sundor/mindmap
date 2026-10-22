@@ -8,7 +8,7 @@
 // as null and is treated as absent, since that is common while editing.
 
 import { z } from './zod';
-import { EDGE_KINDS, FLOW_KINDS } from './model';
+import { EDGE_KINDS } from './model';
 
 /** Optional field where an empty YAML value (null) means the same as leaving the key out. */
 function optional<T extends z.ZodType>(schema: T) {
@@ -60,7 +60,7 @@ export const LinkSchema = z.object({
 export const FlowSchema = z.object({
   id: z.string(),
   name: requiredText,
-  kind: optional(z.enum(FLOW_KINDS)),
+  kind: optionalText,
   description: optionalText,
   edges: nestedList,
   nodes: nestedList,

@@ -78,18 +78,18 @@ function FocusSelect({ flows, items, focus, focusName, onChoose }: FocusChooser)
         }}
       >
         <option value="">None</option>
-        {(['workflow', 'dataflow'] as const).map((kind) => {
-          const ofKind = flows.filter((f) => f.kind === kind);
-          return ofKind.length > 0 ? (
-            <optgroup key={kind} label={kind === 'dataflow' ? 'Data flows' : 'Workflows'}>
-              {ofKind.map((f) => (
+        {/* One group per kind the file uses, in the order the kinds first occur. */}
+        {[...new Set(flows.map((f) => f.kind))].map((kind) => (
+          <optgroup key={kind} label={kind}>
+            {flows
+              .filter((f) => f.kind === kind)
+              .map((f) => (
                 <option key={f.id} value={`flow:${f.id}`}>
                   {f.name}
                 </option>
               ))}
-            </optgroup>
-          ) : null;
-        })}
+          </optgroup>
+        ))}
         {(['Epic', 'Feature'] as const).map((type) => {
           const ofType = offered(type);
           return ofType.length > 0 ? (
@@ -150,6 +150,18 @@ export function VisibilitySection({
         <>
           <h3 className="cp-section-title">Edges</h3>
           <KindFilters hiddenKinds={hiddenKinds} counts={kindCounts} onToggle={onToggleKind} />
+          <label
+            className="settings-row settings-check"
+            title="The label of every edge, at every level of detail. Off: the edges carry no labels (a merged edge still shows its count); hover an edge for its label."
+          >
+            <input
+              type="checkbox"
+              id="edge-labels"
+              checked={settings.edgeLabels}
+              onChange={(event) => onChange({ ...settings, edgeLabels: event.target.checked })}
+            />
+            <span>Edge labels</span>
+          </label>
           <label
             className="settings-row settings-check"
             title="Edges show only at the box under the pointer or selected, and those of the focus"

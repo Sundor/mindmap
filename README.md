@@ -21,7 +21,7 @@ Besides name, description and row, a node may carry `owner`, `status` and `tech`
 inherited by everything inside), `labels` (name → value, under names the file chooses;
 inherited the same way), `links` (`{ label, url }`, http(s) only) and `metrics`
 (name → number). A top-level `flows:` list names stories told through the edges (`id`, `name`,
-`kind: workflow | dataflow`, `description`, `edges` in step order, `nodes`). A top-level
+`kind`: any word, `workflow` by default, `description`, `edges` in step order, `nodes`). A top-level
 `presets:` list names colourings, offered under **Lenses → Colour by** (`name`, the `label`
 whose values it colours, `description`, `values`: a colour for a value). `examples/template/`
 holds a short structure file and its work items in which every key occurs once, with what it
@@ -407,7 +407,9 @@ items.
   right. A node with a **dashed border** has no row of its own and was placed by its connections
   (hover it for the tooltip).
 - **Edges** by kind: `dataflow` solid blue, `dependency` dashed grey, `control` dotted red,
-  `config` thin dash-dot green; the arrowhead points at `to`. Labels show `label [protocol]`.
+  `config` thin dash-dot green; the arrowhead points at `to`. Labels show `label [protocol]`,
+  at every level of detail; **Map → Edge labels** switches them off (a merged edge shows its
+  `×n` count whatever it says), and the level of detail last chosen comes back on the next visit.
   A label sits on its line — the line runs through the middle of the label, bent to it where
   the label was moved beside the line to lie clear of a box or of another label — and a dot in
   the colour of the edge on each side of the label, where the line crosses its border, says
@@ -598,12 +600,12 @@ items.
   estimated, generously for Latin, Greek, Cyrillic, CJK and emoji; names in other scripts may
   still be cut. The settings are kept in the browser.
 
-  | Zoom (Auto) | Level           | Shows                                                                                     |
-  | ----------- | --------------- | ----------------------------------------------------------------------------------------- |
-  | below 40%   | `domains`       | domain boxes only, drawn like collapsed groups; edges merged per domain                   |
-  | 40% – 100%  | `components`    | components (those with subcomponents drawn closed); edge labels hidden, `×n` counts shown |
-  | 100% – 160% | `subcomponents` | subcomponents and edge labels; work items as count badges                                 |
-  | above 160%  | `detail`        | everything: the work items are listed inside the boxes                                    |
+  | Zoom (Auto) | Level           | Shows                                                                           |
+  | ----------- | --------------- | ------------------------------------------------------------------------------- |
+  | below 40%   | `domains`       | domain boxes only, drawn like collapsed groups; edges merged per domain         |
+  | 40% – 100%  | `components`    | components (those with subcomponents drawn closed); `×n` counts on merged edges |
+  | 100% – 160% | `subcomponents` | subcomponents; work items as count badges                                       |
+  | above 160%  | `detail`        | everything: the work items are listed inside the boxes                          |
 
   A level only changes once the zoom is 5% past a threshold (up past 42% / 105% / 168%, down
   below 38% / 95% / 152%), so it does not flicker at a boundary. Changing level never moves

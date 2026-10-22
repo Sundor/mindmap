@@ -47,8 +47,8 @@ describe('pairKey', () => {
 });
 
 describe('labelRoom', () => {
-  it('gives each pair joined by labelled edges the room of the largest label, once labels are drawn', () => {
-    const rooms = labelRoom(model, everything, 'detail');
+  it('gives each pair joined by labelled edges the room of the largest label', () => {
+    const rooms = labelRoom(model, everything);
     // e1 and e2 join the same pair: the longer label, on two lines, with the margins.
     expect(rooms.get(pairKey('a.x', 'a.y'))).toEqual(room('reads the orders of the day'));
     expect(rooms.get(pairKey('a.g.one', 'b.z'))).toEqual(room('one'));
@@ -65,20 +65,22 @@ describe('labelRoom', () => {
     expect(two.height).toBeLessThanOrEqual(EDGE_LABEL_ROOM.maxHeight);
   });
 
-  it('keeps no room for the labels of single edges at the coarser levels', () => {
-    expect(labelRoom(model, everything, 'components').size).toBe(0);
-    expect(labelRoom(model, everything, 'subcomponents').size).toBe(2);
+  it('keeps no room for the labels of single edges while they are switched off', () => {
+    expect(labelRoom(model, everything, false).size).toBe(0);
+    expect(labelRoom(model, everything, true).size).toBe(2);
   });
 
-  it('keeps room for the count of an aggregate at every level', () => {
+  it('keeps room for the count of an aggregate, labels on or off', () => {
     const components = visibleNodes(model, new Set(), 'components');
-    const rooms = labelRoom(model, components, 'components');
+    const rooms = labelRoom(model, components, false);
     // e3 and e4 roll up into one edge from the closed group to b.z, counted.
     expect(rooms.get(pairKey('a.g', 'b.z'))).toEqual(room(aggregateCountLabel(2)));
     expect(rooms.size).toBe(1);
+    // With labels on, the edges between the two components keep their room at that level too.
+    expect(labelRoom(model, components).size).toBe(2);
     // Closed by hand at the Everything level: the labels of the parallel edges, one per line.
     const closed = visibleNodes(model, new Set(['a.g']), 'detail');
-    expect(labelRoom(model, closed, 'detail').get(pairKey('a.g', 'b.z'))).toEqual(
+    expect(labelRoom(model, closed).get(pairKey('a.g', 'b.z'))).toEqual(
       room(aggregateCountLabel(2)),
     );
     const parallel = parseOk(`
@@ -94,10 +96,10 @@ edges:
   - { id: e2, from: a.x, to: a.y, kind: dataflow, label: second one }
 `);
     const drawn = visibleNodes(parallel, new Set(), 'detail');
-    expect(labelRoom(parallel, drawn, 'detail').get(pairKey('a.x', 'a.y'))).toEqual(
+    expect(labelRoom(parallel, drawn).get(pairKey('a.x', 'a.y'))).toEqual(
       room('first\nsecond one'),
     );
-    expect(labelRoom(parallel, drawn, 'components').get(pairKey('a.x', 'a.y'))).toEqual(
+    expect(labelRoom(parallel, drawn, false).get(pairKey('a.x', 'a.y'))).toEqual(
       room(aggregateCountLabel(2)),
     );
   });
@@ -114,7 +116,7 @@ domains:
 edges:
   - { id: e1, from: a.x, to: a.y, kind: dataflow, label: ${'word '.repeat(30).trim()} }
 `);
-    const rooms = labelRoom(long, visibleNodes(long, new Set(), 'detail'), 'detail');
+    const rooms = labelRoom(long, visibleNodes(long, new Set(), 'detail'));
     expect(rooms.get(pairKey('a.x', 'a.y'))).toEqual({
       width: EDGE_LABEL_ROOM.maxWidth,
       height: room('word\nword').height,

@@ -48,8 +48,10 @@ function rootOf(id: string): string {
 }
 
 describe('edgeLabelsShown', () => {
-  it('is true from the subcomponents level on', () => {
-    expect(LOD_LEVELS.map(edgeLabelsShown)).toEqual([false, false, true, true]);
+  it('is true at every level unless the view switches the labels off', () => {
+    expect(edgeLabelsShown({})).toBe(true);
+    expect(edgeLabelsShown({ edgeLabels: true })).toBe(true);
+    expect(edgeLabelsShown({ edgeLabels: false })).toBe(false);
   });
 });
 
@@ -152,8 +154,9 @@ describe('buildFlow across levels of detail (examples/architecture.yaml)', () =>
     for (const edge of aggregates) {
       expect(flowEdgeLabel(edge.data)).toBe(aggregateCountLabel(edge.data.count));
     }
+    // A single edge between two domains keeps its label at this level too.
     for (const edge of edges.filter((e) => e.data.count === 1)) {
-      expect(flowEdgeLabel(edge.data)).toBeUndefined();
+      expect(flowEdgeLabel(edge.data)).toBe(edgeLabelText(edge.data));
     }
   });
 
@@ -175,13 +178,18 @@ describe('buildFlow across levels of detail (examples/architecture.yaml)', () =>
     }
   });
 
-  it('components: labels of single edges hidden, aggregate counts shown', () => {
+  it('components: labels of single edges shown, aggregate counts shown; the labels can be switched off', () => {
     const { edges } = flows.components;
     const singles = edges.filter((e) => e.data.count === 1);
     const aggregates = edges.filter((e) => e.data.count > 1);
-    // The labels are still in the data (for the detail panel), just not drawn.
     expect(singles.some((e) => edgeLabelText(e.data) !== undefined)).toBe(true);
     for (const edge of singles) {
+      expect(edge.data.labelShown).toBe(true);
+      expect(flowEdgeLabel(edge.data)).toBe(edgeLabelText(edge.data));
+    }
+    // Switched off, the labels are still in the data (for the detail panel), just not drawn.
+    const off = buildFlow(model, layout, { lodLevel: 'components', edgeLabels: false });
+    for (const edge of off.edges.filter((e) => e.data.count === 1)) {
       expect(edge.data.labelShown).toBe(false);
       expect(flowEdgeLabel(edge.data)).toBeUndefined();
     }

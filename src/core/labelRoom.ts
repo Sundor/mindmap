@@ -3,12 +3,12 @@
 // enough apart for the label to lie between them with the line showing on both sides of it.
 // Pure: no React, no browser APIs.
 
-import { aggregateCountLabel, edgeLabelSize, edgeLabelsShown, edgeLabelText } from './flow';
+import { edgeLabelSize, edgeLabelText } from './edgeLabel';
+import { aggregateCountLabel } from './flow';
 import type { Size } from './layout/types';
 import type { ArchitectureModel } from './model';
 import { rollupEdges } from './rollup';
 import { wrapBalanced } from './text';
-import type { LodLevel } from './visibility';
 
 /** How much room a label is given between the two boxes of its edge. */
 export const EDGE_LABEL_ROOM = {
@@ -40,7 +40,7 @@ function larger(a: Size, b: Size): Size {
 /**
  * The room the labels of the edges drawn among `visible` take, by pair of drawn nodes: for every
  * rolled-up edge with a label — the count of an aggregate, the labels of parallel edges, the
- * `label [protocol]` of a single edge once `lodLevel` draws edge labels — the box of that label
+ * `label [protocol]` of a single edge while `shown` says labels are drawn — the box of that label
  * as it would be drawn on {@link EDGE_LABEL_ROOM.lines} lines (`edgeLabelSize`), the margins
  * added, capped at the maxima; the largest where several edges join the same two nodes. Pairs
  * whose edges have no label are not in the map.
@@ -48,9 +48,8 @@ function larger(a: Size, b: Size): Size {
 export function labelRoom(
   model: ArchitectureModel,
   visible: ReadonlySet<string>,
-  lodLevel: LodLevel,
+  shown = true,
 ): LabelRoom {
-  const shown = edgeLabelsShown(lodLevel);
   const edgesById = new Map(model.edges.map((edge) => [edge.id, edge]));
   const room = new Map<string, Size>();
   for (const edge of rollupEdges(model, visible)) {

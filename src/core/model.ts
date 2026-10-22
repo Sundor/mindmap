@@ -105,12 +105,8 @@ export interface ArchEdge {
 }
 
 /** What a flow describes: a sequence of work, or the way data travels. */
-export const FLOW_KINDS = ['workflow', 'dataflow'] as const;
-export type FlowKind = (typeof FLOW_KINDS)[number];
-
-export function isFlowKind(value: unknown): value is FlowKind {
-  return typeof value === 'string' && (FLOW_KINDS as readonly string[]).includes(value);
-}
+/** The kind of a flow when the file gives none. */
+export const DEFAULT_FLOW_KIND = 'workflow';
 
 /**
  * A flow: a set of edges and nodes that together tell one story ("place an order"), defined
@@ -120,7 +116,11 @@ export function isFlowKind(value: unknown): value is FlowKind {
 export interface ArchFlow {
   readonly id: string;
   readonly name: string;
-  readonly kind: FlowKind;
+  /**
+   * What kind of story the flow tells, in the file's own words (`workflow` when it says
+   * nothing): the flows of one kind are grouped together where a flow is chosen.
+   */
+  readonly kind: string;
   readonly description?: string;
   /** Edge IDs in step order. An edge may occur more than once. */
   readonly edgeIds: readonly string[];

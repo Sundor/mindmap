@@ -147,7 +147,7 @@ edges: # the lines; the arrowhead is at "to"
 flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
     name: Place an order # its entry in the focus list, the title of its panel
-    kind: workflow # workflow (the default) or dataflow: its group in the focus list
+    kind: workflow # any word (workflow if left out): its group in the focus list
     description: From the basket to a stored order # shown in its panel
     edges: [payment-places-order, jobs-run-api] # the steps, in order
     nodes: [shop.checkout.basket] # further nodes it involves
@@ -273,19 +273,19 @@ graph by its connections.
 ### Flows
 
 A flow is a story told through the edges: a **workflow** (an order is placed, a release goes
-out) or a **data flow** (a page view becomes a chart). It is defined apart from the nodes
+out), a **data flow** (a page view becomes a chart), or a kind of your own. It is defined apart from the nodes
 and edges, as a set: the viewer's **Focus** lights what a flow involves and pales everything
 else — or, switched to **Filter**, draws nothing else — and the panel of a node or an edge
 lists the flows it is part of.
 
-| Key           | Required | Value                                                            |
-| ------------- | -------- | ---------------------------------------------------------------- |
-| `id`          | yes      | Text, same character rules as a node ID; unique among flows      |
-| `name`        | yes      | Text, not empty                                                  |
-| `kind`        | no       | `workflow` (default) or `dataflow`                               |
-| `description` | no       | Text: what the flow is, shown in its panel                       |
-| `edges`       | no       | List of edge IDs, **in step order**; an edge may occur twice     |
-| `nodes`       | no       | List of node IDs the flow involves besides the ends of its edges |
+| Key           | Required | Value                                                                                                             |
+| ------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `id`          | yes      | Text, same character rules as a node ID; unique among flows                                                       |
+| `name`        | yes      | Text, not empty                                                                                                   |
+| `kind`        | no       | Any word, `workflow` when left out: the flows of one kind are grouped together in the focus list, under that word |
+| `description` | no       | Text: what the flow is, shown in its panel                                                                        |
+| `edges`       | no       | List of edge IDs, **in step order**; an edge may occur twice                                                      |
+| `nodes`       | no       | List of node IDs the flow involves besides the ends of its edges                                                  |
 
 - A flow involves the nodes it names plus both ends of every edge it names.
 - An ID that names no edge or node is an error; a flow with neither is a warning.
@@ -724,8 +724,10 @@ The version of the viewer stands beside its name at the top of the control panel
 | Get more room for the map             | **Hide** on the rail, or click the tab that is shown                                                                         |
 
 - **Levels of detail.** Zoomed out, only domains are drawn and edges are merged per domain;
-  zooming in shows components, then subcomponents with edge labels, then (**Everything**, above
-  160%) the work items listed inside the boxes. At the coarser levels a badge on a box counts
+  zooming in shows components, then subcomponents, then (**Everything**, above 160%) the work
+  items listed inside the boxes. Edges carry their labels at every level (**Map → Edge labels**
+  switches them off; a merged edge shows its count whatever it says). At the coarser levels a
+  badge on a box counts
   its work items and its open bugs. Changing level never moves anything, unless **Close up the
   gaps** is on.
 - **Collapsed groups** keep their place, unless **Close up the gaps** is on; edges into them

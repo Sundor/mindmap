@@ -3,12 +3,23 @@
 // (not per structure). Pure: the storage is injected and nothing here throws.
 
 import { isFocusMode, type FocusMode } from './focus';
-import { LOD_CONFIG, LOD_THRESHOLD_KEYS, lodConfigFromStored, type LodConfig } from './lod';
+import {
+  isLodMode,
+  LOD_CONFIG,
+  LOD_THRESHOLD_KEYS,
+  lodConfigFromStored,
+  type LodConfig,
+  type LodMode,
+} from './lod';
 import type { ViewStateStorage } from './visibility';
 import { isStoryMode, type StoryMode } from './workitems';
 
 export interface DisplaySettings {
   readonly lod: LodConfig;
+  /** The level of detail: following the zoom (`auto`) or pinned to one level. */
+  readonly lodMode: LodMode;
+  /** Draw the labels of single edges (a merged edge shows its count whatever this says). */
+  readonly edgeLabels: boolean;
   /** Draw closed groups shrunk around their middle instead of keeping the full box. */
   readonly compactCollapsed: boolean;
   /**
@@ -47,6 +58,8 @@ export interface DisplaySettings {
 
 export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   lod: LOD_CONFIG,
+  lodMode: 'auto',
+  edgeLabels: true,
   compactCollapsed: false,
   closeGaps: false,
   showRows: true,
@@ -88,6 +101,8 @@ export function serializeDisplaySettings(settings: DisplaySettings): string {
   for (const key of LOD_THRESHOLD_KEYS) lod[key] = settings.lod[key];
   return JSON.stringify({
     lod,
+    lodMode: settings.lodMode,
+    edgeLabels: settings.edgeLabels,
     compactCollapsed: settings.compactCollapsed,
     closeGaps: settings.closeGaps,
     showRows: settings.showRows,
@@ -117,6 +132,8 @@ export function parseDisplaySettings(text: string | null | undefined): DisplaySe
   const iteration = typeof record.iteration === 'string' ? record.iteration.trim() : '';
   return {
     lod: lodConfigFromStored(record.lod),
+    lodMode: isLodMode(record.lodMode) ? record.lodMode : DEFAULT_DISPLAY_SETTINGS.lodMode,
+    edgeLabels: record.edgeLabels !== false,
     compactCollapsed: record.compactCollapsed === true,
     closeGaps: record.closeGaps === true,
     showRows: record.showRows !== false,

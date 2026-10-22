@@ -1038,7 +1038,7 @@ describe('parseArchitecture: flows', () => {
     ]);
   });
 
-  it('reports unknown edges and nodes, bad kinds, duplicate and invalid IDs, and empty flows', () => {
+  it('reports unknown edges and nodes, duplicate and invalid IDs, and empty flows; a kind is any word', () => {
     const result = parseArchitecture(
       file(
         `${DOMAINS}flows:\n  - id: a\n    name: A\n    edges: [e9, 7]\n    nodes: [nope]\n  - id: a\n    name: Again\n    kind: loop\n    edges: [e1]\n  - id: Bad Id\n    name: Empty\n  - id: fine\n    name: Fine\n    edges: [e1]\n`,
@@ -1050,9 +1050,8 @@ describe('parseArchitecture: flows', () => {
     expect(errorAt(result, 'flows[0].edges[1]').message).toMatch(/must be the ID of an edge/);
     expect(errorAt(result, 'flows[0].nodes[0]').message).toMatch(/unknown node "nope"/);
     expect(errorAt(result, 'flows[1].id').message).toMatch(/Duplicate flow ID "a"/);
-    expect(errorAt(result, 'flows[1].kind').message).toMatch(
-      /Invalid flow kind "loop" in flow "a"; allowed kinds: workflow, dataflow/,
-    );
+    // A flow's kind is any word of the file's own: "loop" is no error.
+    expect(result.errors.some((error) => error.path === 'flows[1].kind')).toBe(false);
     expect(errorAt(result, 'flows[2].id').message).toMatch(/Invalid flow ID/);
     expect(result.warnings.map((d) => d.path)).toEqual(['flows[2]']);
   });

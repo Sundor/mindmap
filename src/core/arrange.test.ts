@@ -738,7 +738,7 @@ describe('arrangeLayout of the example', () => {
     for (const { name, model, reference } of modes) {
       for (const { level, collapsed } of namedCases(model, reference)) {
         const visible = visibleNodes(model, collapsed, level);
-        const room = labelRoom(model, visible, level);
+        const room = labelRoom(model, visible);
         const view = viewOf(model, visible, undefined, undefined, room);
         const label = `${name} ${level} ${[...collapsed].length} collapsed`;
         // With no closed group drawn smaller the map is not closed up, room or no room.

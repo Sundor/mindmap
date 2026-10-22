@@ -24,9 +24,9 @@ export function lodModeHint(mode: LodMode, config: LodConfig): string {
     case 'domains':
       return 'Domains only, with the edges merged between domains.';
     case 'components':
-      return 'Components; subcomponents and edge labels stay hidden.';
+      return 'Components; subcomponents stay hidden.';
     case 'subcomponents':
-      return 'Subcomponents and edge labels; what is inside the boxes (work items) stays hidden.';
+      return 'Subcomponents; what is inside the boxes (work items) stays hidden.';
     case 'detail':
       return 'Everything, including what is inside the boxes (work items).';
   }
