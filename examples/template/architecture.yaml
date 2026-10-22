@@ -55,6 +55,7 @@ domains: # the top-level boxes; three levels: domains → components → subcomp
       - id: orders.settings
         name: Settings
         row: front
+
 edges: # the lines; the arrowhead is at "to"
   - id: payment-places-order # unique among the edges; what a flow lists
     from: shop.checkout.payment # a node of any level
@@ -87,6 +88,7 @@ flows: # stories told through the edges: Map → Focus lights one and pales the 
     edges: [payment-places-order, jobs-run-api] # the steps, in order
     nodes: [shop.checkout.basket] # further nodes it involves
   - { id: prices, name: Prices reach the shop, kind: dataflow, edges: [settings-set-prices] }
+
 presets: # named colourings, offered first under Lenses → Colour by
   - name: Zones # unique: its entry in the list, the title of the legend, what a view remembers
     label: zone # the label whose values it colours; owner, status and tech work too

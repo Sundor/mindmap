@@ -36,7 +36,8 @@ import {
 } from './schema';
 
 /** The longest the template may be and still be read at a glance: two screens. */
-const MAX_LINES = 100;
+// Brief, not short at any price: every key the viewer reads is shown once, with what it does.
+const MAX_LINES = 120;
 const MAX_ITEMS = 6;
 
 type Entry = Record<string, unknown>;
