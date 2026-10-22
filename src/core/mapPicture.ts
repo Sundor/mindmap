@@ -9,7 +9,7 @@
 // (src/ui/pictureStyles.test.ts fails when a repeated value differs).
 
 import type { SchemeColor } from './model';
-import { COMPACT_GROUP, compactGroupText } from './compactGroup';
+import { closedGroupText, COMPACT_GROUP } from './compactGroup';
 import {
   aggregateCountLabel,
   drawnEdgeCurves,
@@ -898,7 +898,7 @@ function drawNode(ctx: Ctx, node: ArchFlowNode, at: Rect, lenses: PictureLenses)
         { size: c.nameSize, weight: 700, color: headerFg },
       );
       const listLines = wrapText(
-        compactGroupText(data.childNames, data.compactHidden),
+        closedGroupText(data.summary, data.childNames, data.compactHidden),
         Math.max(1, inner - 2 * c.paddingX),
         c.textSize,
         500,
@@ -981,7 +981,7 @@ function drawNode(ctx: Ctx, node: ArchFlowNode, at: Rect, lenses: PictureLenses)
         const badgeHeight = data.badge ? WORK_ITEM_GEOMETRY.badgeHeight * scale + 4 : 0;
         // The canvas wraps a summary that is wider than the body; only real widths can tell
         // (the estimate is an upper bound and would break lines the screen does not break).
-        const summary = contentSummary(node);
+        const summary = data.summary ?? contentSummary(node);
         const summaryLines = ctx.measure.exact
           ? wrapText(summary, Math.max(1, inner - 20), size, 500, ctx.measure)
           : [summary];

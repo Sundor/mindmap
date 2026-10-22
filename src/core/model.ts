@@ -62,6 +62,8 @@ export interface ArchNode {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
+  /** What a closed box says in place of the names of its children: a group's story in a line. */
+  readonly summary?: string;
   /** The team or person responsible. */
   readonly owner?: string;
   /** Where the node is in its life: planned, live, deprecated … (free text). */
@@ -102,6 +104,17 @@ export interface ArchEdge {
   readonly label?: string;
   readonly protocol?: string;
   readonly description?: string;
+  /**
+   * A summary edge: one end is a group, and the edge stands for the edges inside that group
+   * which run the same way. It is drawn while the group is closed, in place of those edges
+   * merged, and not at all while the group is open.
+   */
+  readonly summary?: true;
+  /**
+   * The edges this edge stands for, in plain words: drawn in their place while the map shows
+   * the plain edges, and not at all otherwise (`withPlainEdges`).
+   */
+  readonly replaces?: readonly string[];
 }
 
 /** The kind of a flow when the file gives none. */

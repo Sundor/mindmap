@@ -15,6 +15,7 @@ domains: # the top-level boxes; three levels: domains → components → subcomp
   - id: shop # the stable key: edges, flows and comp: tags name it; found by the search
     name: Web Shop # the text of the box; found by the search
     description: Everything a customer sees # tooltip of the box, and its detail panel
+    summary: Sells to customers # what the box says while it is closed, in place of its contents
     row: front # the band of this box and of everything inside it
     owner: Shop team # owner, status and tech hold for everything inside, unless set there;
     status: live # the detail panel lists them and says where each comes from;
@@ -54,7 +55,6 @@ domains: # the top-level boxes; three levels: domains → components → subcomp
       - id: orders.settings
         name: Settings
         row: front
-
 edges: # the lines; the arrowhead is at "to"
   - id: payment-places-order # unique among the edges; what a flow lists
     from: shop.checkout.payment # a node of any level
@@ -66,6 +66,18 @@ edges: # the lines; the arrowhead is at "to"
   - { id: basket-needs-catalog, from: shop.checkout.basket, to: shop.catalog, kind: dependency }
   - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
   - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
+  - id: shop-orders
+    from: shop
+    to: orders
+    kind: dataflow
+    label: orders
+    summary: true # a summary edge: stands for the edges inside "shop" while shop is closed
+  - id: shop-pays
+    from: shop.checkout
+    to: orders.api
+    kind: dataflow
+    label: pays
+    replaces: [payment-places-order] # a plain edge: drawn in their place with Map → Plain edges
 
 flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
@@ -75,7 +87,6 @@ flows: # stories told through the edges: Map → Focus lights one and pales the 
     edges: [payment-places-order, jobs-run-api] # the steps, in order
     nodes: [shop.checkout.basket] # further nodes it involves
   - { id: prices, name: Prices reach the shop, kind: dataflow, edges: [settings-set-prices] }
-
 presets: # named colourings, offered first under Lenses → Colour by
   - name: Zones # unique: its entry in the list, the title of the legend, what a view remembers
     label: zone # the label whose values it colours; owner, status and tech work too

@@ -5,7 +5,7 @@ import { Fragment, useContext, type CSSProperties, type MouseEvent } from 'react
 import {
   collapseAction,
   COMPACT_GROUP,
-  compactGroupText,
+  closedGroupText,
   drawnProgressText,
   HEAT_STOPS,
   heatText,
@@ -224,12 +224,13 @@ export function GroupNode({ id, data, dragHandle }: NodeProps<ArchRFNode>) {
           <span className="arch-level-tag">{data.levelName}</span>
         </div>
         {collapsed && (
-          // Shrunk: the names of what is inside; full box: how much is inside.
+          // Its summary, if it has one; else shrunk: the names of what is inside; full box:
+          // how much is inside.
           <div className="arch-collapsed-body" title={contentSummary(data)}>
             <span className="arch-collapsed-text">
               {data.compact
-                ? compactGroupText(data.childNames, data.compactHidden)
-                : contentSummary(data)}
+                ? closedGroupText(data.summary, data.childNames, data.compactHidden)
+                : (data.summary ?? contentSummary(data))}
             </span>
             {data.badge && <WorkItemBadge counts={data.badge} />}
           </div>

@@ -72,6 +72,7 @@ import {
   visibleNodes,
   visibleRects,
   withoutEdgeKinds,
+  withPlainEdges,
   workItemContent,
   workItemDiagnostics,
   workItemLineRect,
@@ -1559,8 +1560,11 @@ function Viewer() {
     }
   }, [hiddenKindsEdit]);
   const shownModel = useMemo(
-    () => (drawnModel ? withoutEdgeKinds(drawnModel, hiddenKinds) : undefined),
-    [drawnModel, hiddenKinds],
+    () =>
+      drawnModel
+        ? withPlainEdges(withoutEdgeKinds(drawnModel, hiddenKinds), settings.plainEdges)
+        : undefined,
+    [drawnModel, hiddenKinds, settings.plainEdges],
   );
   // Of the edges on the map: what a click on a kind hides or shows.
   const kindCounts = useMemo(() => {
@@ -2862,6 +2866,9 @@ function Viewer() {
                 onToggleKind={toggleKind}
                 settings={settings}
                 onChange={changeSettings}
+                hasPlainEdges={
+                  model !== undefined && model.edges.some((e) => e.replaces !== undefined)
+                }
                 workItems={filterChoices}
               />
               <LayoutSection

@@ -80,6 +80,7 @@ interface NodeRecord {
   id: string;
   name: string;
   description?: string;
+  summary?: string;
   owner?: string;
   status?: string;
   tech?: string;
@@ -342,6 +343,8 @@ function walkNode(
       };
       const description = stringField(obj, 'description');
       if (description !== undefined) record.description = description;
+      const summary = stringField(obj, 'summary')?.trim();
+      if (summary !== undefined && summary !== '') record.summary = summary;
       for (const key of NODE_ATTRIBUTES) {
         const value = stringField(obj, key)?.trim();
         if (value !== undefined && value !== '') record[key] = value;
@@ -640,7 +643,56 @@ function readEdges(
       }
     }
 
-    if (data) edges.push(compact({ ...data }));
+    // A summary edge stands for the edges inside the group at one of its ends.
+    if (data?.summary === true && from !== undefined && to !== undefined) {
+      const atGroup = [from, to].some((end) => (nodes.get(end)?.childIds.length ?? 0) > 0);
+      if (!atGroup) {
+        out.error(
+          [...path, 'summary'],
+          `${capitalize(label)} is a summary edge, but neither end is a group: a summary edge stands for the edges inside the group it ends at`,
+        );
+      }
+    }
+    const replaces = listAt(obj, 'replaces').filter(
+      (entry): entry is string => typeof entry === 'string',
+    );
+    if (data) {
+      edges.push(
+        compact({
+          id: data.id,
+          from: data.from,
+          to: data.to,
+          kind: data.kind,
+          label: data.label,
+          protocol: data.protocol,
+          description: data.description,
+          ...(data.summary === true ? { summary: true as const } : {}),
+          ...(replaces.length > 0 ? { replaces } : {}),
+        }),
+      );
+    }
+  });
+  // What an edge stands for must be another edge of the file, and one that stands for nothing
+  // itself: a reader switches between the plain edges and the edges they replace, not deeper.
+  const byId = new Map(edges.map((edge) => [edge.id, edge]));
+  edges.forEach((edge, index) => {
+    for (const [k, replaced] of (edge.replaces ?? []).entries()) {
+      const path: DocPath = ['edges', index, 'replaces', k];
+      const label = `edge "${edge.id}"`;
+      if (replaced === edge.id) {
+        out.error(path, `${capitalize(label)} cannot replace itself`);
+      } else if (!byId.has(replaced)) {
+        out.error(
+          path,
+          `${capitalize(label)} replaces unknown edge "${replaced}"${didYouMean(replaced, byId.keys())}`,
+        );
+      } else if ((byId.get(replaced)?.replaces?.length ?? 0) > 0) {
+        out.error(
+          path,
+          `${capitalize(label)} replaces "${replaced}", which replaces edges itself: only edges that stand for nothing can be replaced`,
+        );
+      }
+    }
   });
   return edges;
 }
@@ -1009,6 +1061,7 @@ function buildModel(
         id: record.id,
         name: record.name,
         description: record.description,
+        summary: record.summary,
         owner: record.owner,
         status: record.status,
         tech: record.tech,

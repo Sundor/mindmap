@@ -21,7 +21,10 @@ Besides name, description and row, a node may carry `owner`, `status` and `tech`
 inherited by everything inside), `labels` (name → value, under names the file chooses;
 inherited the same way), `links` (`{ label, url }`, http(s) only) and `metrics`
 (name → number). A top-level `flows:` list names stories told through the edges (`id`, `name`,
-`kind`: any word, `workflow` by default, `description`, `edges` in step order, `nodes`). A top-level
+`kind`: any word, `workflow` by default, `description`, `edges` in step order, `nodes`). A node may
+carry a `summary`, what its box says while it is closed; an edge may be a `summary: true` edge
+standing for the edges inside the group it ends at while that group is closed, or may list the
+edges it `replaces` in plain words, drawn in their place with **Map → Plain edges**. A top-level
 `presets:` list names colourings, offered under **Lenses → Colour by** (`name`, the `label`
 whose values it colours, `description`, `values`: a colour for a value). `examples/template/`
 holds a short structure file and its work items in which every key occurs once, with what it

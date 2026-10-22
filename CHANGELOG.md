@@ -7,6 +7,13 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 
 ## Unreleased
 
+- **Summary edges, plain edges and summaries.** A node's `summary` is what its box says while
+  it is closed, in place of the names of its contents. An edge with `summary: true` stands for
+  the edges inside the group it ends at: drawn with its own label while the group is closed,
+  in place of their merged `×n` line, and not at all while the group is open. An edge that
+  lists the edges it `replaces` is a plain edge: **Map → Plain edges** draws the plain edges in
+  place of the edges they stand for, for a reader who needs the story rather than the
+  interfaces, and off draws the technical edges alone. The detail panel says which is which.
 - **Arrowheads a size larger**, and at a label one chevron where the line leaves it towards its
   target, in place of the two dots: which edge the label belongs to, and which way it goes.
 - **Edge labels at every level of detail**, with **Map → Edge labels** to switch them off (a

@@ -129,6 +129,23 @@ export function withoutEdgeKinds(
   return { ...model, edges: filterEdgesByKind(model.edges, hiddenKinds) };
 }
 
+/**
+ * `model` with its edges as the plain view or the technical one draws them: with `plain`, the
+ * edges that stand for others (`ArchEdge.replaces`) in place of the edges they replace; without
+ * it, the replaced edges and none of the ones that stand for them. Returns `model` itself when
+ * no edge replaces another. Applied before the rollup, like `withoutEdgeKinds`.
+ */
+export function withPlainEdges(model: ArchitectureModel, plain: boolean): ArchitectureModel {
+  const replaced = new Set(model.edges.flatMap((edge) => edge.replaces ?? []));
+  if (replaced.size === 0) return model;
+  return {
+    ...model,
+    edges: model.edges.filter((edge) =>
+      plain ? !replaced.has(edge.id) : (edge.replaces?.length ?? 0) === 0,
+    ),
+  };
+}
+
 /** A copy of `kinds` with `kind` added if absent, removed if present. */
 export function toggleEdgeKind(kinds: ReadonlySet<EdgeKind>, kind: EdgeKind): Set<EdgeKind> {
   const next = new Set(kinds);

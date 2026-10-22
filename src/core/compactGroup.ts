@@ -77,9 +77,19 @@ function neededHeight(width: number, name: string, text: string, extra: number):
   );
 }
 
+/** What a shrunk group lists: its `summary` when it has one, else the names of its children. */
+export function closedGroupText(
+  summary: string | undefined,
+  childNames: readonly string[],
+  hidden = 0,
+): string {
+  return summary ?? compactGroupText(childNames, hidden);
+}
+
 /**
  * The box of a closed group drawn shrunk: centred on the middle of its full box `rect`, never
- * larger than it, and large enough for `name` and all of `childNames` (the estimates of
+ * larger than it, and large enough for `name` and all of `childNames` — or for its `summary`,
+ * which a group shows in place of the names (the estimates of
  * src/core/text.ts are upper bounds for the usual scripts, so the drawn text fits).
  *
  * The box is `COMPACT_GROUP.width` wide, or as wide as the name needs to stay on one line; when
@@ -96,6 +106,7 @@ export function compactGroupBox(
   name: string,
   childNames: readonly string[],
   extra = 0,
+  summary?: string,
 ): CompactGroupBox {
   const c = COMPACT_GROUP;
   const centred = (width: number, height: number): Rect => ({
@@ -104,7 +115,7 @@ export function compactGroupBox(
     width,
     height,
   });
-  const text = compactGroupText(childNames);
+  const text = closedGroupText(summary, childNames);
   const nameWidth =
     Math.ceil(estimateTextWidth(name, c.nameSize)) + 2 * c.border + 2 * c.paddingX + c.chevron;
   let width = Math.min(rect.width, Math.max(c.width, nameWidth));
@@ -114,7 +125,9 @@ export function compactGroupBox(
     if (width >= rect.width) break;
     width = Math.min(rect.width, width + c.widthStep);
   }
-  // Not even the full box holds everything: list what fits.
+  // Not even the full box holds everything: a summary is shown in the full box as it is; names
+  // are listed as far as they fit.
+  if (summary !== undefined) return { rect, hidden: childNames.length };
   for (let hidden = 1; hidden < childNames.length; hidden++) {
     const shorter = compactGroupText(childNames, hidden);
     if (neededHeight(rect.width, name, shorter, extra) <= rect.height) return { rect, hidden };
@@ -137,6 +150,7 @@ export function compactGroupRect(
   name: string,
   childNames: readonly string[],
   extra = 0,
+  summary?: string,
 ): Rect {
-  return compactGroupBox(rect, name, childNames, extra).rect;
+  return compactGroupBox(rect, name, childNames, extra, summary).rect;
 }

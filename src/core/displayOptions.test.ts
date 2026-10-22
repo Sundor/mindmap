@@ -94,6 +94,7 @@ describe('display settings', () => {
       lod: withLodThreshold(LOD_CONFIG, 'detailZoom', 2.5),
       lodMode: 'components',
       edgeLabels: false,
+      plainEdges: true,
       compactCollapsed: true,
       closeGaps: true,
       showRows: false,

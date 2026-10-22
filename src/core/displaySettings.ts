@@ -20,6 +20,8 @@ export interface DisplaySettings {
   readonly lodMode: LodMode;
   /** Draw the labels of single edges (a merged edge shows its count whatever this says). */
   readonly edgeLabels: boolean;
+  /** Draw the plain edges, which stand for others, in place of the edges they replace. */
+  readonly plainEdges: boolean;
   /** Draw closed groups shrunk around their middle instead of keeping the full box. */
   readonly compactCollapsed: boolean;
   /**
@@ -60,6 +62,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   lod: LOD_CONFIG,
   lodMode: 'auto',
   edgeLabels: true,
+  plainEdges: false,
   compactCollapsed: false,
   closeGaps: false,
   showRows: true,
@@ -103,6 +106,7 @@ export function serializeDisplaySettings(settings: DisplaySettings): string {
     lod,
     lodMode: settings.lodMode,
     edgeLabels: settings.edgeLabels,
+    plainEdges: settings.plainEdges,
     compactCollapsed: settings.compactCollapsed,
     closeGaps: settings.closeGaps,
     showRows: settings.showRows,
@@ -134,6 +138,7 @@ export function parseDisplaySettings(text: string | null | undefined): DisplaySe
     lod: lodConfigFromStored(record.lod),
     lodMode: isLodMode(record.lodMode) ? record.lodMode : DEFAULT_DISPLAY_SETTINGS.lodMode,
     edgeLabels: record.edgeLabels !== false,
+    plainEdges: record.plainEdges === true,
     compactCollapsed: record.compactCollapsed === true,
     closeGaps: record.closeGaps === true,
     showRows: record.showRows !== false,

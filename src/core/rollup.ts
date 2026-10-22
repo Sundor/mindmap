@@ -42,12 +42,22 @@ export function nearestVisible(
   return undefined;
 }
 
+/** Whether `id` is drawn as a closed box: visible, with children, none of them visible. */
+function drawnClosed(model: ArchitectureModel, visible: ReadonlySet<string>, id: string): boolean {
+  const node = model.nodes.get(id);
+  if (!node || !visible.has(id) || node.childIds.length === 0) return false;
+  return !node.childIds.some((child) => visible.has(child));
+}
+
 /**
  * The edges to draw for the nodes in `visible`:
  * 1. each end of every model edge is replaced by its nearest visible ancestor (itself if visible);
  * 2. edges whose two ends map to the same node are dropped (as are edges with an end that has no
  *    visible ancestor at all, which cannot happen for a set produced by `visibleNodes`);
- * 3. the rest are grouped by (source, target, kind) — direction and kind are preserved.
+ * 3. a summary edge (`ArchEdge.summary`) is drawn only while a group it ends at is drawn
+ *    closed, and then stands for every other edge that runs the same way between the two nodes
+ *    it is drawn between, or what is drawn inside them: those are dropped;
+ * 4. the rest are grouped by (source, target, kind) — direction and kind are preserved.
  *
  * Deterministic: aggregates come in the document order of their first member edge, and
  * `memberEdgeIds` in document order.
@@ -66,10 +76,40 @@ export function rollupEdges(
     return resolved.get(id);
   };
 
+  // The summary edges that are drawn, and the two drawn nodes each stands between.
+  const drawnSummaries = new Set<string>();
+  const covers: { readonly source: string; readonly target: string }[] = [];
+  for (const edge of model.edges) {
+    if (edge.summary !== true) continue;
+    const source = resolve(edge.from);
+    const target = resolve(edge.to);
+    if (source === undefined || target === undefined || source === target) continue;
+    const closedEnd = [edge.from, edge.to].some((end) => drawnClosed(model, visible, end));
+    if (!closedEnd) continue;
+    drawnSummaries.add(edge.id);
+    covers.push({ source, target });
+  }
+  /** Whether `id` is `root`, or lies inside it. */
+  const within = (id: string, root: string): boolean => {
+    let current: string | undefined = id;
+    while (current !== undefined) {
+      if (current === root) return true;
+      current = model.nodes.get(current)?.parentId;
+    }
+    return false;
+  };
+  const covered = (source: string, target: string): boolean =>
+    covers.some((cover) => within(source, cover.source) && within(target, cover.target));
+
   for (const edge of model.edges) {
     const source = resolve(edge.from);
     const target = resolve(edge.to);
     if (source === undefined || target === undefined || source === target) continue;
+    if (edge.summary === true) {
+      if (!drawnSummaries.has(edge.id)) continue;
+    } else if (covers.length > 0 && covered(source, target)) {
+      continue;
+    }
     const id = aggregateEdgeId(source, target, edge.kind);
     const group = groups.get(id);
     if (group) group.members.push(edge);

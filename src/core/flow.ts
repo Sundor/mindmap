@@ -143,6 +143,8 @@ export type ArchNodeData = {
   readonly compact: boolean;
   /** Names of the direct children, in document order: what a shrunk closed group lists. */
   readonly childNames: readonly string[];
+  /** What a closed box says in place of the names (`ArchNode.summary`). */
+  readonly summary?: string;
   /**
    * How many of `childNames` (from the end) a shrunk group does not list, because even its full
    * box cannot hold them all (`compactGroupBox`); 0 otherwise. Always fewer than all of them.
@@ -335,6 +337,10 @@ export type ArchEdgeData = {
   readonly label?: string;
   readonly protocol?: string;
   readonly description?: string;
+  /** A summary edge, drawn in place of the edges inside the closed group it ends at. */
+  readonly summary?: true;
+  /** The edges this plain edge stands for (`ArchEdge.replaces`). */
+  readonly replaces?: readonly string[];
   /**
    * For an aggregate of parallel edges (every member joins the two drawn nodes themselves, none
    * is rolled up from inside a closed group): the members' `label [protocol]` texts, in document
@@ -680,6 +686,8 @@ function buildEdges(
         ...(original?.label !== undefined ? { label: original.label } : {}),
         ...(original?.protocol !== undefined ? { protocol: original.protocol } : {}),
         ...(original?.description !== undefined ? { description: original.description } : {}),
+        ...(original?.summary === true ? { summary: true as const } : {}),
+        ...(original?.replaces !== undefined ? { replaces: original.replaces } : {}),
         ...(labels.length > 0 ? { labels } : {}),
         labelShown,
         route,
@@ -846,7 +854,13 @@ function shrunkGroupBox(
   rect: Rect,
   badge: boolean,
 ): CompactGroupBox | undefined {
-  const box = compactGroupBox(rect, node.name, childNames, badge ? COMPACT_GROUP.badgeLine : 0);
+  const box = compactGroupBox(
+    rect,
+    node.name,
+    childNames,
+    badge ? COMPACT_GROUP.badgeLine : 0,
+    node.summary,
+  );
   return fitsCompact(box, childNames) ? box : undefined;
 }
 
@@ -1061,6 +1075,7 @@ export function buildFlow(
       childNames,
       compactHidden: box?.hidden ?? 0,
       ...(node.description !== undefined ? { description: node.description } : {}),
+      ...(node.summary !== undefined ? { summary: node.summary } : {}),
       ...(placedRow !== undefined ? { placedRowName: rowNames.get(placedRow) ?? placedRow } : {}),
       ...(listed ? { workItems: listed } : {}),
       ...(block ? { contentRect: block } : {}),

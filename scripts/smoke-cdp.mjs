@@ -2019,6 +2019,7 @@ async function run(viewerPath, browserPath) {
       'kind-filters',
       'edge-labels',
       'edges-on-demand',
+      'plain-edges',
       'workitem-filter',
       'workitem-filter-count',
       'show-completed',
@@ -11055,7 +11056,7 @@ async function run(viewerPath, browserPath) {
       templateDrawn &&
         template.source === 'architecture.yaml' &&
         template.structure.nodes === '9' &&
-        template.structure.edges === '4' &&
+        template.structure.edges === '6' &&
         template.structure.rows === '2' &&
         template.items === '5' &&
         template.diagnostics.errors === '0' &&

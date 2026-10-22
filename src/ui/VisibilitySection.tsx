@@ -53,6 +53,8 @@ export interface VisibilitySectionProps {
   readonly onToggleKind: (kind: EdgeKind) => void;
   readonly settings: DisplaySettings;
   readonly onChange: (settings: DisplaySettings) => void;
+  /** The file has edges that stand for others: the plain edges can be chosen. */
+  readonly hasPlainEdges: boolean;
   /** Absent while no work items are loaded: the filter is then not offered. */
   readonly workItems?: WorkItemFilterChoices | undefined;
 }
@@ -122,6 +124,7 @@ export function VisibilitySection({
   onToggleKind,
   settings,
   onChange,
+  hasPlainEdges,
   workItems,
 }: VisibilitySectionProps) {
   // An iteration stored for another file is not applied (`usableWorkItemFilter`), so not shown.
@@ -173,6 +176,23 @@ export function VisibilitySection({
               onChange={(event) => onChange({ ...settings, edgesOnDemand: event.target.checked })}
             />
             <span>Edges on demand</span>
+          </label>
+          <label
+            className="settings-row settings-check"
+            title={
+              hasPlainEdges
+                ? 'Draw the plain edges, which stand for others (replaces: in the file), in place of the edges they stand for'
+                : 'The file has no edge that stands for others (replaces: in the file)'
+            }
+          >
+            <input
+              type="checkbox"
+              id="plain-edges"
+              checked={settings.plainEdges}
+              disabled={!hasPlainEdges}
+              onChange={(event) => onChange({ ...settings, plainEdges: event.target.checked })}
+            />
+            <span>Plain edges</span>
           </label>
         </>
       )}

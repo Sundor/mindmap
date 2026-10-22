@@ -492,6 +492,7 @@ function NodeDetail({
           </Field>
         )}
       </dl>
+      {node.summary !== undefined && <p className="detail-description">{node.summary}</p>}
       {node.description !== undefined && <p className="detail-description">{node.description}</p>}
       {node.links && node.links.length > 0 && (
         <ul className="detail-links" id="detail-links">
@@ -534,6 +535,17 @@ function EdgeDetail({ model, id, hiddenKinds, onGoToNode, onGoToFlow }: DetailPr
         </Field>
         {edge.label !== undefined && <Field label="Label">{edge.label}</Field>}
         {edge.protocol !== undefined && <Field label="Protocol">{edge.protocol}</Field>}
+        {edge.summary === true && (
+          <Field label="Summary edge">
+            Stands for the edges inside the closed group it ends at; not drawn while the group is
+            open.
+          </Field>
+        )}
+        {edge.replaces !== undefined && (
+          <Field label="Stands for">
+            {edge.replaces.join(', ')} (drawn in their place with Map → Plain edges)
+          </Field>
+        )}
       </dl>
       {edge.description !== undefined && <p className="detail-description">{edge.description}</p>}
       <FlowList flows={flowsOfEdge(model, id)} onGoToFlow={onGoToFlow} />

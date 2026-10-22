@@ -40,6 +40,7 @@ const nodeFields = {
   id: z.string(),
   name: requiredText,
   description: optionalText,
+  summary: optionalText,
   row: optionalText,
   owner: optionalText,
   status: optionalText,
@@ -89,6 +90,8 @@ export const EdgeSchema = z.object({
   label: optionalText,
   protocol: optionalText,
   description: optionalText,
+  summary: optional(z.boolean()),
+  replaces: nestedList,
 });
 
 export type FileHeader = z.infer<typeof FileSchema>;

@@ -92,6 +92,7 @@ domains: # the top-level boxes; three levels: domains → components → subcomp
   - id: shop # the stable key: edges, flows and comp: tags name it; found by the search
     name: Web Shop # the text of the box; found by the search
     description: Everything a customer sees # tooltip of the box, and its detail panel
+    summary: Sells to customers # what the box says while it is closed, in place of its contents
     row: front # the band of this box and of everything inside it
     owner: Shop team # owner, status and tech hold for everything inside, unless set there;
     status: live # the detail panel lists them and says where each comes from;
@@ -131,7 +132,6 @@ domains: # the top-level boxes; three levels: domains → components → subcomp
       - id: orders.settings
         name: Settings
         row: front
-
 edges: # the lines; the arrowhead is at "to"
   - id: payment-places-order # unique among the edges; what a flow lists
     from: shop.checkout.payment # a node of any level
@@ -143,6 +143,18 @@ edges: # the lines; the arrowhead is at "to"
   - { id: basket-needs-catalog, from: shop.checkout.basket, to: shop.catalog, kind: dependency }
   - { id: jobs-run-api, from: orders.jobs, to: orders.api, kind: control, label: run exports }
   - { id: settings-set-prices, from: orders.settings, to: shop.catalog, kind: config }
+  - id: shop-orders
+    from: shop
+    to: orders
+    kind: dataflow
+    label: orders
+    summary: true # a summary edge: stands for the edges inside "shop" while shop is closed
+  - id: shop-pays
+    from: shop.checkout
+    to: orders.api
+    kind: dataflow
+    label: pays
+    replaces: [payment-places-order] # a plain edge: drawn in their place with Map → Plain edges
 
 flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
@@ -152,7 +164,6 @@ flows: # stories told through the edges: Map → Focus lights one and pales the 
     edges: [payment-places-order, jobs-run-api] # the steps, in order
     nodes: [shop.checkout.basket] # further nodes it involves
   - { id: prices, name: Prices reach the shop, kind: dataflow, edges: [settings-set-prices] }
-
 presets: # named colourings, offered first under Lenses → Colour by
   - name: Zones # unique: its entry in the list, the title of the legend, what a view remembers
     label: zone # the label whose values it colours; owner, status and tech work too
@@ -185,20 +196,21 @@ There are exactly **three levels**. A domain lists its children under `component
 lists its children under `subcomponents`, a subcomponent has no children. Nothing nests deeper,
 and a list under the wrong key (for example `subcomponents` directly in a domain) is an error.
 
-| Key             | Required | Value                                                |
-| --------------- | -------- | ---------------------------------------------------- |
-| `id`            | yes      | Text; see the ID rules below                         |
-| `name`          | yes      | Text, not empty: what the box shows                  |
-| `description`   | no       | Text: shown in the detail panel and as a tooltip     |
-| `row`           | no       | ID of a row from `rows`                              |
-| `owner`         | no       | Text: the team or person responsible                 |
-| `status`        | no       | Text: `planned`, `live`, `deprecated`, … (free)      |
-| `tech`          | no       | Text: the main technology                            |
-| `labels`        | no       | Mapping of name → value (`zone: public`); see Labels |
-| `links`         | no       | List of `{ label, url }`; `url` must be `http(s)`    |
-| `metrics`       | no       | Mapping of name → number (`loc: 12400`)              |
-| `components`    | no       | Domains only: list of components                     |
-| `subcomponents` | no       | Components only: list of subcomponents               |
+| Key             | Required | Value                                                                                                       |
+| --------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `id`            | yes      | Text; see the ID rules below                                                                                |
+| `name`          | yes      | Text, not empty: what the box shows                                                                         |
+| `description`   | no       | Text: shown in the detail panel and as a tooltip                                                            |
+| `summary`       | no       | Text: what the box says while it is closed, in place of the names of its contents; also in the detail panel |
+| `row`           | no       | ID of a row from `rows`                                                                                     |
+| `owner`         | no       | Text: the team or person responsible                                                                        |
+| `status`        | no       | Text: `planned`, `live`, `deprecated`, … (free)                                                             |
+| `tech`          | no       | Text: the main technology                                                                                   |
+| `labels`        | no       | Mapping of name → value (`zone: public`); see Labels                                                        |
+| `links`         | no       | List of `{ label, url }`; `url` must be `http(s)`                                                           |
+| `metrics`       | no       | Mapping of name → number (`loc: 12400`)                                                                     |
+| `components`    | no       | Domains only: list of components                                                                            |
+| `subcomponents` | no       | Components only: list of subcomponents                                                                      |
 
 `owner`, `status` and `tech` are **inherited**, and so is every label (see [Labels](#labels)):
 a node without one has its nearest ancestor's (the panel says where it comes from). Set them on
@@ -253,6 +265,20 @@ graph by its connections.
 | `label`       | no       | Short text on the line (2–4 words)                                 |
 | `protocol`    | no       | Free text, shown as `label [protocol]`                             |
 | `description` | no       | Text: shown on hover and in the detail panel                       |
+| `summary`     | no       | `true`: a summary edge, see below                                  |
+| `replaces`    | no       | List of edge IDs this edge stands for, see below                   |
+
+**Summary edges.** An edge with `summary: true` has a group at one end (or both) and stands
+for the edges inside that group which run the same way. While the group is drawn closed — by
+the level of detail, or collapsed by hand — the summary edge is drawn with its own label and
+kind, in place of the merged `×n` line those inner edges would make; while the group is open,
+the inner edges are drawn and the summary edge is not. Give it the words the overview needs
+("orders", "events out"), and leave the inner edges as technical as they are.
+
+**Plain edges.** An edge with `replaces: [ids]` stands for the listed edges in plain words,
+for a reader who needs the story rather than the interfaces: with **Map → Plain edges** on, it
+is drawn and the edges it lists are not; off, the reverse. An edge that is listed cannot list
+edges itself. The edge kinds, the focus and the work items see whichever set is drawn.
 
 | Kind         | Drawn as       | Use it for                                                          |
 | ------------ | -------------- | ------------------------------------------------------------------- |

@@ -217,6 +217,7 @@ export function TabContent({
             onToggleKind={noop}
             settings={shown}
             onChange={noop}
+            hasPlainEdges={false}
             workItems={{
               states,
               iterations,
