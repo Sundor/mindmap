@@ -854,9 +854,9 @@ The version of the viewer stands beside its name at the top of the control panel
   enough apart for the label to lie between them, clear of both, and lays the map out again
   when a label changes. They sit on their lines: the line runs through the middle of the label, bent to it
   where the label was moved beside the line to lie clear of a box, of a name or of another
-  label, and a dot in the colour of the edge on each side of the label, where the line crosses
-  its border, says which edge the label belongs to. The labels of edges running side by side
-  lie next to each other.
+  label, and a chevron in the colour of the edge where the line leaves the label towards its
+  target says which edge the label belongs to and which way it goes. The labels of edges
+  running side by side lie next to each other.
 - **Edge legend** (top left of the map): a sample of the line of each edge kind with its name,
   there whichever tab is shown; a kind that is hidden is struck through. It is a key only — the
   kinds are switched under **Map → Edges**.

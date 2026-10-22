@@ -7,6 +7,8 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 
 ## Unreleased
 
+- **Arrowheads a size larger**, and at a label one chevron where the line leaves it towards its
+  target, in place of the two dots: which edge the label belongs to, and which way it goes.
 - **Edge labels at every level of detail**, with **Map → Edge labels** to switch them off (a
   merged edge shows its count whatever it says). They are set in 14 px now, and the parallel
   edges between two boxes run far enough apart for their labels to lie next to each other on

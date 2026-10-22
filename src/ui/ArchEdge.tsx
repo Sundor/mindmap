@@ -1,8 +1,8 @@
 // Custom edge styled by kind (dataflow solid, dependency dashed, control dotted,
 // config dash-dot thin), with a per-kind arrowhead and a label with a readable background. The
 // line runs through the centre of its label, bent to it where the label sits beside the curve,
-// and a dot on each side of the label, where the line crosses its border, says which edge the
-// label belongs to.
+// and a chevron where the line leaves the label towards its target says which edge the label
+// belongs to and which way it goes.
 
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react';
 import {
@@ -10,11 +10,12 @@ import {
   drawnCurves,
   EDGE_KINDS,
   aggregateCountLabel,
+  chevronPath,
   edgeLabelSize,
   flowEdgeLabel,
+  labelArrow,
   labelCentre,
   labelRect,
-  rectCrossings,
   routeCurve,
   type ArchEdgeData,
   type EdgeKind,
@@ -38,8 +39,8 @@ export function EdgeMarkers() {
             viewBox="0 0 10 10"
             refX="10"
             refY="5"
-            markerWidth="11"
-            markerHeight="11"
+            markerWidth="14"
+            markerHeight="14"
             markerUnits="userSpaceOnUse"
             orient="auto-start-reverse"
           >
@@ -111,13 +112,13 @@ export function ArchEdgeView({
   const drawn = drawnCurves(curve, route.labelT, data.labelOffset);
   const { text, aggregate, countShown, hidden } = edgeLabelOf(data);
   const labelShown = text !== undefined && !hidden;
-  // Where the line crosses the border of its label (the box as src/core estimates it).
-  const dots = labelShown
-    ? rectCrossings(
+  // Where the line leaves its label towards the target (the box as src/core estimates it).
+  const arrow = labelShown
+    ? labelArrow(
         drawn,
         labelRect(curve, route.labelT, edgeLabelSize(data.labelText ?? text), data.labelOffset),
       )
-    : [];
+    : undefined;
   const tooltip = [
     hidden ? (aggregate && countShown ? `${data.count} ${data.kind} edges` : text) : undefined,
     data.description,
@@ -132,15 +133,7 @@ export function ArchEdgeView({
         markerEnd={`url(#${markerId(data.kind)})`}
         interactionWidth={interactionWidth}
       />
-      {dots.map((dot, i) => (
-        <circle
-          key={i}
-          className="arch-edge-dot"
-          cx={dot.x}
-          cy={dot.y}
-          r={aggregate ? 3.5 : 2.75}
-        />
-      ))}
+      {arrow && <path className="arch-label-arrow" d={chevronPath(arrow, aggregate ? 8 : 6)} />}
       {labelShown && (
         <EdgeLabelRenderer>
           <EdgeLabel id={id} data={data} x={label.x} y={label.y} />

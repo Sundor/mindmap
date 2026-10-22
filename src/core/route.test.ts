@@ -5,6 +5,7 @@ import {
   curveNormal,
   curvePath,
   curvePoint,
+  chevronPath,
   curvesPath,
   distanceToCurve,
   distanceToCurves,
@@ -12,6 +13,7 @@ import {
   edgeCurve,
   facingSides,
   hiddenSamples,
+  labelArrow,
   labelCentre,
   labelPoint,
   labelRect,
@@ -534,12 +536,31 @@ describe('rectCrossings', () => {
   const line = edgeCurve({ x: 0, y: 0 }, 'right', { x: 1000, y: 0 }, 'left');
   const size = { width: 80, height: 20 };
 
-  it('finds where a line enters and leaves a box', () => {
+  it('finds where a line enters and leaves a box, and the way it runs there', () => {
     const points = rectCrossings([line], labelRect(line, 0.5, size));
     expect(points).toHaveLength(2);
     expect(points[0]?.x).toBeCloseTo(460, 0);
     expect(points[1]?.x).toBeCloseTo(540, 0);
     expect(points[0]?.y).toBeCloseTo(0, 6);
+    for (const point of points) {
+      expect(point.dx).toBeCloseTo(1, 6);
+      expect(point.dy).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('puts the arrow of a label where the line leaves it towards the target', () => {
+    const box = labelRect(line, 0.5, size);
+    const arrow = labelArrow([line], box);
+    expect(arrow?.x).toBeCloseTo(540, 0);
+    expect(arrow?.dx).toBeCloseTo(1, 6);
+    // A line that ends inside the box has no way out: no arrow. Nor has one that misses it.
+    expect(labelArrow([line], rect(900, -10, 200, 20))).toBeUndefined();
+    expect(labelArrow([line], rect(0, 100))).toBeUndefined();
+    // The chevron: its tip at the arrow, its arms back along the line, to each side.
+    if (!arrow) throw new Error('no arrow');
+    expect(chevronPath(arrow, 6)).toBe(
+      `M${Math.round((arrow.x - 6) * 100) / 100},4.8 L${Math.round(arrow.x * 100) / 100},0 L${Math.round((arrow.x - 6) * 100) / 100},-4.8`,
+    );
   });
 
   it('finds them on a line bent through a label beside the curve', () => {

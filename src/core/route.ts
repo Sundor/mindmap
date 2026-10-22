@@ -573,13 +573,21 @@ export function distanceToCurves(point: Point, curves: readonly Curve[]): number
 /** Distance between the points a curve is flattened to when it is held against a box. */
 const CROSSING_STEP = 2;
 
+/** A point where a line crosses the border of a box, and the way the line runs there. */
+export interface Crossing extends Point {
+  /** Unit direction of the line at the crossing, from its source towards its target. */
+  readonly dx: number;
+  readonly dy: number;
+}
+
 /**
  * Where the line of `curves` crosses the border of `rect`, in the order of the line: the points
- * at which it enters and leaves the box. Measured on the line flattened to points about
- * {@link CROSSING_STEP} pixels apart. Empty when the line stays outside the box or inside it.
+ * at which it enters and leaves the box, each with the direction of the line there. Measured on
+ * the line flattened to points about {@link CROSSING_STEP} pixels apart. Empty when the line
+ * stays outside the box or inside it.
  */
-export function rectCrossings(curves: readonly Curve[], rect: Rect): Point[] {
-  const crossings: Point[] = [];
+export function rectCrossings(curves: readonly Curve[], rect: Rect): Crossing[] {
+  const crossings: Crossing[] = [];
   let previous: Point | undefined;
   let wasInside = false;
   for (const curve of curves) {
@@ -601,13 +609,40 @@ export function rectCrossings(curves: readonly Curve[], rect: Rect): Point[] {
           if (inside(mid, rect, 0)) within = mid;
           else out = mid;
         }
-        crossings.push(lerp(out, within, 0.5));
+        const length = Math.hypot(point.x - previous.x, point.y - previous.y) || 1;
+        crossings.push({
+          ...lerp(out, within, 0.5),
+          dx: (point.x - previous.x) / length,
+          dy: (point.y - previous.y) / length,
+        });
       }
       previous = point;
       wasInside = isInside;
     }
   }
   return crossings;
+}
+
+/**
+ * Where the line of an edge leaves the box of its label on its way to the target: the last of
+ * its crossings, when the line comes in and goes out again. Undefined when the line does not
+ * cross the box, or ends inside it (a label beyond the end of a short edge).
+ */
+export function labelArrow(curves: readonly Curve[], rect: Rect): Crossing | undefined {
+  const crossings = rectCrossings(curves, rect);
+  if (crossings.length < 2 || crossings.length % 2 !== 0) return undefined;
+  return crossings[crossings.length - 1];
+}
+
+/**
+ * SVG path data of a chevron with its tip at `at`, pointing the way the line runs there: two
+ * arms `size` pixels long, `size * 0.8` pixels to each side.
+ */
+export function chevronPath(at: Crossing, size: number): string {
+  const back = { x: at.x - at.dx * size, y: at.y - at.dy * size };
+  const across = { x: -at.dy * size * 0.8, y: at.dx * size * 0.8 };
+  const round = (n: number): number => Math.round(n * 100) / 100;
+  return `M${round(back.x + across.x)},${round(back.y + across.y)} L${round(at.x)},${round(at.y)} L${round(back.x - across.x)},${round(back.y - across.y)}`;
 }
 
 /** Area two rectangles share; 0 when they only touch. */

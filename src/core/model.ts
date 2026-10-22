@@ -104,7 +104,6 @@ export interface ArchEdge {
   readonly description?: string;
 }
 
-/** What a flow describes: a sequence of work, or the way data travels. */
 /** The kind of a flow when the file gives none. */
 export const DEFAULT_FLOW_KIND = 'workflow';
 

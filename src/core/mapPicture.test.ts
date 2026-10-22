@@ -1772,7 +1772,11 @@ describe('what an edge and its label say', () => {
           expect(
             parts.map((e) => e.attrs.get('data-part')),
             edge.id,
-          ).toEqual(['line', 'head']);
+          ).toEqual(
+            // A label the line leaves towards the target carries a chevron there.
+            parts.length > 2 ? ['line', 'head', 'label-arrow'] : ['line', 'head'],
+          );
+          if (parts.length > 2) expect(flowEdgeLabel(edge.data)).toBeDefined();
           const [line, head] = parts;
           const style = edgeLineStyle(edge.data.kind, edge.data.count > 1, edge.selected === true);
           expect(line?.attrs.get('stroke'), edge.id).toBe(colors[edge.data.kind]);
@@ -1790,9 +1794,9 @@ describe('what an edge and its label say', () => {
           const u = { x: (p3.x - c2.x) / length, y: (p3.y - c2.y) / length };
           expect(tip.x).toBeCloseTo(p3.x, 1);
           expect(tip.y).toBeCloseTo(p3.y, 1);
-          expect((a.x + b.x) / 2).toBeCloseTo(p3.x - 11 * u.x, 1);
-          expect((a.y + b.y) / 2).toBeCloseTo(p3.y - 11 * u.y, 1);
-          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(9.9, 1);
+          expect((a.x + b.x) / 2).toBeCloseTo(p3.x - 14 * u.x, 1);
+          expect((a.y + b.y) / 2).toBeCloseTo(p3.y - 14 * u.y, 1);
+          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(12.6, 1);
           kinds.add(edge.data.kind);
           if (edge.data.count > 1) aggregates += 1;
         }

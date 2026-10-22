@@ -708,22 +708,25 @@ button {
   font-weight: 700;
 }
 
-/* Where the line of an edge crosses the border of its label: which edge the label belongs to. */
-.react-flow__edge .arch-edge-dot {
-  fill: var(--edge-dataflow);
-  stroke: none;
+/* Where the line of an edge leaves its label towards the target: a chevron, which edge the label belongs to and which way it goes. */
+.react-flow__edge .arch-label-arrow {
+  fill: none;
+  stroke: var(--edge-dataflow);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.react-flow__edge.arch-edge-dependency .arch-edge-dot {
-  fill: var(--edge-dependency);
+.react-flow__edge.arch-edge-dependency .arch-label-arrow {
+  stroke: var(--edge-dependency);
 }
 
-.react-flow__edge.arch-edge-control .arch-edge-dot {
-  fill: var(--edge-control);
+.react-flow__edge.arch-edge-control .arch-label-arrow {
+  stroke: var(--edge-control);
 }
 
-.react-flow__edge.arch-edge-config .arch-edge-dot {
-  fill: var(--edge-config);
+.react-flow__edge.arch-edge-config .arch-label-arrow {
+  stroke: var(--edge-config);
 }
 
 .arch-arrow-dataflow path {

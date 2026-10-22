@@ -44,7 +44,7 @@ import {
   type TextMeasure,
   type XmlAttributes,
 } from './pictureKit';
-import { curvesPath, labelCentre, rectCrossings, type Curve } from './route';
+import { chevronPath, curvesPath, labelArrow, labelCentre, type Curve } from './route';
 import { DIMMED_CLASS } from './selection';
 import { plural } from './text';
 import { WORK_ITEM_GEOMETRY, type WorkItemLine } from './workItemContent';
@@ -1239,13 +1239,14 @@ function arrowHead(curve: Curve): string {
   const length = Math.hypot(p3.x - from.x, p3.y - from.y);
   const ux = length > 0 ? (p3.x - from.x) / length : 1;
   const uy = length > 0 ? (p3.y - from.y) / length : 0;
-  const back = { x: p3.x - 11 * ux, y: p3.y - 11 * uy };
-  return `M${num(p3.x)} ${num(p3.y)}L${num(back.x - 4.95 * uy)} ${num(back.y + 4.95 * ux)}L${num(back.x + 4.95 * uy)} ${num(back.y - 4.95 * ux)}Z`;
+  // The marker of the canvas: 14 px long, 6.3 px to each side.
+  const back = { x: p3.x - 14 * ux, y: p3.y - 14 * uy };
+  return `M${num(p3.x)} ${num(p3.y)}L${num(back.x - 6.3 * uy)} ${num(back.y + 6.3 * ux)}L${num(back.x + 6.3 * uy)} ${num(back.y - 6.3 * ux)}Z`;
 }
 
 /**
- * The line of an edge, its arrowhead and, when it has a label (`label`: its box), the dots where
- * the line crosses the border of the label.
+ * The line of an edge, its arrowhead and, when it has a label (`label`: its box), the chevron
+ * where the line leaves the label towards the target.
  */
 function drawEdge(ctx: Ctx, edge: FlowEdge, label: LabelBox | undefined): string {
   const { curve, kind, count } = edge.data;
@@ -1287,19 +1288,20 @@ function drawEdge(ctx: Ctx, edge: FlowEdge, label: LabelBox | undefined): string
         ...edgeLine(kind, count > 1, edge.selected === true),
       }) +
       el('path', { 'data-part': 'head', d: arrowHead(last), fill: color }) +
-      (label
-        ? rectCrossings(drawn, label.rect)
-            .map((dot) =>
-              el('circle', {
-                'data-part': 'dot',
-                cx: num(dot.x),
-                cy: num(dot.y),
-                r: count > 1 ? 3.5 : 2.75,
-                fill: color,
-              }),
-            )
-            .join('')
-        : ''),
+      (() => {
+        const arrow = label ? labelArrow(drawn, label.rect) : undefined;
+        return arrow
+          ? el('path', {
+              'data-part': 'label-arrow',
+              d: chevronPath(arrow, count > 1 ? 8 : 6),
+              fill: 'none',
+              stroke: color,
+              'stroke-width': 2,
+              'stroke-linecap': 'round',
+              'stroke-linejoin': 'round',
+            })
+          : '';
+      })(),
   );
 }
 

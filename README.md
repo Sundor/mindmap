@@ -411,9 +411,9 @@ items.
   at every level of detail; **Map → Edge labels** switches them off (a merged edge shows its
   `×n` count whatever it says), and the level of detail last chosen comes back on the next visit.
   A label sits on its line — the line runs through the middle of the label, bent to it where
-  the label was moved beside the line to lie clear of a box or of another label — and a dot in
-  the colour of the edge on each side of the label, where the line crosses its border, says
-  which edge the label belongs to. Edges go around the boxes between their ends where they
+  the label was moved beside the line to lie clear of a box or of another label — and a
+  chevron in the colour of the edge where the line leaves the label towards its target says
+  which edge the label belongs to and which way it goes. Edges go around the boxes between their ends where they
   can; several edges between the same two nodes run side by side, their labels next to each
   other. Hover an edge for its description.
   Known limit: every edge is a single curve drawn below the leaf boxes, so in a very dense map

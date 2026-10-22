@@ -44,7 +44,7 @@ The **Tokens** section at the top of the kit lists every custom property declare
 with its light and dark value and where it is used. Most of the look is in those values; start
 there. The colours of the heat scale and of _Colour by_ are not in the stylesheet (they are
 computed), and the edge colours are the four `--edge-*` tokens, used by the lines, the
-arrowheads (`.arch-arrow-*`), the dots on the labels (`.arch-edge-dot`) and the legend alike.
+arrowheads (`.arch-arrow-*`), the chevrons at the labels (`.arch-label-arrow`) and the legend alike.
 
 In the app the dark scheme is `@media (prefers-color-scheme: dark)`. In the pages that condition
 is rewritten so that the switch can show it: the block reads
@@ -72,7 +72,7 @@ pointer (`(pointer: coarse)`) are left as they are.
   heat strips and progress bars of the lenses, resize handles `.arch-resize`), edges (the line
   `.react-flow__edge-path` coloured per kind by `.arch-edge-dataflow|dependency|control|config`,
   merged edges `.arch-edge-aggregate`, labels `.arch-edge-label` with the same kind classes, the
-  dots `.arch-edge-dot`), the states dimmed (`.arch-dimmed`), paled (`.arch-faded`) and held back
+  chevrons `.arch-label-arrow`), the states dimmed (`.arch-dimmed`), paled (`.arch-faded`) and held back
   (`.arch-quiet`), the legends (`.map-legends`), the minimap and the zoom buttons.
 - **Detail panel** (`.detail-panel`, `.detail-section`, `.detail-link`), the **focus bar**, the
   **notices** (`.notice`, `.notice-error`), the **diagnostics** bar and panel, and the **start
