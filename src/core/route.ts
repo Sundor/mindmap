@@ -433,8 +433,12 @@ export function hiddenSamples(curve: Curve, boxes: readonly Rect[], samples = 40
 
 // --- Lanes ----------------------------------------------------------------------------------
 
-/** Distance between parallel edges joining the same two nodes, in pixels. */
-export const LANE_GAP = 14;
+/**
+ * Distance between parallel edges joining the same two nodes, in pixels: a label's height and
+ * the gap between labels beside each other, so that the labels of the lanes lie next to each
+ * other on their own lines, with no line bent across a neighbouring lane.
+ */
+export const LANE_GAP = 28;
 /** Lanes stay this far from the corners of the node side they attach to. */
 const LANE_CORNER_CLEARANCE = 6;
 

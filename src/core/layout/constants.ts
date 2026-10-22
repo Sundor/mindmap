@@ -1,5 +1,6 @@
 // Layout geometry constants. All values are in canvas pixels at zoom 1.
 
+import { EDGE_LABEL } from '../edgeLabel';
 import type { ArchNode, NodeLevel } from '../model';
 import type { Size } from './types';
 
@@ -16,14 +17,27 @@ export const HEADER_HEIGHT = 40;
 /** Inner padding of a group; `top` includes the header bar. */
 export const GROUP_PADDING = { top: HEADER_HEIGHT + 8, right: 16, bottom: 16, left: 16 } as const;
 
-/** ELK spacing between sibling nodes, and between layers. */
-export const NODE_SPACING = 24;
+/**
+ * ELK spacing between sibling nodes, and between layers. A labelled edge between two layers
+ * gets the layer spacing on both sides of its label: the layout keeps the label's box free
+ * between them (`buildHierarchyGraph`), so the label lies clear of both boxes by at least this.
+ */
+export const NODE_SPACING = 32;
 export const LAYER_SPACING = 48;
 /** ELK padding around the whole canvas when there are no rows. */
 export const CANVAS_PADDING = 24;
+/**
+ * Clearance kept around the label of an edge, on every side, where boxes are packed without
+ * ELK (the items of the row bands) and where the map is closed up around its closed groups: the
+ * room an edge with a label is given between its ends is the label's box grown by this. ELK
+ * keeps more: the layer spacing on each side.
+ */
+export const EDGE_LABEL_CLEARANCE = 12;
+/** Lines a label may take in the room the layout keeps for it: a long label wraps. */
+export const EDGE_LABEL_LAYOUT_LINES = 2;
 
 /** Horizontal gap between items packed left → right in a container (rows mode). */
-export const ITEM_GAP = 32;
+export const ITEM_GAP = 48;
 /** Width of the band label gutter on the left of the rows. */
 export const ROW_GUTTER_WIDTH = 140;
 /** Vertical padding inside a band, above and below its content. */
@@ -36,7 +50,7 @@ export const MIN_BAND_HEIGHT = 96;
 /** Unassigned side area: title strip, inner padding, gap between items, minimum width. */
 export const UNASSIGNED_HEADER = 36;
 export const UNASSIGNED_PADDING = 24;
-export const UNASSIGNED_GAP = 24;
+export const UNASSIGNED_GAP = NODE_SPACING;
 export const UNASSIGNED_MIN_WIDTH = 200;
 
 const LEAF_CHAR_WIDTH = 8.6;
@@ -48,8 +62,12 @@ export const ELK_BASE_OPTIONS: Readonly<Record<string, string>> = {
   'elk.direction': 'RIGHT',
   'elk.spacing.nodeNode': String(NODE_SPACING),
   'elk.layered.spacing.nodeNodeBetweenLayers': String(LAYER_SPACING),
-  'elk.spacing.edgeNode': '16',
-  'elk.spacing.edgeEdge': '8',
+  'elk.spacing.edgeNode': '24',
+  'elk.spacing.edgeEdge': '12',
+  // The labels of the edges lie on their lines; the layout keeps their room between the layers.
+  'elk.edgeLabels.inline': 'true',
+  'elk.edgeLabels.placement': 'CENTER',
+  'elk.spacing.edgeLabel': String(EDGE_LABEL_CLEARANCE),
   // Where the graph leaves freedom, follow YAML order. ELK is deterministic for a fixed seed.
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
   'elk.randomSeed': '1',
@@ -79,6 +97,12 @@ export const LAYOUT_CONFIG = {
   },
   leafCharWidth: LEAF_CHAR_WIDTH,
   headerCharWidth: HEADER_CHAR_WIDTH,
+  // The type of the edge labels: their room depends on it.
+  edgeLabel: {
+    ...EDGE_LABEL,
+    clearance: EDGE_LABEL_CLEARANCE,
+    lines: EDGE_LABEL_LAYOUT_LINES,
+  },
   elk: ELK_BASE_OPTIONS,
 } as const;
 

@@ -367,11 +367,13 @@ describe('buildFlow with closed groups drawn shrunk (examples/architecture.yaml)
       expect(node.width).toBeLessThanOrEqual(before.width);
       expect(node.height).toBeLessThanOrEqual(before.height);
       expect(node.style).toEqual({ width: node.width, height: node.height });
-      expect(node.position.x + node.width / 2).toBeCloseTo(before.position.x + before.width / 2, 0);
-      expect(node.position.y + node.height / 2).toBeCloseTo(
-        before.position.y + before.height / 2,
-        0,
-      );
+      // Centred to the pixel: the shrunk box is on whole pixels, the full one may be odd.
+      expect(
+        Math.abs(node.position.x + node.width / 2 - (before.position.x + before.width / 2)),
+      ).toBeLessThanOrEqual(0.5);
+      expect(
+        Math.abs(node.position.y + node.height / 2 - (before.position.y + before.height / 2)),
+      ).toBeLessThanOrEqual(0.5);
       expect(node.data.childNames).toEqual(
         model.nodes.get(node.id)?.childIds.map((id) => model.nodes.get(id)?.name),
       );

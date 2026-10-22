@@ -594,9 +594,14 @@ describe('layout cache', () => {
     const first = await computeLayout(model);
     expect(await computeLayout(model)).toBe(first);
     expect(await computeLayout(parseOk(exampleYaml))).toBe(first);
-    // Edge label text does not affect the layout …
-    const relabelled = parseOk(exampleYaml.replace('label: app events', 'label: other'));
-    expect(await computeLayout(relabelled)).toBe(first);
+    // An edge description does not affect the layout …
+    const described = parseOk(
+      exampleYaml.replace(
+        '    label: app events\n',
+        '    label: app events\n    description: other\n',
+      ),
+    );
+    expect(await computeLayout(described)).toBe(first);
     // … but a node name does (it changes the box width).
     const renamed = parseOk(exampleYaml.replace('name: Web Shop', 'name: Main Web Shop'));
     const second = await computeLayout(renamed);

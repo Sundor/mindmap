@@ -850,7 +850,9 @@ The version of the viewer stands beside its name at the top of the control panel
     of the map is not on the minimap there (**Fit view** shows it); grown to the right or
     downward, the map and the minimap grow along. A box or an edge that is drawn over a handle
     takes the press there.
-- **Edge labels** sit on their lines: the line runs through the middle of the label, bent to it
+- **Edge labels** have their room: the layout keeps two boxes joined by a labelled edge far
+  enough apart for the label to lie between them, clear of both, and lays the map out again
+  when a label changes. They sit on their lines: the line runs through the middle of the label, bent to it
   where the label was moved beside the line to lie clear of a box, of a name or of another
   label, and a dot in the colour of the edge on each side of the label, where the line crosses
   its border, says which edge the label belongs to. The labels of edges running side by side

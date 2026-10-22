@@ -730,8 +730,9 @@ function arrangeRows(
         const gap = item.ref.x - (before.ref.x + before.ref.width);
         if (gap < 0) continue;
         if (resized) x = Math.max(x, before.x + before.width + Math.min(gap, ITEM_GAP));
+        // In a row they share, as the row layout keeps it (./layout/tiered.ts).
         const wanted = room?.(before.id, item.id);
-        if (wanted && facesAlongX(before.ref, item.ref)) {
+        if (wanted && before.bottom >= item.top && item.bottom >= before.top) {
           x = Math.max(x, before.x + before.width + wanted.width);
         }
       }

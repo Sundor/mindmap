@@ -448,17 +448,17 @@ items.
   - **What stays.** The order, among the boxes of one group and among the domains: a box that
     is left or right of another box stays on that side, and so does one above or below it. The
     space between two such boxes is never less than on the full map — or, where it is wider
-    there, than the usual spacing (48 px side by side, 32 px between the items of the row
-    bands, 24 px one above the other): a wide gap may close down to that. One exception: a
+    there, than the usual spacing (48 px side by side, 48 px between the items of the row
+    bands, 32 px one above the other): a wide gap may close down to that. One exception: a
     box of the Unassigned area follows its connections, as it does on the full map — it stays
     right of the row bands and above or below the other boxes of the area, but it may come to
     stand beside a box in the bands that it stood above or below. The map never becomes wider
     or taller than the full one, except for the room of the edge labels: two boxes joined by a
     labelled edge — themselves, or through what is drawn inside them — are kept far enough
     apart, along the axis the edge crosses between them, for the label (on up to two lines) to
-    lie between them with the line showing on both sides, at most 160 px side by side and
-    72 px one above the other; between the row bands no such room is kept. Nothing is laid out
-    again — the map is still laid out once,
+    lie between them with the line showing on both sides and 12 px clear of each box, as the
+    full map keeps it; between the row bands no such room is kept. Nothing is laid out again —
+    the map is still laid out once,
     fully expanded, and closing up only moves those boxes — so it happens at once, and the same
     groups closed at the same level give the same map: zooming across a level and back shows
     the map as it was. With every group open at the Subcomponents or Everything level the map
@@ -847,7 +847,10 @@ loaded) choose what the canvas shows of them: the story mode. It is remembered.
 - **Nothing lies on the lines.** The list of an open group is drawn on a small panel of its own
   above the edges, at the left end of the group's strip, as wide as its lines need: an edge on
   its way to a box inside the group passes behind it (and is routed around it where it can be).
-  Edge labels keep clear of boxes, names, lines and each other: a label is moved along its
+  The layout keeps room for the labels: two boxes joined by a labelled edge are laid out far
+  enough apart for the label (on up to two lines) to lie between them, 12 px clear of each
+  box — inside a group and among the items of a row band alike —, and the map is laid out
+  again when a label changes. Edge labels keep clear of boxes, names, lines and each other: a label is moved along its
   edge or beside it (so that the labels of edges running side by side lie next to each other,
   and the line is then bent to pass through the label), broken into up to three lines, or — on
   a very short edge between two boxes side by side — centred over the border of the box that

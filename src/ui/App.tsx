@@ -1949,6 +1949,7 @@ function Viewer() {
       );
     },
     [
+      settings.edgeLabels,
       settings.closeGaps,
       lodMode,
       drawnModel,
@@ -2102,7 +2103,16 @@ function Viewer() {
         return to && { to, duration: REVEAL_DURATION_MS };
       });
     },
-    [model, layout, lodMode, lodConfig, changeCollapsed, moveOnArrangement, viewportShowing],
+    [
+      model,
+      layout,
+      lodMode,
+      lodConfig,
+      changeCollapsed,
+      moveOnArrangement,
+      viewportShowing,
+      setLodMode,
+    ],
   );
   // Brings the work-item list of a node on screen, drawn: the node and the groups around it are
   // opened (a closed group shows a badge instead), a pinned level coarser than Everything is
@@ -2140,6 +2150,7 @@ function Viewer() {
       });
     },
     [
+      setLodMode,
       model,
       layout,
       shownWorkItems,
@@ -2470,7 +2481,7 @@ function Viewer() {
       };
       setViewRequest((count) => count + 1);
     },
-    [model, settings, changeSettings, lodConfig],
+    [model, settings, changeSettings, lodConfig, setLodMode],
   );
   useEffect(() => {
     const centre = pendingCentre.current;

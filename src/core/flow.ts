@@ -24,6 +24,7 @@ import {
   type Point,
   type Side,
 } from './route';
+import { HEADER_HEIGHT } from './layout/constants';
 import {
   NODE_LEVEL_NAMES,
   type ArchitectureModel,
@@ -77,8 +78,26 @@ export function targetHandleId(side: Side): string {
  */
 export const Z_INDEX = { band: -10, group: 0, edge: 5, leaf: 10 } as const;
 
-import { EDGE_LABEL, edgeLabelSize, edgeLabelText } from './edgeLabel';
-export { EDGE_LABEL, edgeLabelSize, edgeLabelText };
+import { aggregateCountLabel, EDGE_LABEL, edgeLabelSize, edgeLabelText } from './edgeLabel';
+export { aggregateCountLabel, EDGE_LABEL, edgeLabelSize, edgeLabelText };
+
+/** The type the name of a group is set in (`.arch-group-header` in styles.css), in pixels. */
+const GROUP_NAME_FONT_SIZE = 19;
+/** What the chevron and the paddings take of a group's title, left of the name, in pixels. */
+const GROUP_TITLE_LEAD = 12 + 26 + 12;
+
+/**
+ * The title of an open group drawn at `rect` (canvas coordinates): the left part of its header
+ * bar holding the chevron and the name, generously. Edges and labels keep off it; the rest of
+ * the bar, and the sides of the group, are open to them.
+ */
+export function groupTitleRect(name: string, rect: Rect): Rect {
+  const width = Math.min(
+    rect.width,
+    GROUP_TITLE_LEAD + Math.ceil(estimateTextWidth(name, GROUP_NAME_FONT_SIZE)),
+  );
+  return { x: rect.x, y: rect.y, width, height: HEADER_HEIGHT };
+}
 
 /** The type a leaf name is set in, per level (`.arch-leaf` in styles.css), in pixels. */
 const LEAF_NAME_FONT_SIZE: Readonly<Record<NodeLevel, number>> = { 0: 18, 1: 16, 2: 15 };
@@ -435,11 +454,6 @@ export function nearestEdgeAt<
   return best;
 }
 
-/** Count label of an aggregate edge, e.g. "×3". */
-export function aggregateCountLabel(count: number): string {
-  return `×${count}`;
-}
-
 /**
  * True when single edges draw their labels: at every level of detail, unless the view switches
  * them off (`FlowView.edgeLabels`).
@@ -522,6 +536,8 @@ function buildEdges(
   lists: ReadonlyMap<string, Rect> = new Map(),
   /** Absolute boxes of what is written in the boxes, which no label should lie on. */
   texts: BoxTexts = { names: [], lines: [] },
+  /** The titles of the open groups (`groupTitleRect`): edges and labels keep off them, but for the ends. */
+  headers: ReadonlyMap<string, Rect> = new Map(),
 ): FlowEdge[] {
   const absolute = (id: string): Rect | undefined => shrunk.get(id) ?? layout.absolute.get(id);
   const edgesById = new Map(model.edges.map((edge) => [edge.id, edge]));
@@ -538,6 +554,9 @@ function buildEdges(
   }
   // So are the work-item lists of open groups. (Node IDs have no "#", so the names differ.)
   for (const [id, rect] of lists) obstacles.push({ id: `${id}#workitems`, rect });
+  // And the titles of open groups: an edge into a group comes in beside the title, at its side
+  // or its foot, not through it. An edge of the group itself may attach to its top side still.
+  for (const [id, rect] of headers) obstacles.push({ id: `${id}#header`, rect });
   // Naming the shrunk nodes keeps their routes apart from the full-box ones. With the size: a
   // shrunk box is taller with a badge, which comes and goes with the work items shown, not with
   // the layout the routes are remembered for.
@@ -558,7 +577,10 @@ function buildEdges(
     acrossRows: boolean,
   ): EdgeRoute => {
     const reach = routeReach(source, target);
-    const near = obstacles.filter((obstacle) => rectsTouch(obstacle.rect, reach));
+    const ownHeaders = [`${sourceId}#header`, `${targetId}#header`];
+    const near = obstacles.filter(
+      (obstacle) => rectsTouch(obstacle.rect, reach) && !ownHeaders.includes(obstacle.id),
+    );
     // Node IDs contain neither spaces nor line breaks.
     const key = `${keyPrefix}${sourceId}@${rectKey(source)}\n${targetId}@${rectKey(target)}\n${acrossRows ? 1 : 0}\n${near.map((o) => `${o.id}@${rectKey(o.rect)}`).join(' ')}`;
     let route = routes.get(key);
@@ -924,6 +946,8 @@ export function buildFlow(
   const workItems = view.workItems?.mode === 'off' ? undefined : view.workItems;
   /** Visible nodes drawn as closed boxes, above the edges: leaves and closed groups. */
   const closed = new Set<string>();
+  /** The title bars of the open groups, in canvas coordinates. */
+  const headers = new Map<string, Rect>();
   const nodes: FlowNode[] = [];
   const compactCollapsed = view.compactCollapsed ?? false;
   /** Absolute boxes of the closed groups drawn shrunk. */
@@ -963,6 +987,12 @@ export function buildFlow(
     // Children are shown or hidden together, so none visible means the box is closed.
     const isClosed = !node.childIds.some((child) => visible.has(child));
     if (isClosed) closed.add(node.id);
+    else if (isGroup) {
+      // The title of an open group: edges keep off it, so that its chevron and name stay clear
+      // and can be clicked.
+      const absolute = layout.absolute.get(node.id);
+      if (absolute) headers.set(node.id, groupTitleRect(node.name, absolute));
+    }
     const childNames = childNamesOf(model, node);
     let listed: NodeWorkItemLines | undefined;
     let badge: WorkItemCounts | undefined;
@@ -1065,6 +1095,7 @@ export function buildFlow(
     shrunk,
     lists,
     texts,
+    headers,
   );
   return { nodes, edges };
 }

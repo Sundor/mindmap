@@ -1,5 +1,6 @@
 // Stable layout cache key.
 
+import { edgeLabelText } from '../edgeLabel';
 import type { ArchitectureModel } from '../model';
 import { LAYOUT_CONFIG } from './constants';
 import type { Size } from './types';
@@ -8,7 +9,7 @@ import type { Size } from './types';
  * Bump when the layout code changes, so cached layouts are invalidated. Geometry constants and ELK
  * options need no bump: they are part of the key through `LAYOUT_CONFIG`.
  */
-export const LAYOUT_ALGORITHM_VERSION = 2;
+export const LAYOUT_ALGORITHM_VERSION = 3;
 
 const FNV64_OFFSET = 0xcbf29ce484222325n;
 const FNV64_PRIME = 0x100000001b3n;
@@ -26,9 +27,10 @@ export function fnv1a64(text: string): string {
 
 /**
  * Canonical JSON of everything that affects the layout: row IDs and names, node IDs, names
- * (widths depend on them), parents, levels, order and explicit rows, and edge endpoints in order.
- * Descriptions, edge IDs, kinds, labels and protocols do not move anything, so editing them keeps
- * the cached layout. The algorithm version and the layout constants (`config`, defaulting to
+ * (widths depend on them), parents, levels, order and explicit rows, and edge endpoints in order
+ * with the text of their labels (the layout keeps room for them). Descriptions, edge IDs and
+ * kinds do not move anything, so editing them keeps the cached layout. The algorithm version
+ * and the layout constants (`config`, defaulting to
  * `LAYOUT_CONFIG`) are included, so a new release with different geometry does not reuse stale
  * persistent cache entries. So are the content blocks reserved inside nodes (`content`, see
  * `ComputeLayoutOptions.content`), in model order; without any the text is the same as before
@@ -55,7 +57,7 @@ export function layoutStructureJson(
       n.level,
       n.row ?? null,
     ]),
-    edges: model.edges.map((e) => [e.from, e.to]),
+    edges: model.edges.map((e) => [e.from, e.to, edgeLabelText(e) ?? null]),
     ...(blocks.length > 0 ? { content: blocks } : {}),
   });
 }

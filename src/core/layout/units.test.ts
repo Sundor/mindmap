@@ -94,11 +94,13 @@ describe('edgeContainer / ELK graph', () => {
 
 describe('layoutKey', () => {
   const base = parseOk(TREE);
-  it('ignores edge labels, kinds and descriptions', () => {
-    const relabelled = parseOk(
-      TREE.replace('kind: control }', 'kind: dataflow, label: new, description: text }'),
+  it('ignores edge kinds and descriptions, and changes with a label, which the layout keeps room for', () => {
+    const rekinded = parseOk(
+      TREE.replace('kind: control }', 'kind: dataflow, description: text }'),
     );
-    expect(layoutKey(relabelled)).toBe(layoutKey(base));
+    expect(layoutKey(rekinded)).toBe(layoutKey(base));
+    const relabelled = parseOk(TREE.replace('kind: control }', 'kind: control, label: new }'));
+    expect(layoutKey(relabelled)).not.toBe(layoutKey(base));
   });
   it('changes with names, structure and edge endpoints', () => {
     expect(layoutKey(parseOk(TREE.replace('name: Z', 'name: Zed')))).not.toBe(layoutKey(base));

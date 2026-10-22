@@ -23,6 +23,7 @@ import {
   edgeLabelText,
   facingSides,
   GROUP_DRAG_HANDLE,
+  groupTitleRect,
   hiddenSamples,
   LANE_GAP,
   nearestEdgeAt,
@@ -95,11 +96,22 @@ function curveOf(edge: FlowEdge, layout: LayoutResult): Curve {
   );
 }
 
-function leafRects(model: ArchitectureModel, layout: LayoutResult, except: string[] = []): Rect[] {
+/**
+ * What edges keep off with every group open: the leaves, and (`titles`) the titles of the
+ * groups — but for the nodes `except` (the ends of an edge).
+ */
+function leafRects(
+  model: ArchitectureModel,
+  layout: LayoutResult,
+  except: string[] = [],
+  titles = true,
+): Rect[] {
   const rects: Rect[] = [];
   for (const node of model.nodes.values()) {
     const r = layout.absolute.get(node.id);
-    if (r && node.childIds.length === 0 && !except.includes(node.id)) rects.push(r);
+    if (!r || except.includes(node.id)) continue;
+    if (node.childIds.length === 0) rects.push(r);
+    else if (titles) rects.push(groupTitleRect(node.name, r));
   }
   return rects;
 }
@@ -378,17 +390,26 @@ edges:
 
   it('resolves a click to the nearest line, although the hit areas of the lanes overlap', () => {
     // The lanes are closer together than a hit area is wide: what is on top says nothing.
-    expect(LANE_GAP).toBeLessThan(EDGE_INTERACTION_WIDTH);
+    // The lanes are a label apart, wider than the hit area: a click lands between two of them.
+    expect(LANE_GAP).toBeGreaterThan(EDGE_INTERACTION_WIDTH);
     for (const id of ['e1', 'e3', 'e4']) {
       const self = edge(id);
+      // Along the line as it is drawn: bent through a label beside the curve, which may take
+      // it across a neighbouring lane — there, and a few pixels off the line on either side,
+      // the neighbour may be the nearer one.
+      const drawn = drawnEdgeCurves(self.data);
+      let own = 0;
       for (let i = 1; i < 20; i++) {
-        const on = curvePoint(self.data.curve, i / 20);
+        const along = (i / 20) * drawn.length;
+        const piece = drawn[Math.min(drawn.length - 1, Math.floor(along))];
+        if (!piece) throw new Error('no curve');
+        const on = curvePoint(piece, along - Math.floor(along));
         expect(nearestEdgeAt(on, flow.edges)?.id).toBe(self.id);
-        // Also a few pixels off the line, on either side.
         for (const d of [-4, 4]) {
-          expect(nearestEdgeAt({ x: on.x + d, y: on.y + d }, flow.edges)?.id).toBe(self.id);
+          if (nearestEdgeAt({ x: on.x + d, y: on.y + d }, flow.edges)?.id === self.id) own++;
         }
       }
+      expect(own, id).toBeGreaterThanOrEqual(28);
     }
   });
 
@@ -641,13 +662,14 @@ describe('buildFlow for examples/architecture.yaml', () => {
       id: edge.id,
       samples: hiddenSamples(
         curveOf(edge, layout),
-        leafRects(model, layout, [edge.source, edge.target]),
+        leafRects(model, layout, [edge.source, edge.target], false),
         SAMPLES,
       ),
     }));
     for (const { id, samples } of hidden) {
-      // At most a corner clipped, never a stretch of the edge.
-      expect(samples / SAMPLES, id).toBeLessThan(0.03);
+      // At most a corner clipped, never a stretch of the edge (an edge that keeps off a group's
+      // title may clip a little more of a leaf).
+      expect(samples / SAMPLES, id).toBeLessThan(0.05);
     }
     expect(hidden.filter((h) => h.samples > 0).length).toBeLessThanOrEqual(3);
     // And no edge doubles back through its own end nodes.

@@ -8,9 +8,13 @@ import ElkConstructor, {
   type ElkNode,
   type LayoutOptions,
 } from 'elkjs/lib/elk.bundled.js';
+import { aggregateCountLabel, edgeLabelText, labelRoomOf } from '../edgeLabel';
 import type { ArchitectureModel, ArchNode } from '../model';
 import {
+  EDGE_LABEL_CLEARANCE,
+  EDGE_LABEL_LAYOUT_LINES,
   ELK_BASE_OPTIONS,
+  LAYER_SPACING,
   groupMinHeight,
   groupMinWidth,
   groupPadding,
@@ -39,8 +43,22 @@ export type ContentSizes = ReadonlyMap<string, Size>;
 
 const NO_CONTENT: ContentSizes = new Map();
 
+/**
+ * The spacing of the base options, given to every group as well: with the children of the
+ * hierarchy laid out together, a group that says nothing gets ELK's own spacing, not the root's.
+ */
+const SPACING_OPTIONS: LayoutOptions = Object.fromEntries(
+  Object.entries(ELK_BASE_OPTIONS).filter(
+    ([key]) =>
+      key.startsWith('elk.spacing.') ||
+      key.startsWith('elk.layered.spacing.') ||
+      key.startsWith('elk.edgeLabels.'),
+  ),
+);
+
 function groupOptions(node: ArchNode, content: Size | undefined): LayoutOptions {
   return {
+    ...SPACING_OPTIONS,
     'elk.padding': padding(groupPadding(content)),
     'elk.nodeSize.constraints': 'MINIMUM_SIZE',
     'elk.nodeSize.minimum': `(${groupMinWidth(node, content)}, ${groupMinHeight(content)})`,
@@ -52,7 +70,15 @@ function groupOptions(node: ArchNode, content: Size | undefined): LayoutOptions 
  * model edge with both endpoints in those subtrees is declared in its containing node: the
  * endpoint that contains the other one, else the lowest common ancestor, else the root. Nodes
  * with a `content` block are sized for it: a leaf grows, a group keeps the block free between
- * its header and its children.
+ * its header and its children. An edge with a label carries a label (ELK reads one only with
+ * its text), which the layout keeps free on the line between the two ends with the layer
+ * spacing on each side of it: the label is given its box (on up to `EDGE_LABEL_LAYOUT_LINES`
+ * lines) less what the layer spacing on both sides exceeds the clearance, so that the two ends
+ * come to lie the box and `EDGE_LABEL_CLEARANCE` on each side apart — the room the row packing
+ * and the map closed up around its closed groups keep as well. Edges of one kind between the
+ * same two nodes are drawn as one, with their count where they have no labels: the first of
+ * them carries that count. The sizes are even numbers of pixels, so that a layer holding a
+ * label beside boxes (whose sizes are even) centres them on whole pixels.
  */
 export function buildHierarchyGraph(
   model: ArchitectureModel,
@@ -90,14 +116,43 @@ export function buildHierarchyGraph(
     children: rootIds.map(makeNode),
     edges: [],
   };
+  // Edges of one kind between the same two nodes, in order: drawn as one, counted.
+  const alike = new Map<string, number[]>();
+  model.edges.forEach((edge, index) => {
+    const key = `${edge.from}\n${edge.to}\n${edge.kind}`;
+    alike.set(key, [...(alike.get(key) ?? []), index]);
+  });
+  const even = (n: number): number => 2 * Math.ceil(n / 2);
   model.edges.forEach((edge, index) => {
     if (!scope.has(edge.from) || !scope.has(edge.to)) return;
     const containerId = edgeContainer(model, edge.from, edge.to);
     const container = (containerId !== undefined && groups.get(containerId)) || root;
+    const together = alike.get(`${edge.from}\n${edge.to}\n${edge.kind}`) ?? [index];
+    const labelled = together.some((i) => edgeLabelText(model.edges[i] ?? edge) !== undefined);
+    let text = edgeLabelText(edge);
+    if (together.length > 1 && !labelled && together[0] === index) {
+      text = aggregateCountLabel(together.length);
+    }
+    const room =
+      text === undefined
+        ? undefined
+        : labelRoomOf(text, EDGE_LABEL_LAYOUT_LINES, EDGE_LABEL_CLEARANCE);
     const elkEdge: ElkExtendedEdge = {
       id: `edge:${index}`,
       sources: [edge.from],
       targets: [edge.to],
+      ...(text !== undefined && room
+        ? {
+            labels: [
+              {
+                id: `label:${index}`,
+                text,
+                width: even(Math.max(1, room.width - 2 * LAYER_SPACING)),
+                height: even(room.height),
+              },
+            ],
+          }
+        : {}),
     };
     container.edges?.push(elkEdge);
   });

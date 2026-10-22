@@ -748,7 +748,7 @@ describe('Filter on examples/architecture.yaml', () => {
         nodes: 14,
         edges: 7,
         rows: all,
-        bounds: { width: 1074, height: 560 },
+        bounds: { width: 1368, height: 616 },
       },
       {
         focus: { type: 'flow', id: 'campaign-run' },
@@ -756,7 +756,7 @@ describe('Filter on examples/architecture.yaml', () => {
         nodes: 11,
         edges: 5,
         rows: all,
-        bounds: { width: 873, height: 612 },
+        bounds: { width: 1155, height: 664 },
       },
       {
         focus: { type: 'flow', id: 'rule-release' },
@@ -764,7 +764,7 @@ describe('Filter on examples/architecture.yaml', () => {
         nodes: 7,
         edges: 2,
         rows: ['backoffice', 'middle'],
-        bounds: { width: 592, height: 416 },
+        bounds: { width: 710, height: 472 },
       },
       {
         focus: { type: 'workitem', id: 1001 },
@@ -772,7 +772,7 @@ describe('Filter on examples/architecture.yaml', () => {
         nodes: 23,
         edges: 13,
         rows: all,
-        bounds: { width: 1336, height: 740 },
+        bounds: { width: 1790, height: 908 },
         placedRow: [['data.analytics.feature-store', 'middle']],
       },
       {

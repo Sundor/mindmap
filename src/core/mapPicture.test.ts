@@ -1920,7 +1920,7 @@ describe('what the heading, the bands and the key say', () => {
         texts: textsOf(elements, group(elements, 'data-part', 'heading')),
       };
     };
-    const long = 'the map of a structure file with a very long name, '.repeat(12).trim();
+    const long = 'the map of a structure file with a very long name, '.repeat(24).trim();
     const two = headed(long, 'a note');
     expect(two.texts).toHaveLength(3);
     expect(long.startsWith(two.texts[0] ?? '?')).toBe(true);

@@ -8,6 +8,7 @@ import {
   buildFlow,
   collapseAction,
   flowEdgeLabel,
+  groupTitleRect,
   routeEdge,
   sourceHandleId,
   targetHandleId,
@@ -119,11 +120,20 @@ function checkView(
   // Edges are exactly the rollup, attached to visible nodes.
   const aggregates = rollupEdges(model, visible);
   expect(flow.edges.map((e) => e.id)).toEqual(aggregates.map((a) => a.id));
+  // What edges keep off: the boxes drawn above them, and the titles of the open groups — but
+  // not the title of a group an edge ends at.
   const closedRects: Rect[] = [];
+  const titles = new Map<string, Rect>();
   for (const node of nodes) {
     const rect = layout.absolute.get(node.id);
-    if (rect && node.zIndex === Z_INDEX.leaf) closedRects.push(rect);
+    if (!rect) continue;
+    if (node.zIndex === Z_INDEX.leaf) closedRects.push(rect);
+    else if (node.type === 'group') titles.set(node.id, groupTitleRect(node.data.name, rect));
   }
+  const obstaclesFor = (edge: { source: string; target: string }): Rect[] => [
+    ...closedRects,
+    ...[...titles].filter(([id]) => id !== edge.source && id !== edge.target).map(([, r]) => r),
+  ];
   const routedPairs = new Set<string>();
   for (const [index, edge] of flow.edges.entries()) {
     const aggregate = aggregates[index];
@@ -163,7 +173,7 @@ function checkView(
       const acrossRows =
         sourceRow !== undefined && targetRow !== undefined && sourceRow !== targetRow;
       expect(edge.data.route, edge.id).toMatchObject(
-        routeEdge(source, target, closedRects, acrossRows),
+        routeEdge(source, target, obstaclesFor(edge), acrossRows),
       );
     }
   }

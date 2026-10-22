@@ -5,6 +5,27 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## Unreleased
+
+- **Edge labels at every level of detail**, with **Map → Edge labels** to switch them off (a
+  merged edge shows its count whatever it says). They are set in 14 px now, and the parallel
+  edges between two boxes run far enough apart for their labels to lie next to each other on
+  their own lines.
+- **The layout keeps room for the labels.** Two boxes joined by a labelled edge are laid out
+  far enough apart for the label (on up to two lines) to lie between them, 12 px clear of each
+  box — inside a group, where the spacing of the layout now applies too, and among the items
+  of a row band alike. The spacing between boxes is wider (32 px between neighbours, 48 px
+  between the items of a row band), and a change of a label lays the map out again: the
+  layout's cache key carries the label texts. **Close up the gaps** keeps the same room, with
+  no cap any more, so a closed-up map with nothing closed is the full map again.
+- **The level of detail is remembered**: the mode last chosen (Auto or a pinned level) comes
+  back on the next visit.
+- **The kind of a flow is any word.** `kind` in a flow is no longer one of `workflow` and
+  `dataflow`: it is the file's own word (`workflow` when left out), and the focus list groups
+  the flows by the kinds the file uses, under those words.
+- **Changed behaviour — a layout cached by an earlier version is computed again**, since the
+  room for the labels changed the geometry.
+
 ## 0.3.1 — 2026-10-16
 
 - **Changed behaviour — the level of detail is chosen on the rail.** The row of five buttons

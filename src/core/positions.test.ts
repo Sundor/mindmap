@@ -317,9 +317,9 @@ beforeAll(async () => {
   ] as const) {
     const content = workItemContent(buildWorkItemOverlay(drawn, items), 'tasks');
     const a = { name, model: drawn, base: await computeLayoutUncached(drawn, undefined, content) };
-    if (groupsOffPixel(a).length === 0) throw new Error(`${name}: every group is on whole pixels`);
-    if (Number.isInteger(a.base.bounds.height)) throw new Error(`${name}: a map on whole pixels`);
-    offPixel.push({ ...a, content });
+    // Only an arrangement with such boxes is of use here: with the room the layout keeps for
+    // the edge labels, the example may come out on whole pixels throughout.
+    if (groupsOffPixel(a).length > 0) offPixel.push({ ...a, content });
   }
 });
 

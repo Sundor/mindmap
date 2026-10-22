@@ -34,8 +34,8 @@ const everything = visibleNodes(model, new Set(), 'detail');
 const room = (text: string) => {
   const size = edgeLabelSize(wrapBalanced(text, EDGE_LABEL_ROOM.lines));
   return {
-    width: Math.min(EDGE_LABEL_ROOM.maxWidth, size.width + 2 * EDGE_LABEL_ROOM.margin),
-    height: Math.min(EDGE_LABEL_ROOM.maxHeight, size.height + 2 * EDGE_LABEL_ROOM.margin),
+    width: Math.ceil(size.width + 2 * EDGE_LABEL_ROOM.margin),
+    height: Math.ceil(size.height + 2 * EDGE_LABEL_ROOM.margin),
   };
 };
 
@@ -61,8 +61,6 @@ describe('labelRoom', () => {
     const two = room('reads the orders of the day');
     expect(two.width).toBeLessThan(one.width + 2 * EDGE_LABEL_ROOM.margin);
     expect(two.height).toBeGreaterThan(one.height + 2 * EDGE_LABEL_ROOM.margin);
-    expect(two.width).toBeLessThanOrEqual(EDGE_LABEL_ROOM.maxWidth);
-    expect(two.height).toBeLessThanOrEqual(EDGE_LABEL_ROOM.maxHeight);
   });
 
   it('keeps no room for the labels of single edges while they are switched off', () => {
@@ -96,15 +94,17 @@ edges:
   - { id: e2, from: a.x, to: a.y, kind: dataflow, label: second one }
 `);
     const drawn = visibleNodes(parallel, new Set(), 'detail');
-    expect(labelRoom(parallel, drawn).get(pairKey('a.x', 'a.y'))).toEqual(
-      room('first\nsecond one'),
-    );
+    // Each label on its own line: as wide as the widest takes on its own, as high as both.
+    expect(labelRoom(parallel, drawn).get(pairKey('a.x', 'a.y'))).toEqual({
+      width: Math.max(room('first').width, room('second one').width),
+      height: room('first\nsecond one').height,
+    });
     expect(labelRoom(parallel, drawn, false).get(pairKey('a.x', 'a.y'))).toEqual(
       room(aggregateCountLabel(2)),
     );
   });
 
-  it('caps the room, however long the label', () => {
+  it('wraps a long label onto the lines the layout allows and keeps its room, however long', () => {
     const long = parseOk(`
 version: 1
 domains:
@@ -117,9 +117,8 @@ edges:
   - { id: e1, from: a.x, to: a.y, kind: dataflow, label: ${'word '.repeat(30).trim()} }
 `);
     const rooms = labelRoom(long, visibleNodes(long, new Set(), 'detail'));
-    expect(rooms.get(pairKey('a.x', 'a.y'))).toEqual({
-      width: EDGE_LABEL_ROOM.maxWidth,
-      height: room('word\nword').height,
-    });
+    const kept = rooms.get(pairKey('a.x', 'a.y'));
+    expect(kept?.height).toBe(room('word\nword').height);
+    expect(kept?.width).toBeGreaterThan(room('word '.repeat(10).trim()).width);
   });
 });

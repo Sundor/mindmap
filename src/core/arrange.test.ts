@@ -272,13 +272,14 @@ function viewOf(
   visible: ReadonlySet<string>,
   workItems?: FlowWorkItems,
   content?: ReadonlyMap<string, Size>,
-  room?: LabelRoom,
+  room: LabelRoom = labelRoom(model, visible),
 ): ArrangeView {
+  // The room of the labels, as the app always gives it: the layout keeps the same room.
   return {
     visible,
     closedSize: shrunk(model, workItems),
     ...(content ? { content } : {}),
-    ...(room ? { labelRoom: room } : {}),
+    labelRoom: room,
   };
 }
 
@@ -423,6 +424,24 @@ function violations(
       problems.push(`${first} leaves no room for the label ${side} ${second}`);
     }
   };
+  /** The rows an item of the bands lies in, as indexes; undefined off the bands. */
+  const rowIndex = new Map(reference.rows.map((row, i) => [row.id, i]));
+  const rowSpan = (id: string): [number, number] | undefined => {
+    const node = nodeOf(model, id);
+    if (node.effectiveRow === undefined && node.rowRange) {
+      return [node.rowRange.top, node.rowRange.bottom];
+    }
+    const row = reference.rowOf.get(id);
+    const at = row === undefined ? undefined : rowIndex.get(row);
+    return at === undefined ? undefined : [at, at];
+  };
+  const sharesRow = (a: string, b: string): boolean => {
+    const spanA = rowSpan(a);
+    const spanB = rowSpan(b);
+    return (
+      spanA !== undefined && spanB !== undefined && spanA[0] <= spanB[1] && spanB[0] <= spanA[1]
+    );
+  };
   for (const [parent, group] of siblings) {
     // The items of the bands are ITEM_GAP apart, the boxes inside a box LAYER_SPACING.
     const inBands = rows && (parent === '' || spansRows(layout, nodeOf(model, parent)));
@@ -438,7 +457,14 @@ function violations(
           // kept between a box of the area and one of the bands. The bands keep their padding:
           // none is kept between rows either.
           const together = isUnassigned(a) === isUnassigned(b);
-          ordered(first, second, 'x', inBands ? ITEM_GAP : LAYER_SPACING, together);
+          // In the bands, room for a label is kept between items of one row only.
+          ordered(
+            first,
+            second,
+            'x',
+            inBands ? ITEM_GAP : LAYER_SPACING,
+            together && (!inBands || sharesRow(a, b)),
+          );
           if (together) ordered(first, second, 'y', NODE_SPACING, !inBands);
         }
       }
@@ -625,7 +651,7 @@ describe('compact2D', () => {
     expect(packed.positions).toEqual([
       { x: 0, y: 0 },
       { x: 220, y: 0 },
-      { x: 0, y: 74 },
+      { x: 0, y: 50 + NODE_SPACING },
     ]);
     expect(packed.width).toBe(320);
     // Above each other: the height of the room.
@@ -707,12 +733,12 @@ describe('arrangeLayout of the example', () => {
 
   it('takes the expected room at the coarser levels', () => {
     const expected: Record<string, Record<string, [number, number]>> = {
-      rows: { plain: [2484, 1120], domains: [1608, 378], components: [2352, 778] },
-      'no rows': { plain: [4020, 1092], domains: [1923, 290], components: [3377, 656] },
+      rows: { plain: [2984, 1447], domains: [1730, 378], components: [2679, 810] },
+      'no rows': { plain: [5748, 1901], domains: [2220, 406], components: [4306, 974] },
     };
     const badged: Record<string, Record<string, [number, number]>> = {
-      rows: { domains: [1608, 430], components: [2352, 860] },
-      'no rows': { domains: [1923, 342], components: [3572, 734] },
+      rows: { domains: [1730, 430], components: [2679, 914] },
+      'no rows': { domains: [2220, 484], components: [4342, 1036] },
     };
     for (const { name, model, reference } of modes) {
       const size = (layout: LayoutResult): [number, number] => [
@@ -999,7 +1025,7 @@ describe('arrangeLayout with rows', () => {
     // now, lies below where it ended in the reference.
     const view: ArrangeView = {
       visible: visibleNodes(sided, new Set(['deep.list']), 'subcomponents'),
-      closedSize: (_node, full) => ({ width: full.width, height: Math.min(full.height, 300) }),
+      closedSize: (_node, full) => ({ width: full.width, height: Math.min(full.height, 320) }),
     };
     const end = rectIn(reference.absolute, 'deep.list.s0');
     const layout = check(sided, reference, view, 'deep.list closed');
@@ -1082,11 +1108,18 @@ describe('arrangement keys and the cache', () => {
   it('names an arrangement by its closed groups and their sizes, per reference', () => {
     const [rows, flat] = modes;
     if (!rows || !flat) throw new Error('modes');
+    // Without room for labels: the keys of the closed groups alone.
     const keyOf = (mode: Mode, collapsed: ReadonlySet<string>, level: LodLevel): string =>
       arrangeLayout(
         mode.model,
         mode.reference,
-        viewOf(mode.model, visibleNodes(mode.model, collapsed, level)),
+        viewOf(
+          mode.model,
+          visibleNodes(mode.model, collapsed, level),
+          undefined,
+          undefined,
+          new Map(),
+        ),
       ).key;
     const domains = keyOf(rows, new Set(), 'domains');
     const components = keyOf(rows, new Set(), 'components');
@@ -1097,7 +1130,9 @@ describe('arrangement keys and the cache', () => {
     expect(keyOf(rows, new Set(groupIds(example)), 'detail')).toBe(domains);
     expect(keyOf(flat, new Set(), 'domains')).not.toBe(domains);
 
-    const view = viewOf(example, visibleNodes(example, new Set(), 'domains'));
+    // Without room for labels the signature names the closed groups alone.
+    const visibleDomains = visibleNodes(example, new Set(), 'domains');
+    const view = viewOf(example, visibleDomains, undefined, undefined, new Map());
     const signature = arrangementSignature(example, rows.reference, view);
     expect(signature.split(' ')).toHaveLength(example.rootIds.length);
     for (const part of signature.split(' ')) expect(part).toMatch(/^[\w.-]+:\d+x\d+$/);

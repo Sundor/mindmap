@@ -32,6 +32,7 @@ import {
   groupMinWidth,
   groupPadding,
 } from './constants';
+import { labelRoom } from '../labelRoom';
 import { layoutHierarchy, orderItems, type ContentSizes, type HierarchyLayout } from './elk';
 import { sweep1D } from './sweep';
 import { isWithin, selfAndAncestors, subtreeIds } from './tree';
@@ -302,17 +303,39 @@ export async function layoutWithRows(
       seen.add(key);
       projected.push([a, b]);
     }
+    // The widest room the labels of the edges between two items need, by unordered pair: the
+    // labels as the fully expanded map draws them (the count of edges that merge), the rule the
+    // map closed up around its closed groups keeps as well.
+    const room = new Map<string, number>();
+    for (const [pair, size] of labelRoom(model, new Set(model.nodes.keys()))) {
+      const [from = '', to = ''] = pair.split('\n');
+      const a = itemOf(from);
+      const b = itemOf(to);
+      if (a === undefined || b === undefined || a === b) continue;
+      const key = a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+      room.set(key, Math.max(room.get(key) ?? 0, size.width));
+    }
     const order = await orderItems(items, projected);
     const byId = new Map(items.map((item) => [item.id, item]));
     const ordered = order.map((id) => byId.get(id)).filter((item) => item !== undefined);
 
-    // Skyline packing: per-row cursor of the next free x.
+    // Skyline packing: per-row cursor of the next free x. An item joined by a labelled edge to
+    // an item placed before it in a row they share is held that label's room right of it: the
+    // edge crosses the gap between the two, and the label lies in it.
     const cursor = new Array<number>(rowCount).fill(0);
     const sliceHeight = new Array<number>(rowCount).fill(0);
     let contentWidth = 0;
     for (const item of ordered) {
       let x = 0;
       for (let r = item.top; r <= item.bottom; r++) x = Math.max(x, cursor[r] ?? 0);
+      for (const before of ordered) {
+        if (before === item) break;
+        if (before.bottom < item.top || item.bottom < before.top) continue;
+        const pair =
+          before.id < item.id ? `${before.id}\u0000${item.id}` : `${item.id}\u0000${before.id}`;
+        const wanted = room.get(pair);
+        if (wanted !== undefined) x = Math.max(x, before.x + before.width + wanted);
+      }
       item.x = x;
       for (let r = item.top; r <= item.bottom; r++) cursor[r] = x + item.width + ITEM_GAP;
       contentWidth = Math.max(contentWidth, x + item.width);
