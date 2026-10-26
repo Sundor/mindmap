@@ -27,6 +27,8 @@ import {
   routeEdge,
   shiftAlongSide,
   sidePoint,
+  type Curve,
+  type Point,
   type EdgeRoute,
 } from './route';
 
@@ -550,17 +552,63 @@ describe('rectCrossings', () => {
 
   it('puts the arrow of a label where the line leaves it towards the target', () => {
     const box = labelRect(line, 0.5, size);
-    const arrow = labelArrow([line], box);
-    expect(arrow?.x).toBeCloseTo(540, 0);
+    const arrow = labelArrow([line], box, 6);
+    // The line leaves the box at x = 540; the chevron, 6 long, lies beyond it, 1.5 clear.
+    expect(arrow?.x).toBeCloseTo(547.5, 2);
     expect(arrow?.dx).toBeCloseTo(1, 6);
     // A line that ends inside the box has no way out: no arrow. Nor has one that misses it.
-    expect(labelArrow([line], rect(900, -10, 200, 20))).toBeUndefined();
-    expect(labelArrow([line], rect(0, 100))).toBeUndefined();
+    expect(labelArrow([line], rect(900, -10, 200, 20), 6)).toBeUndefined();
+    expect(labelArrow([line], rect(0, 100), 6)).toBeUndefined();
     // The chevron: its tip at the arrow, its arms back along the line, to each side.
     if (!arrow) throw new Error('no arrow');
     expect(chevronPath(arrow, 6)).toBe(
       `M${Math.round((arrow.x - 6) * 100) / 100},4.8 L${Math.round(arrow.x * 100) / 100},0 L${Math.round((arrow.x - 6) * 100) / 100},-4.8`,
     );
+  });
+
+  it('keeps the whole chevron outside the box, whichever way the line leaves it', () => {
+    const straight = (a: Point, b: Point): Curve => ({
+      p0: a,
+      c1: { x: a.x + (b.x - a.x) / 3, y: a.y + (b.y - a.y) / 3 },
+      c2: { x: a.x + ((b.x - a.x) * 2) / 3, y: a.y + ((b.y - a.y) * 2) / 3 },
+      p3: b,
+    });
+    const points = (path: string): Point[] =>
+      path
+        .split(/[ML]/)
+        .filter((part) => part.trim() !== '')
+        .map((part) => {
+          const [x, y] = part.split(',').map(Number);
+          return { x: x ?? NaN, y: y ?? NaN };
+        });
+    const clear = (point: Point, box: Rect): boolean =>
+      point.x <= box.x - 1.5 ||
+      point.x >= box.x + box.width + 1.5 ||
+      point.y <= box.y - 1.5 ||
+      point.y >= box.y + box.height + 1.5;
+    const box = rect(400, -20, 200, 40);
+    const lines: Curve[] = [
+      // Straight through, and out at a corner on a slant: an arm of a chevron with its tip on
+      // the border would lie inside the box.
+      straight({ x: 0, y: 0 }, { x: 1000, y: 0 }),
+      straight({ x: 400, y: -300 }, { x: 700, y: 300 }),
+      straight({ x: 1000, y: 100 }, { x: 100, y: -100 }),
+      straight({ x: 500, y: 200 }, { x: 500, y: -200 }),
+    ];
+    for (const [index, curve] of lines.entries()) {
+      for (const size of [6, 8]) {
+        const arrow = labelArrow([curve], box, size);
+        expect(arrow, `line ${index}`).toBeDefined();
+        if (!arrow) continue;
+        const chevron = points(chevronPath(arrow, size));
+        expect(chevron, `line ${index}`).toHaveLength(3);
+        for (const point of chevron)
+          expect(clear(point, box), `line ${index}, size ${size}`).toBe(true);
+        // Not further out than it needs to be: half a pixel back, some of it is too close.
+        const nearer = { ...arrow, x: arrow.x - arrow.dx * 0.5, y: arrow.y - arrow.dy * 0.5 };
+        expect(points(chevronPath(nearer, size)).every((point) => clear(point, box))).toBe(false);
+      }
+    }
   });
 
   it('finds them on a line bent through a label beside the curve', () => {

@@ -1289,11 +1289,12 @@ function drawEdge(ctx: Ctx, edge: FlowEdge, label: LabelBox | undefined): string
       }) +
       el('path', { 'data-part': 'head', d: arrowHead(last), fill: color }) +
       (() => {
-        const arrow = label ? labelArrow(drawn, label.rect) : undefined;
+        const chevron = count > 1 ? 8 : 6;
+        const arrow = label ? labelArrow(drawn, label.rect, chevron) : undefined;
         return arrow
           ? el('path', {
               'data-part': 'label-arrow',
-              d: chevronPath(arrow, count > 1 ? 8 : 6),
+              d: chevronPath(arrow, chevron),
               fill: 'none',
               stroke: color,
               'stroke-width': 2,

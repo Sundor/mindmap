@@ -12,6 +12,8 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
   and of nothing else — is not drawn, nor is anything inside it. A node no edge reached in the
   first place stays, as does a group a plain edge ends at. The map is laid out for the edges it
   draws: switching plain edges on or off lays it out again.
+- **The chevron of a label lies outside the label's box**, whichever way the line leaves it: before,
+  its arms lay under the label.
 
 ## 0.4.0 — 2026-10-22
 

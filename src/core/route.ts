@@ -623,15 +623,55 @@ export function rectCrossings(curves: readonly Curve[], rect: Rect): Crossing[] 
   return crossings;
 }
 
+/** A chevron keeps this far from the box of its label, in pixels: its stroke, and a little. */
+const CHEVRON_CLEARANCE = 1.5;
+
 /**
- * Where the line of an edge leaves the box of its label on its way to the target: the last of
- * its crossings, when the line comes in and goes out again. Undefined when the line does not
- * cross the box, or ends inside it (a label beyond the end of a short edge).
+ * Where the tip of the chevron of a label goes: where the line of the edge leaves the box of
+ * its label on its way to the target — the last of its crossings, when the line comes in and
+ * goes out again — moved on along the line until a chevron of `size` (`chevronPath`) lies
+ * wholly outside the box, a little clear of it: with its tip on the border, its arms would lie
+ * inside, under the label. Undefined when the line does not cross the box, or ends inside it (a
+ * label beyond the end of a short edge).
  */
-export function labelArrow(curves: readonly Curve[], rect: Rect): Crossing | undefined {
+export function labelArrow(
+  curves: readonly Curve[],
+  rect: Rect,
+  size: number,
+): Crossing | undefined {
   const crossings = rectCrossings(curves, rect);
   if (crossings.length < 2 || crossings.length % 2 !== 0) return undefined;
-  return crossings[crossings.length - 1];
+  const at = crossings[crossings.length - 1];
+  if (!at) return undefined;
+  // How far each point of the chevron has to move, along the line, to be out of the box.
+  const shift = Math.max(...chevronPoints(at, size).map((point) => wayOut(point, at, rect)));
+  return shift > 0 ? { ...at, x: at.x + at.dx * shift, y: at.y + at.dy * shift } : at;
+}
+
+/**
+ * How far `point` has to move in the direction `d` to be outside `rect` and its clearance: 0
+ * when it is outside already.
+ */
+function wayOut(point: Point, d: { dx: number; dy: number }, rect: Rect): number {
+  const margin = CHEVRON_CLEARANCE;
+  if (!inside(point, rect, margin)) return 0;
+  const ways: number[] = [];
+  if (d.dx > 1e-9) ways.push((rect.x + rect.width + margin - point.x) / d.dx);
+  if (d.dx < -1e-9) ways.push((rect.x - margin - point.x) / d.dx);
+  if (d.dy > 1e-9) ways.push((rect.y + rect.height + margin - point.y) / d.dy);
+  if (d.dy < -1e-9) ways.push((rect.y - margin - point.y) / d.dy);
+  return ways.length > 0 ? Math.min(...ways) : 0;
+}
+
+/** The tip of a chevron and the ends of its two arms, as `chevronPath` draws them. */
+function chevronPoints(at: Crossing, size: number): [Point, Point, Point] {
+  const back = { x: at.x - at.dx * size, y: at.y - at.dy * size };
+  const across = { x: -at.dy * size * 0.8, y: at.dx * size * 0.8 };
+  return [
+    at,
+    { x: back.x + across.x, y: back.y + across.y },
+    { x: back.x - across.x, y: back.y - across.y },
+  ];
 }
 
 /**
@@ -639,10 +679,9 @@ export function labelArrow(curves: readonly Curve[], rect: Rect): Crossing | und
  * arms `size` pixels long, `size * 0.8` pixels to each side.
  */
 export function chevronPath(at: Crossing, size: number): string {
-  const back = { x: at.x - at.dx * size, y: at.y - at.dy * size };
-  const across = { x: -at.dy * size * 0.8, y: at.dx * size * 0.8 };
+  const [tip, left, right] = chevronPoints(at, size);
   const round = (n: number): number => Math.round(n * 100) / 100;
-  return `M${round(back.x + across.x)},${round(back.y + across.y)} L${round(at.x)},${round(at.y)} L${round(back.x - across.x)},${round(back.y - across.y)}`;
+  return `M${round(left.x)},${round(left.y)} L${round(tip.x)},${round(tip.y)} L${round(right.x)},${round(right.y)}`;
 }
 
 /** Area two rectangles share; 0 when they only touch. */

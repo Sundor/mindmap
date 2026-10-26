@@ -112,11 +112,13 @@ export function ArchEdgeView({
   const drawn = drawnCurves(curve, route.labelT, data.labelOffset);
   const { text, aggregate, countShown, hidden } = edgeLabelOf(data);
   const labelShown = text !== undefined && !hidden;
+  const chevron = aggregate ? 8 : 6;
   // Where the line leaves its label towards the target (the box as src/core estimates it).
   const arrow = labelShown
     ? labelArrow(
         drawn,
         labelRect(curve, route.labelT, edgeLabelSize(data.labelText ?? text), data.labelOffset),
+        chevron,
       )
     : undefined;
   const tooltip = [
@@ -133,7 +135,7 @@ export function ArchEdgeView({
         markerEnd={`url(#${markerId(data.kind)})`}
         interactionWidth={interactionWidth}
       />
-      {arrow && <path className="arch-label-arrow" d={chevronPath(arrow, aggregate ? 8 : 6)} />}
+      {arrow && <path className="arch-label-arrow" d={chevronPath(arrow, chevron)} />}
       {labelShown && (
         <EdgeLabelRenderer>
           <EdgeLabel id={id} data={data} x={label.x} y={label.y} />

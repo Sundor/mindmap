@@ -403,6 +403,26 @@ const PAGE_HELPERS = `
       }
       return problems;
     },
+    // The chevron of every edge label against the box of that label on screen — the real one,
+    // which may be larger than the box src/core estimates: the chevron must lie outside it.
+    labelArrows: () => {
+      const covered = [];
+      let arrows = 0;
+      for (const path of document.querySelectorAll('.react-flow__edge .arch-label-arrow')) {
+        const id = path.closest('.react-flow__edge')?.dataset.id;
+        const label = document.querySelector('.arch-edge-label[data-edge-id="' + id + '"]');
+        if (!label) continue;
+        arrows += 1;
+        const a = path.getBoundingClientRect();
+        const l = label.getBoundingClientRect();
+        const apart = a.right <= l.left || a.left >= l.right || a.bottom <= l.top || a.top >= l.bottom;
+        if (!apart) {
+          const box = (r) => [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
+          covered.push({ id, arrow: box(a), label: box(l) });
+        }
+      }
+      return { arrows, covered };
+    },
     // What lies on the work-item lines (nothing should): an edge on top of a line, found by
     // asking for the element at points along the line, and an edge label over the icon or the
     // text of a line (labels take no pointer events, so their boxes are compared).
@@ -2538,6 +2558,13 @@ async function run(viewerPath, browserPath) {
       'no edge and no edge label lies on a work-item line',
       cover.lines > 40 && cover.labels > 20 && cover.problems.length === 0,
       cover,
+    );
+    // The chevron of a label lies outside the label's box on screen, every time.
+    const arrows = await evaluate(`window.__smoke.labelArrows()`);
+    check(
+      'the chevron of every label lies outside its label',
+      arrows.arrows > 10 && arrows.covered.length === 0,
+      arrows,
     );
     check(
       'the lists of open groups are drawn above the edges, inside their groups',
