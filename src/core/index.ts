@@ -28,6 +28,7 @@ export { parseArchitecture, type ParseOptions, type ParseResult } from './parse'
 export * from './focus';
 export * from './edgesOnDemand';
 export * from './focusFilter';
+export * from './plainEdges';
 export * from './workload';
 export * from './colorBy';
 export * from './hints';

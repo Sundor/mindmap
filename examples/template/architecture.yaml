@@ -79,6 +79,7 @@ edges: # the lines; the arrowhead is at "to"
     kind: dataflow
     label: pays
     replaces: [payment-places-order] # a plain edge: drawn in their place with Map → Plain edges
+    # (and payment, which only the replaced edge reaches, is left out of the map then)
 
 flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers

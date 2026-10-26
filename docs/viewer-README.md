@@ -156,6 +156,7 @@ edges: # the lines; the arrowhead is at "to"
     kind: dataflow
     label: pays
     replaces: [payment-places-order] # a plain edge: drawn in their place with Map → Plain edges
+    # (and payment, which only the replaced edge reaches, is left out of the map then)
 
 flows: # stories told through the edges: Map → Focus lights one and pales the rest
   - id: place-order # unique among the flows; what a saved view remembers
@@ -279,8 +280,11 @@ the inner edges are drawn and the summary edge is not. Give it the words the ove
 
 **Plain edges.** An edge with `replaces: [ids]` stands for the listed edges in plain words,
 for a reader who needs the story rather than the interfaces: with **Map → Plain edges** on, it
-is drawn and the edges it lists are not; off, the reverse. An edge that is listed cannot list
-edges itself. The edge kinds, the focus and the work items see whichever set is drawn.
+is drawn and the edges it lists are not; off, the reverse. A node that only the listed edges
+reached is left out as well, with everything inside it, so the map holds what the story needs:
+a node no edge reached in the first place stays, as does a group the plain edge ends at. An
+edge that is listed cannot list edges itself. The edge kinds, the focus and the work items see
+whichever set is drawn.
 
 | Kind         | Drawn as       | Use it for                                                          |
 | ------------ | -------------- | ------------------------------------------------------------------- |

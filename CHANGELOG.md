@@ -5,6 +5,14 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
+## Unreleased
+
+- **Plain edges leave out what only the replaced edges reached.** With **Map → Plain edges**
+  on, a node that no edge reaches any more — an end of a replaced edge, or a group holding one,
+  and of nothing else — is not drawn, nor is anything inside it. A node no edge reached in the
+  first place stays, as does a group a plain edge ends at. The map is laid out for the edges it
+  draws: switching plain edges on or off lays it out again.
+
 ## 0.4.0 — 2026-10-22
 
 - **Summary edges, plain edges and summaries.** A node's `summary` is what its box says while

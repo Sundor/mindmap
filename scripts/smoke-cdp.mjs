@@ -11069,6 +11069,47 @@ async function run(viewerPath, browserPath) {
         same(zones.values, ['public', 'payment', 'internal']),
       { templateThere, template, zones },
     );
+    // Plain edges on the template: "pays" (checkout → API) stands for the order the payment
+    // places, and the payment, which no other edge reaches, is left out of the map; off again,
+    // it is back. The setting is kept in the browser: it is switched back off.
+    const paymentDrawn = `window.__smoke.count('.react-flow__node[data-id="shop.checkout.payment"]')`;
+    const nodesDrawn = `window.__smoke.count('.react-flow__node')`;
+    await showControl('#plain-edges');
+    const plainBefore = {
+      payment: await evaluate(paymentDrawn),
+      nodes: await evaluate(nodesDrawn),
+    };
+    await click('#plain-edges');
+    const plainCame = await eventually(
+      `${paymentDrawn} === 0 && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the map without the payment',
+    );
+    await settled();
+    const plainOn = {
+      nodes: await evaluate(nodesDrawn),
+      checkout: await evaluate(
+        `window.__smoke.count('.react-flow__node[data-id="shop.checkout"]')`,
+      ),
+      edges: await evaluate(
+        `[...document.querySelectorAll('.react-flow__edge')].map((el) => el.dataset.id).sort()`,
+      ),
+    };
+    await click('#plain-edges');
+    const plainWent = await eventually(
+      `${paymentDrawn} === 1 && ${nodesDrawn} === ${plainBefore.nodes} && window.__smoke.attr('data-lines-laid-out') === 'true'`,
+      'the map with the payment again',
+    );
+    await settled();
+    check(
+      'plain edges leave out what only the replaced edges reached',
+      templateDrawn &&
+        plainBefore.payment === 1 &&
+        plainCame &&
+        plainOn.nodes === plainBefore.nodes - 1 &&
+        plainOn.checkout === 1 &&
+        plainWent,
+      { plainBefore, plainOn, plainCame, plainWent },
+    );
 
     // The example again, and the room of its legend under the preset with a subtitle.
     await dropFiles(dataFiles);

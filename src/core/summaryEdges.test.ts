@@ -5,6 +5,7 @@ import { closedGroupText, compactGroupBox, compactGroupText, fitsCompact } from 
 import { parseOk } from './layout/test-helpers';
 import { withPlainEdges } from './navigate';
 import { parseArchitecture } from './parse';
+import { plainEdgesModel } from './plainEdges';
 import { rollupEdges } from './rollup';
 import { visibleNodes } from './visibility';
 
@@ -96,6 +97,63 @@ describe('plain edges', () => {
     const plain = { ...model, edges: model.edges.filter((edge) => edge.replaces === undefined) };
     expect(withPlainEdges(plain, true)).toBe(plain);
     expect(withPlainEdges(plain, false)).toBe(plain);
+  });
+});
+
+describe('the map with plain edges', () => {
+  it('leaves out a node that only the replaced edges reached, with everything inside it', () => {
+    const { model: plain, placedRow } = plainEdgesModel(model, true);
+    expect(ids(plain.edges)).toEqual(['jobs-catalog', 'shop-orders', 'pays']);
+    // Basket and Pay were ends of the replaced edges only; Web, where "pays" starts, stays.
+    expect([...plain.nodes.keys()]).toEqual([
+      'shop',
+      'shop.web',
+      'shop.catalog',
+      'orders',
+      'orders.api',
+      'orders.jobs',
+    ]);
+    expect(plain.nodes.get('shop.web')?.childIds).toEqual([]);
+    expect(placedRow.size).toBe(0);
+    // Plain edges off: the technical edges alone, and every node.
+    const technical = plainEdgesModel(model, false).model;
+    expect(ids(technical.edges)).toEqual(['pay-api', 'basket-api', 'jobs-catalog', 'shop-orders']);
+    expect(technical.nodes.size).toBe(model.nodes.size);
+  });
+
+  it('keeps a node no edge reached, and a group a plain edge ends at when its children go', () => {
+    const small = parseOk(`
+version: 1
+domains:
+  - id: a
+    name: A
+    components:
+      - { id: a.x, name: X }
+      - { id: a.docs, name: Docs }
+  - id: b
+    name: B
+    components:
+      - { id: b.y, name: Y }
+edges:
+  - { id: x-y, from: a.x, to: b.y, kind: dataflow, label: POST /y }
+  - { id: a-b, from: a, to: b, kind: dataflow, label: talks to, replaces: [x-y] }
+`);
+    const plain = plainEdgesModel(small, true).model;
+    expect([...plain.nodes.keys()]).toEqual(['a', 'a.docs', 'b']);
+    expect(plain.nodes.get('b')?.childIds).toEqual([]);
+    expect(ids(plain.edges)).toEqual(['a-b']);
+    // Drawn as a box between the two: the group without children is a leaf of the rollup.
+    const drawn = rollupEdges(plain, visibleNodes(plain, new Set(), 'detail'));
+    expect(ids(drawn)).toEqual(['a>b:dataflow']);
+  });
+
+  it('holds the model itself when the file has no plain edges', () => {
+    const plainless = {
+      ...model,
+      edges: model.edges.filter((edge) => edge.replaces === undefined),
+    };
+    expect(plainEdgesModel(plainless, true).model).toBe(plainless);
+    expect(plainEdgesModel(plainless, false).model).toBe(plainless);
   });
 });
 

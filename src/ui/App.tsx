@@ -72,7 +72,7 @@ import {
   visibleNodes,
   visibleRects,
   withoutEdgeKinds,
-  withPlainEdges,
+  plainEdgesModel,
   workItemContent,
   workItemDiagnostics,
   workItemLineRect,
@@ -1055,16 +1055,26 @@ function Viewer() {
     [model, focus, focusOverlay],
   );
   const wholePlacement = useMemo(() => (model ? rowPlacement(model) : undefined), [model]);
-  // One object per model: choosing a focus that pales the rest lays nothing out.
-  const whole = useMemo((): DrawnModel | undefined => (model ? { model } : undefined), [model]);
+  // The whole map as it is drawn: with Plain edges on, the plain edges in place of the edges
+  // they stand for, and without the nodes those alone reached. One object per model and
+  // setting: choosing a focus that pales the rest lays nothing out.
+  const whole = useMemo(
+    (): DrawnModel | undefined =>
+      model ? { ...plainEdgesModel(model, settings.plainEdges, wholePlacement) } : undefined,
+    [model, settings.plainEdges, wholePlacement],
+  );
   const wantedDrawn = useMemo((): DrawnModel | undefined => {
-    if (!model || settings.focusMode !== 'filter' || !focus || !wantedFocused) return whole;
+    if (!whole || settings.focusMode !== 'filter' || !focus || !wantedFocused) return whole;
     // Nothing to leave out, or nothing involved: the whole map stays, paled like in Focus mode.
-    const filtered = filterToFocus(model, wantedFocused, wholePlacement);
+    const filtered = filterToFocus(whole.model, wantedFocused, wholePlacement);
     return filtered
-      ? { model: filtered.model, filteredTo: focus, placedRow: filtered.placedRow }
+      ? {
+          model: filtered.model,
+          filteredTo: focus,
+          placedRow: new Map([...(whole.placedRow ?? []), ...filtered.placedRow]),
+        }
       : whole;
-  }, [model, whole, settings.focusMode, focus, wantedFocused, wholePlacement]);
+  }, [whole, settings.focusMode, focus, wantedFocused, wholePlacement]);
 
   // Layout: once per drawn model and per work-item content (new data, another story mode or
   // filter, a map reduced to a focus: an explicit action), never on zoom or collapse — with Close
@@ -1560,11 +1570,8 @@ function Viewer() {
     }
   }, [hiddenKindsEdit]);
   const shownModel = useMemo(
-    () =>
-      drawnModel
-        ? withPlainEdges(withoutEdgeKinds(drawnModel, hiddenKinds), settings.plainEdges)
-        : undefined,
-    [drawnModel, hiddenKinds, settings.plainEdges],
+    () => (drawnModel ? withoutEdgeKinds(drawnModel, hiddenKinds) : undefined),
+    [drawnModel, hiddenKinds],
   );
   // Of the edges on the map: what a click on a kind hides or shows.
   const kindCounts = useMemo(() => {
@@ -1855,12 +1862,12 @@ function Viewer() {
    */
   const deferGoTo = useCallback(
     (target: Selection): boolean => {
-      if (!model) return false;
+      if (!model || !whole) return false;
       // Judged by the map wanted first, so that this also holds while a filtered one is on its
       // way; then by the one on screen: the target may be on the wanted map, which has not
-      // arrived yet, and there is only to wait. Something the structure does not have is handled
-      // as on the whole map.
-      const timing = goToTiming(model, wantedDrawn?.model, drawnModel, target, wantedOverlay);
+      // arrived yet, and there is only to wait. Something the structure does not have — a node
+      // Plain edges leaves out among them — is handled as on the whole map.
+      const timing = goToTiming(whole.model, wantedDrawn?.model, drawnModel, target, wantedOverlay);
       if (timing === 'now' && (!laidOut || canvasUp())) return false;
       select(target);
       setPendingGoTo({ model, target });
@@ -1875,7 +1882,7 @@ function Viewer() {
       }
       return true;
     },
-    [model, wantedOverlay, wantedDrawn, drawnModel, laidOut, canvasUp, select, setFocusMode],
+    [model, whole, wantedOverlay, wantedDrawn, drawnModel, laidOut, canvasUp, select, setFocusMode],
   );
   // Edges on demand holds at every level of detail; on a map reduced to its focus every edge is
   // one of the focus, and none is held back.
@@ -2211,14 +2218,15 @@ function Viewer() {
   // reduced map is on screen instead, the view moves once the whole one is back.
   const goToFlow = useCallback(
     (id: string) => {
-      if (!model) return;
+      if (!model || !whole) return;
       const next: Focus = { type: 'flow', id };
       const set = focusSet(model, next);
       if (!set) return;
       setFocus(next);
       select(next);
       const reduced =
-        settings.focusMode === 'filter' && filterToFocus(model, set, wholePlacement) !== undefined;
+        settings.focusMode === 'filter' &&
+        filterToFocus(whole.model, set, wholePlacement) !== undefined;
       const timing = focusMoveTiming(next, reduced, filteredTo);
       // On a canvas that is not up yet (see `deferGoTo`) the view moves once it is.
       const move = timing === 'now' && (!laidOut || canvasUp());
@@ -2229,6 +2237,7 @@ function Viewer() {
     },
     [
       model,
+      whole,
       settings.focusMode,
       wholePlacement,
       filteredTo,
