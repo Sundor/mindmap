@@ -5,7 +5,7 @@ Semantic Versioning (README.md, "Versioning"): every release has a section
 `## <version> — <date>`. A change that asks something of a user of the viewer is marked
 **Changed behaviour**.
 
-## Unreleased
+## 0.4.1 — 2026-10-26
 
 - **Plain edges leave out what only the replaced edges reached.** With **Map → Plain edges**
   on, a node that no edge reaches any more — an end of a replaced edge, or a group holding one,
